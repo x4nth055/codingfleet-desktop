@@ -5,6 +5,9 @@
   "description": "The CodingFleet coding agent on your desktop.",
   "license": "MIT",
   "main": "src/main/main.js",
+  "engines": {
+    "node": ">=22"
+  },
   "private": true,
   "scripts": {
     "start": "electron .",
