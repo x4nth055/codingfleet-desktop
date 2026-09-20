@@ -163,7 +163,11 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .quota-fill.good { background: linear-gradient(90deg, #2bb57a, #5fe0a6); box-shadow: 0 0 10px color-mix(in srgb, var(--green) 35%, transparent); }
 .quota-fill.low { background: linear-gradient(90deg, #e0902a, #f5c35c); box-shadow: 0 0 10px color-mix(in srgb, var(--amber) 30%, transparent); }
 .quota-fill.out { background: linear-gradient(90deg, #e04850, #ff8a8f); box-shadow: 0 0 10px color-mix(in srgb, var(--red) 35%, transparent); }
-.quota-sub { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.quota-sub { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums;
+  display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; }
+.quota-left { overflow: hidden; text-overflow: ellipsis; }
+/* Credits are still there when the weekly allowance runs low: say so plainly. */
+.quota-then { color: var(--green); font-weight: 600; flex: none; }
 .quota-pop {
   position: absolute;
   left: 0;

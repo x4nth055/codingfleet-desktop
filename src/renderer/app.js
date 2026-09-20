@@ -927,6 +927,8 @@ function renderQuota(credits) {
   const hasAllowance = total > 0 && credits.weekly_remaining != null;
   const pct = hasAllowance ? Math.max(0, Math.min(100, Math.round((left / total) * 100))) : null;
 
+  const balance = Number(credits.credits) || 0;
+
   const wrap = el('div', `quota${quotaOpen ? ' open' : ''}`);
   const card = el('button', 'quota-card');
   card.setAttribute('aria-expanded', String(quotaOpen));
@@ -942,7 +944,15 @@ function renderQuota(credits) {
     const fill = el('div', `quota-fill ${quotaLevel(pct)}`);
     fill.style.width = `${pct}%`;
     bar.append(fill);
-    card.append(bar, el('div', 'quota-sub', `${fmtNum(left)} of ${fmtNum(total)} weekly allowance left`));
+    // Running out of the allowance is not running out of credits: say what is
+    // left to spend, right on the card, while the bar is red or nearly so.
+    const lowOnAllowance = balance > 0 && pct < 25;
+    const sub = el('div', 'quota-sub');
+    sub.append(el('span', 'quota-left', lowOnAllowance
+      ? `${fmtNum(left)} of ${fmtNum(total)} weekly`
+      : `${fmtNum(left)} of ${fmtNum(total)} weekly allowance left`));
+    if (lowOnAllowance) sub.append(el('span', 'quota-then', `then ${fmtNum(balance)} credits`));
+    card.append(bar, sub);
   } else {
     card.append(el('div', 'quota-sub', 'Credits never expire'));
   }
