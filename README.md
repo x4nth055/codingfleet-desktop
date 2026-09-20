@@ -25,15 +25,19 @@ Windows, macOS and Linux. MIT licensed.
 - Survives a dropped connection: the run continues on the server and the app
   re-attaches and replays the turn
 
-**Two execution modes**
-- *Folder session* — tools run on this computer, in the folder you chose
-- *Cloud sandbox* — pick no folder and the tools run on CodingFleet's servers
-  instead; nothing local is read or touched
+**Two places the tools can run** — your folder, or a cloud sandbox
+- Undo a run: put every file back the way it was before the agent started
+- Reads `AGENTS.md` from your project, so the agent follows your conventions
 
 **Approvals you control**
 - Allow / Deny per call, or allow a kind of action for the rest of the session
-- Auto-approve toggle in the composer when you want it to just go
+- Auto-approve mode in the composer when you want it to just go
 - Desktop notification when a run needs you or finishes
+
+**Know what it costs before you send**
+- A running estimate in the composer, from what your earlier runs actually cost
+- Over 100 credits it stops and offers the smartest models that cost less,
+  one click to switch
 
 **MCP support**
 - 13 built-in remote connectors: Context7, DeepWiki, Microsoft Learn, AWS
@@ -98,6 +102,37 @@ CODINGFLEET_API_BASE=http://127.0.0.1:8010/v1 CODINGFLEET_API_KEY=cf_sk_... npm 
 
 ---
 
+## Where the tools run
+
+Every session picks one of two places for its tools, when you start it.
+
+**Your folder** (pick a folder) — the six client tools run on this computer,
+in that folder. The agent reads your real code, runs your real tests, and
+edits your real files. Local MCP servers are available. This is the mode the
+approval rules below exist for.
+
+**A cloud sandbox** (pick no folder) — the same tools run on CodingFleet's
+servers instead, in a container that starts empty. Nothing on your machine is
+read, written, or executed, and no approval prompts appear, because there is
+nothing local to protect. Good for throwaway experiments, for code you'd
+rather not run locally, and for trying the agent before you trust it with a
+repository.
+
+You can attach files to a sandbox session, and they are uploaded into that
+sandbox. Local MCP servers are not offered there: they are programs on your
+machine, and the sandbox cannot reach them.
+
+| | Your folder | Cloud sandbox |
+|---|---|---|
+| Tools run on | this computer | CodingFleet's servers |
+| Sees your code | yes, in the chosen folder | only what you upload |
+| Approvals | yes, per the table below | not needed |
+| Local MCP servers | yes | no |
+| Undo a run | yes | not applicable |
+| `AGENTS.md` | read from the folder | not read |
+
+---
+
 ## Approvals
 
 This is the part worth understanding before you hand an agent your filesystem.
@@ -110,13 +145,81 @@ This is the part worth understanding before you hand an agent your filesystem.
 | `fs_write`, `fs_edit` | Asks — *"changes files"* |
 | Any local MCP tool | Asks — *"uses a local MCP tool"* |
 
-Choosing **Allow for the session** remembers that *reason*, not that one call —
-approve one command and the rest of the session's commands run unprompted.
-The composer's Auto-approve toggle skips every prompt.
-
 Commands are killed as a process tree after their timeout (60s default, 600s
 max), output is clipped at 200k characters, and `fs_glob` skips `node_modules`,
 `.git`, `__pycache__`, `.venv` and `venv`.
+
+### Ask before changes, or Auto-approve
+
+The shield button in the composer switches between the two modes.
+
+**Ask before changes** (the default) — anything in the table above stops and
+waits for you. Each prompt has three answers: **Allow** runs this one call,
+**Deny** refuses it and tells the agent so, and **Allow all … this session**
+stops asking for that *kind* of action until the session ends.
+
+That third one is worth reading twice: it remembers the **reason**, not the
+call. Allowing one `npm test` means every later command in that session runs
+unprompted, `rm -rf` included. It is convenient once you trust what a session
+is doing, and it is not a per-command allowlist.
+
+**Auto-approve** — nothing is ever asked; every call runs the moment it
+arrives. Use it for a folder you can afford to lose, a scratch checkout, or a
+run you are watching. In a folder full of work you care about, leave it off.
+
+Either way, the agent stays inside the tools it was given, and **Undo** below
+is the way back from a run that went wrong.
+
+### Undoing a run
+
+Every run keeps a copy of each file as it was before the agent touched it —
+the same copies that draw the diff card. The **Undo** button on that card puts
+them all back: files the run edited return to their earlier version, and files
+it created are removed again.
+
+A file you edited yourself after the run is **not** overwritten. It is listed
+as skipped, and undoing it again asks whether to discard your later edits.
+Binary and very large files were never read, so they cannot be restored and
+are reported as skipped rather than guessed at.
+
+Undo lives in memory, for the last 20 runs, and does not survive restarting
+the app. It is a way out of a bad run, not a version control system — for that
+there is git, and committing before a big run is still a good habit.
+
+---
+
+## Project instructions (`AGENTS.md`)
+
+If the folder has an `AGENTS.md`, the app reads it when the session starts and
+appends it to the agent's system message, so the agent follows your project's
+conventions without being told each time:
+
+```markdown
+# AGENTS.md
+- Run `npm test` before you claim a change works.
+- This codebase uses tabs. Match the file you are editing.
+- Never edit anything under `generated/`.
+```
+
+`agents.md` and `.agents.md` work too. It is read when the session starts, so
+editing it applies to the next session, not the one already open. Anything
+past 32k characters is cut. The transcript says when one is in use.
+
+---
+
+## What a run costs
+
+The composer shows a rough estimate next to the send button, worked out from
+what your earlier runs in that session actually cost, or — before there is any
+history — the model's published price over an assumed five steps.
+
+If the estimate passes **100 credits**, sending stops and asks first, showing
+the two smartest models that cost less than the one you picked, with their
+intelligence index and price. One click switches model and sends.
+
+It is an estimate, not a quote: an agentic run makes as many model calls as the
+work needs. Sessions on **Auto** are not estimated, since the server picks the
+model per message.
 
 ---
 
@@ -131,9 +234,11 @@ src/core/      no Electron in here — the CLI will reuse it
                posts results, tracks changed files
   mcp.js       local MCP servers over stdio (JSON-RPC, tool discovery)
   diff.js      line diffs for the edited-files card
+  undo.js      putting a run's files back, and refusing to clobber your edits
 src/main/      Electron main process: window, IPC, credentials, state, approvals
 src/renderer/  the window: sidebar, transcript, composer, settings
                (no Node access — it never sees your API key)
+  cost.js      what a run will cost: plain arithmetic, no state, its own tests
 ```
 
 The renderer is fully sandboxed: `preload.js` is the only bridge, and it
@@ -145,7 +250,7 @@ microphone (for voice input) and no other device.
 ## Development
 
 ```bash
-npm test          # 23 unit tests: tools, approval rules, MCP, line diffs
+npm test          # 49 unit tests: tools, approvals, MCP, diffs, undo, cost
 npm run e2e       # a real run against the API (needs CODINGFLEET_API_KEY)
 ```
 
