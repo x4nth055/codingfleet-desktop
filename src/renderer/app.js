@@ -1243,6 +1243,10 @@ function renderItem(item) {
       node = el('div', 'error-card');
       node.append(el('span', null, item.text));
       break;
+    case 'note':
+      node = el('div', 'note-card');
+      node.append(icon('file'), el('span', null, item.text));
+      break;
     case 'load-error': {
       const failure = loadFailures.get(item.sessionId) || { message: 'Something went wrong.', next: null };
       node = el('div', 'error-card load-error');
@@ -1992,6 +1996,57 @@ function approvalBar(tool) {
 }
 
 // ── Edited files ───────────────────────────────────────────────────────────
+// Undo puts every file in this card back to the version from before the run.
+// A file touched since the run is kept: the second press is the one that
+// overwrites it, and it says so first.
+function undoButton(item) {
+  const button = el('button', 'btn small undo-button', 'Undo');
+  button.title = 'Put these files back the way they were before this run';
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const count = item.files.length;
+    const ok = await confirmDialog({
+      title: `Undo ${count} file change${count === 1 ? '' : 's'}?`,
+      text: 'Each file goes back to the version from before this run. Anything you edited '
+        + 'since the run is left alone.',
+      confirm: 'Undo the run',
+    });
+    if (!ok) return;
+    await runUndo(item, false);
+  });
+  return button;
+}
+
+async function runUndo(item, force) {
+  try {
+    const result = await call(cf.undoRun, { runId: item.runId, force });
+    const done = result.restored.length;
+    const conflicts = result.skipped.filter((s) => s.conflict);
+    const other = result.skipped.filter((s) => !s.conflict);
+    if (done) item.undone = `Undone (${done} file${done === 1 ? '' : 's'})`;
+    refreshItem(item.sessionId, item);
+
+    if (conflicts.length) {
+      const names = conflicts.map((s) => s.path).join(', ');
+      const force2 = await confirmDialog({
+        title: `Keep your later edits to ${conflicts.length} file${conflicts.length === 1 ? '' : 's'}?`,
+        text: `${names} changed after the run, so ${conflicts.length === 1 ? 'it was' : 'they were'} left alone. `
+          + 'Undoing anyway overwrites what you did since.',
+        confirm: 'Overwrite anyway',
+        danger: true,
+      });
+      if (force2) return runUndo(item, true);
+    }
+    if (other.length) {
+      showBanner(`Could not undo ${other.map((s) => `${s.path} (${s.reason})`).join(', ')}.`);
+    } else if (done && !conflicts.length) {
+      hideBanner();
+    }
+  } catch (err) {
+    showBanner(err.message);
+  }
+}
+
 function renderFiles(item) {
   const node = el('div', 'files-card');
   const added = item.files.reduce((sum, f) => sum + f.added, 0);
@@ -2000,6 +2055,8 @@ function renderFiles(item) {
   const count = item.files.length;
   head.append(icon('file'), el('span', 'files-title', `Edited ${count} file${count === 1 ? '' : 's'}`),
     el('span', 'add', `+${added}`), el('span', 'del', `−${removed}`));
+  if (item.runId && !item.undone) head.append(el('span', 'bar-spacer'), undoButton(item));
+  if (item.undone) head.append(el('span', 'bar-spacer'), el('span', 'files-undone', item.undone));
   node.append(head);
 
   item.files.forEach((file, index) => {
@@ -2156,7 +2213,10 @@ function onRunEvent({ sessionId, event, data }) {
       if (run) run.ended = data;
       break;
     case 'client.files_changed':
-      if (run) run.files = data.files || [];
+      if (run) {
+        run.files = data.files || [];
+        run.filesRunId = data.run_id || run.runId || null;
+      }
       break;
     case 'client.reconnecting':
       // The whole run is about to be replayed: drop what this turn drew so far.
@@ -2206,7 +2266,9 @@ function finishRun(sessionId) {
   const ended = run && run.ended;
   if (ended && ended.reason === 'error') addItem(sessionId, { type: 'error', text: ended.error || 'The run failed.' });
   if (run && run.files && run.files.length) {
-    addItem(sessionId, { type: 'files', sessionId, files: run.files, open: new Set() });
+    addItem(sessionId, {
+      type: 'files', sessionId, files: run.files, open: new Set(), runId: run.runId || run.filesRunId || null,
+    });
   }
   const note = ended && ended.reason === 'cancelled' ? 'Stopped'
     : ended && ended.reason === 'budget' ? 'Stopped at the spend limit' : null;
@@ -2814,6 +2876,173 @@ function insertIntoPrompt(text) {
   return true;
 }
 
+// ── What a run will cost ───────────────────────────────────────────────────
+// An estimate, not a quote. An agentic run makes several model calls, each
+// re-sending the conversation, and nobody knows in advance how many. Two ways
+// to guess, best first:
+//   history  what this session's earlier runs on this model actually cost,
+//            scaled by how much the conversation has grown since
+//   model    the model's published price times an assumed number of steps
+// Above WARN_CREDITS the composer stops and offers cheaper models instead.
+// The arithmetic lives in cost.js, which has no state and its own tests.
+// Kept behind COST: app.js has its own fromHistory, for transcripts.
+const COST = window.CF_COST;
+const { WARN_CREDITS, ASSUMED_STEPS } = COST;
+const roundCredits = COST.round;
+
+const modelById = (id) => S.models.find((m) => m.id === id) || null;
+
+// What a model costs here: nothing when the plan covers it or it is free.
+function effectiveRate(model) {
+  if (!model) return null;
+  if (planIncludes(model)) return 0;
+  return model.credits_per_20k_tokens || 0;
+}
+
+function contextTokensOf(sessionId) {
+  const session = sessionId ? S.sessions.find((s) => s.id === sessionId) : null;
+  return (session && session.context && session.context.tokens) || 0;
+}
+
+// What this session's past runs on this model really cost, scaled to the
+// conversation's size now. Nothing to say until a run has finished.
+function historyEstimate(sessionId, modelId, contextNow) {
+  if (!sessionId) return null;
+  const past = transcriptOf(sessionId)
+    .filter((i) => i.type === 'footer' && i.usage && Number(i.usage.credits) > 0
+      && (!i.model || i.model === modelId || modelLabel(i.model) === modelLabel(modelId)))
+    .slice(-3)
+    .map((i) => ({ credits: Number(i.usage.credits), contextTokens: i.usage.context_tokens || 0 }));
+  return COST.fromHistory(past, contextNow);
+}
+
+/** @returns {{known: boolean, credits?: number, basis?: string, model?: object}} */
+function estimateRun({ sessionId, modelId, promptText }) {
+  // "Auto" is the server's choice, made per message: there is nothing to price.
+  if (!modelId || modelId === 'auto') return { known: false, basis: 'auto' };
+  const model = modelById(modelId);
+  if (!model) return { known: false, basis: 'unknown' };
+  const contextNow = contextTokensOf(sessionId);
+  if (effectiveRate(model) === 0) {
+    return { known: true, credits: 0, basis: planIncludes(model) ? 'plan' : 'free', model };
+  }
+  const guess = historyEstimate(sessionId, modelId, contextNow)
+    || COST.fromModelPrice({ rate: effectiveRate(model), contextTokens: contextNow, promptText });
+  return guess ? { known: true, ...guess, model } : { known: false, basis: 'unknown' };
+}
+
+// The smartest models that cost less than this one. Plan-covered models count
+// as free, so they come out on top when the plan includes something good.
+function cheaperAlternatives(model, limit = 2) {
+  return COST.rankAlternatives(S.models, model, effectiveRate, limit);
+}
+
+// The quiet line in the composer bar.
+function costHintText() {
+  if (S.current && S.running.has(S.current)) return 'Enter to steer';
+  const estimate = estimateRun({
+    sessionId: S.current, modelId: S.model, promptText: $('prompt').value,
+  });
+  if (!estimate.known || !estimate.credits) return '';
+  const n = roundCredits(estimate.credits);
+  if (n < 1) return '';
+  return `≈ ${fmtNum(n)} credits`;
+}
+
+function updateCostHint() {
+  const hint = $('hint');
+  if (!hint) return;
+  hint.textContent = costHintText();
+  hint.title = hint.textContent
+    ? 'A rough estimate for this run, from what earlier runs cost and the model’s price. '
+      + 'The real cost depends on how much work the agent does.'
+    : '';
+}
+
+// Above the threshold, offer the smartest cheaper models before spending.
+// Resolves 'send', 'cancel', or a model id to switch to and then send.
+function costDialog({ estimate, alternatives }) {
+  return new Promise((resolve) => {
+    const overlay = el('div', 'overlay confirm-overlay');
+    const modal = el('div', 'modal cost-modal');
+    modal.setAttribute('role', 'alertdialog');
+    const credits = roundCredits(estimate.credits);
+    modal.append(el('h2', 'confirm-title', `This run could cost about ${fmtNum(credits)} credits`));
+    const why = estimate.basis === 'history'
+      ? `Based on what this session's last ${estimate.runs === 1 ? 'run' : `${estimate.runs} runs`} cost on `
+        + `${modelLabel(estimate.model.id)}, and how long the conversation has grown.`
+      : `Based on ${modelLabel(estimate.model.id)}'s price and a run of about ${ASSUMED_STEPS} steps.`;
+    modal.append(el('p', 'confirm-text', `${why} The real cost depends on how much work the agent does.`));
+
+    if (alternatives.length) {
+      modal.append(el('div', 'cost-lead', alternatives.length === 1
+        ? 'A cheaper model that is nearly as capable:'
+        : 'Cheaper models that are nearly as capable:'));
+      const list = el('div', 'cost-options');
+      for (const alt of alternatives) {
+        const row = el('button', 'menu-item cost-option');
+        const main = el('div', 'mi-main');
+        const saving = estimate.basis === 'model' && effectiveRate(estimate.model)
+          ? roundCredits(estimate.credits * (effectiveRate(alt) / effectiveRate(estimate.model)))
+          : null;
+        main.append(
+          el('div', 'mi-name', alt.name),
+          el('div', 'mi-sub', saving != null ? `≈ ${fmtNum(saving)} credits for this run` : alt.id),
+        );
+        row.append(main, modelColumns(
+          alt.supports_vision,
+          alt.intelligence_index || 0,
+          planIncludes(alt) ? includedPill() : creditRange([alt]),
+        ));
+        row.addEventListener('click', () => close(alt.id));
+        list.append(row);
+      }
+      modal.append(list);
+    }
+
+    const cancel = el('button', 'btn', 'Cancel');
+    const send = el('button', 'btn primary', 'Send anyway');
+    const actions = el('div', 'modal-actions');
+    actions.append(el('div', 'bar-spacer'), cancel, send);
+    modal.append(actions);
+    overlay.append(modal);
+
+    const close = (answer) => {
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      resolve(answer);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        close('cancel');
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    cancel.addEventListener('click', () => close('cancel'));
+    send.addEventListener('click', () => close('send'));
+    overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) close('cancel'); });
+    document.body.append(overlay);
+    setTimeout(() => send.focus(), 0);
+  });
+}
+
+/** False when the person decided not to send after seeing the price. */
+async function clearedToSpend(sessionId, promptText) {
+  const estimate = estimateRun({ sessionId, modelId: S.model, promptText });
+  if (!estimate.known || estimate.credits < WARN_CREDITS) return true;
+  const answer = await costDialog({
+    estimate, alternatives: cheaperAlternatives(estimate.model),
+  });
+  if (answer === 'cancel') return false;
+  if (answer !== 'send') {
+    chooseModel(answer);
+    $('prompt').value = promptText;
+    autosize();
+  }
+  return true;
+}
+
 // ── Composer ───────────────────────────────────────────────────────────────
 // Each session keeps the message typed but not sent, and so does the new
 // session. They are kept on this computer, across restarts.
@@ -2894,11 +3123,12 @@ function renderComposer() {
     icon('caret', 'icon caret'),
   );
 
-  $('hint').textContent = running ? 'Enter to steer' : '';
+  updateCostHint();
   updateSendButton();
 }
 
 function updateSendButton() {
+  updateCostHint();
   const running = Boolean(S.current && S.running.has(S.current));
   const hasText = Boolean($('prompt').value.trim());
   const uploading = S.attachments.some((a) => a.status === 'uploading');
@@ -2989,6 +3219,9 @@ async function sendMessage() {
     return;
   }
 
+  // A costly run says so before it starts, and offers cheaper models.
+  if (!(await clearedToSpend(S.current, text))) return;
+
   S.sending = true;
   updateSendButton();
   let id = S.current;
@@ -3008,6 +3241,12 @@ async function sendMessage() {
       S.loaded.add(session.id);
       id = session.id;
       S.current = id;
+      if (session.agentsFile) {
+        transcriptOf(id).push({
+          type: 'note',
+          text: `Following ${session.agentsFile} from this folder.`,
+        });
+      }
     } else {
       const session = currentSession();
       if (session && session.executor === 'client' && !local(id).cwd) {

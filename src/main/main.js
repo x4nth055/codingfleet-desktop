@@ -12,6 +12,7 @@ const config = require('../core/config');
 const tools = require('../core/tools');
 const { LocalMcp } = require('../core/mcp');
 const { Run } = require('../core/runner');
+const { revertRun } = require('../core/undo');
 
 // Development flags: --open=<session id>, --screenshot=<file.png>,
 // --shot-delay=<ms>, --shot-menu=models|permissions|settings,
@@ -229,17 +230,57 @@ function settingsView() {
   };
 }
 
+// A project's own instructions for coding agents. AGENTS.md is the convention
+// several tools now share, so a repository that already has one works here
+// without being changed. It is read when the session starts; editing it later
+// applies to the next session, not this one.
+const AGENTS_FILES = ['AGENTS.md', 'agents.md', '.agents.md'];
+const MAX_AGENTS_BYTES = 32 * 1024;
+
+function projectInstructions(cwd) {
+  for (const name of AGENTS_FILES) {
+    const file = path.join(cwd, name);
+    let text;
+    try {
+      if (!fs.statSync(file).isFile()) continue;
+      text = fs.readFileSync(file, 'utf8');
+    } catch {
+      continue; // not there, or not readable
+    }
+    if (!text.trim()) return null;
+    const cut = text.length > MAX_AGENTS_BYTES;
+    return {
+      name,
+      text: cut ? `${text.slice(0, MAX_AGENTS_BYTES)}\n...[${name} is longer than 32k characters: cut here]` : text,
+    };
+  }
+  return null;
+}
+
 function systemMessage(cwd) {
   const os = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[process.platform] || process.platform;
   const shellNote = tools.SHELL.unix
     ? `${tools.SHELL.name}. Use Unix commands and forward slashes in paths.`
     : 'Windows PowerShell 5.1. Use PowerShell syntax, and ";" instead of "&&".';
-  return [
+  const lines = [
     "You are CodingFleet's coding agent, working on the user's computer through the CodingFleet desktop app.",
     `Working directory: ${cwd}`,
     `Operating system: ${os}. Shell for run_command and execute_code: ${shellNote}`,
     'Read files before you change them. Keep your answers short.',
-  ].join('\n');
+  ];
+  const project = projectInstructions(cwd);
+  if (project) {
+    lines.push(
+      '',
+      `The project ships its own instructions in ${project.name}. They come from the people who own this`,
+      'code: follow them, and prefer them over your own habits wherever the two differ.',
+      '',
+      `--- ${project.name} ---`,
+      project.text.trim(),
+      `--- end of ${project.name} ---`,
+    );
+  }
+  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +385,27 @@ function handle(channel, fn) {
 }
 
 const runs = new Map();       // session id -> Run
+// What it would take to undo a finished run: run id -> { sessionId, at, files }.
+// Kept in memory only, and only for the last few runs: the copies are the file
+// contents themselves, and a stale one would put back a version nobody wants.
+const undoable = new Map();
+const MAX_UNDO_RUNS = 20;
+
+// The path as the edited-files card shows it: relative to the session folder.
+function shownPath(saved, abs) {
+  const cwd = (state.sessions[saved.sessionId] || {}).cwd;
+  const shown = cwd && tools.isInside(cwd, abs) ? path.relative(cwd, abs) : abs;
+  return shown.replace(/\\/g, '/');
+}
+
+function rememberUndo(sessionId, run) {
+  if (!run.runId) return;
+  const files = run.restorePoints();
+  if (!files.length) return;
+  undoable.set(run.runId, { sessionId, at: Date.now(), files });
+  while (undoable.size > MAX_UNDO_RUNS) undoable.delete(undoable.keys().next().value);
+}
+
 let signIn = null;            // the browser sign-in waiting for approval, if any
 const approvals = new Map();  // tool call id -> { resolve, sessionId, reason }
 
@@ -813,7 +875,9 @@ function registerIpc() {
     };
     if (cwd) state.lastCwd = cwd;
     saveState();
-    return session;
+    // So the window can say the project's own instructions are in use.
+    const project = cwd ? projectInstructions(cwd) : null;
+    return { ...session, agentsFile: project ? project.name : null };
   });
 
   handle('session:setModel', ({ sessionId, model }) => {
@@ -871,6 +935,7 @@ function registerIpc() {
     if (Object.keys(servers).length) body.mcp_servers = servers;
     if (declared.length) body.client_tools = declared;
     run.start(body).finally(() => {
+      rememberUndo(sessionId, run);
       runs.delete(sessionId);
       for (const [callId, waiting] of approvals) {
         if (waiting.sessionId === sessionId) approvals.delete(callId);
@@ -889,6 +954,23 @@ function registerIpc() {
     const run = runs.get(sessionId);
     if (!run) throw new Error('No run is going in this session.');
     return run.steer(message, Array.isArray(files) ? files.filter((x) => typeof x === 'string') : []);
+  });
+
+  // Put back the files a finished run changed. A file the user edited since is
+  // left alone unless they ask again with force: their work is not ours to
+  // throw away.
+  handle('run:undo', async ({ runId, force } = {}) => {
+    const saved = undoable.get(runId);
+    if (!saved) throw new Error('The changes from this run are no longer available to undo.');
+    if (runs.has(saved.sessionId)) throw new Error('Wait for this session to finish before undoing a run.');
+    const result = await revertRun(saved.files, { force: Boolean(force) });
+    // Everything is back: there is nothing left to undo.
+    if (!result.skipped.length) undoable.delete(runId);
+    return {
+      restored: result.restored.map((r) => ({ path: shownPath(saved, r.path), action: r.action })),
+      skipped: result.skipped.map((r) => ({ path: shownPath(saved, r.path), reason: r.reason, conflict: Boolean(r.conflict) })),
+      conflicts: result.conflicts,
+    };
   });
 
   handle('tool:decide', ({ callId, decision }) => {

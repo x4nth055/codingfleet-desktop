@@ -50,6 +50,13 @@
 .confirm-modal { max-width: 420px; padding: 20px 22px 16px; }
 .confirm-title { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
 .confirm-text { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+
+/* What a run will cost, and the cheaper models offered instead. */
+.cost-modal { max-width: 460px; padding: 20px 22px 16px; }
+.cost-lead { margin: 0 0 8px; font-size: 12.5px; font-weight: 600; }
+.cost-options { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
+.cost-option { border: 1px solid var(--line); border-radius: 9px; }
+.cost-option:hover { border-color: var(--line-3); background: var(--hover); }
 .btn.danger-solid { background: var(--red); border-color: transparent; color: #fff; }
 .btn.danger-solid:hover { filter: brightness(1.08); }
 .icon-button.danger:hover { color: var(--red); }

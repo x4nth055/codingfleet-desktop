@@ -75,7 +75,7 @@ class Run {
     this.controller.abort();
     await Promise.allSettled([...this.pending]);
     const files = this.fileChanges();
-    if (files.length) this.emit('client.files_changed', { files });
+    if (files.length) this.emit('client.files_changed', { run_id: this.runId, files });
     this.emit('client.finished', { run_id: this.runId, reason: this.ended ? this.ended.reason : null });
   }
 
@@ -146,6 +146,21 @@ class Run {
       files.push({ path: shown, created, binary: false, added: diff.added, removed: diff.removed, hunks: diff.hunks, truncated: diff.truncated });
     }
     return files;
+  }
+
+  /**
+   * The copies needed to undo this run: one entry per file it actually
+   * changed, each holding the version from before and the version it left.
+   * A binary or very large file has text: null, and undo reports it skipped.
+   */
+  restorePoints() {
+    const out = [];
+    for (const [abs, { before, after }] of this.changes) {
+      if (!after || !before) continue;
+      if (before.exists === after.exists && before.text === after.text) continue;
+      out.push({ path: abs, before, after });
+    }
+    return out;
   }
 
   async cancel() {

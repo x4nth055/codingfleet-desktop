@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('cf', {
   startRun: call('run:start'),
   cancelRun: call('run:cancel'),
   steerRun: call('run:steer'),
+  undoRun: call('run:undo'),
   decide: call('tool:decide'),
   pickFiles: call('files:pick'),
   describeFiles: call('files:describe'),
