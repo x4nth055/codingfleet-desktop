@@ -8,13 +8,20 @@ const cost = require('../src/renderer/cost');
 const { fromModelPrice, fromHistory, rankAlternatives, round, WARN_CREDITS } = cost;
 
 const rateOf = (m) => m.credits_per_20k_tokens || 0;
+
+// A lineup shaped like the real one: a flagship with effort variants that are
+// barely cheaper, and a row of cheap "flash" models that are still capable.
 const models = [
-  { id: 'big', name: 'Big', credits_per_20k_tokens: 40, intelligence_index: 70 },
-  { id: 'mid', name: 'Mid', credits_per_20k_tokens: 12, intelligence_index: 66 },
-  { id: 'small', name: 'Small', credits_per_20k_tokens: 3, intelligence_index: 55 },
-  { id: 'free', name: 'Free', credits_per_20k_tokens: 0, intelligence_index: 40 },
+  { id: 'fable-max', name: 'Fable 5.1 Max', credits_per_20k_tokens: 100, intelligence_index: 75 },
+  { id: 'fable-xhigh', name: 'Fable 5.1 xHigh', credits_per_20k_tokens: 95, intelligence_index: 74 },
+  { id: 'fable-high', name: 'Fable 5.1 High', credits_per_20k_tokens: 80, intelligence_index: 72 },
+  { id: 'luna-max', name: 'GPT 5.6 Luna Max', credits_per_20k_tokens: 30, intelligence_index: 70 },
+  { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', credits_per_20k_tokens: 8, intelligence_index: 66 },
+  { id: 'glm-flash', name: 'GLM 5.3 Flash', credits_per_20k_tokens: 4, intelligence_index: 64 },
+  { id: 'tiny', name: 'Tiny', credits_per_20k_tokens: 1, intelligence_index: 30 },
   { id: 'unrated', name: 'Unrated', credits_per_20k_tokens: 1, intelligence_index: 0 },
 ];
+const byId = (id) => models.find((m) => m.id === id);
 
 test('a free or plan-covered model costs nothing', () => {
   assert.deepEqual(fromModelPrice({ rate: 0, contextTokens: 90000 }), { credits: 0, basis: 'free' });
@@ -69,32 +76,67 @@ test('no priced history means no history estimate', () => {
   assert.equal(fromHistory([{ credits: 0, contextTokens: 900 }], 1000), null);
 });
 
-test('alternatives are the smartest models that cost less', () => {
-  const out = rankAlternatives(models, models[0], rateOf);
-  assert.deepEqual(out.map((m) => m.id), ['mid', 'small']);
+test('a barely cheaper sibling is never suggested', () => {
+  // Fable Max -> Fable xHigh is 5% off: smart, and no help at all.
+  const out = rankAlternatives(models, byId('fable-max'), rateOf);
+  assert.ok(!out.some((m) => m.id === 'fable-xhigh'), 'xHigh is only 5% cheaper');
+  assert.ok(!out.some((m) => m.id === 'fable-high'), 'High is only 20% cheaper');
 });
 
-test('alternatives never include a dearer or equal model', () => {
-  const out = rankAlternatives(models, models[2], rateOf, 4);
-  assert.ok(out.every((m) => rateOf(m) < rateOf(models[2])));
-  assert.ok(!out.some((m) => m.id === 'big'));
+test('every suggestion at least halves the bill', () => {
+  for (const current of [byId('fable-max'), byId('luna-max'), byId('deepseek-flash')]) {
+    for (const alt of rankAlternatives(models, current, rateOf)) {
+      assert.ok(rateOf(alt) <= rateOf(current) * 0.5,
+        `${alt.name} (${rateOf(alt)}) is not half of ${current.name} (${rateOf(current)})`);
+    }
+  }
 });
 
-test('a model with no intelligence score is not recommended', () => {
-  const out = rankAlternatives(models, models[0], rateOf, 5);
+test('the cheap but capable models are what get offered', () => {
+  const out = rankAlternatives(models, byId('fable-max'), rateOf).map((m) => m.id);
+  // Cheapest that stays within 12 points of 75, and the best of the much cheaper.
+  assert.deepEqual(out, ['glm-flash', 'luna-max']);
+});
+
+test('the two picks differ: one bargain, one safe step down', () => {
+  const out = rankAlternatives(models, byId('fable-max'), rateOf);
+  assert.equal(out.length, 2);
+  assert.notEqual(out[0].id, out[1].id);
+  assert.ok(rateOf(out[0]) < rateOf(out[1]), 'the first pick is the cheaper one');
+  assert.ok(out[1].intelligence_index > out[0].intelligence_index, 'the second is the cleverer one');
+});
+
+test('a cheap but dim model is not offered when capable ones exist', () => {
+  const out = rankAlternatives(models, byId('fable-max'), rateOf);
+  assert.ok(!out.some((m) => m.id === 'tiny'), 'Tiny is cheap but 45 points down');
+});
+
+test('when the chosen model is in a class of its own, the best cheap one is offered', () => {
+  const lonely = [
+    { id: 'genius', name: 'Genius', credits_per_20k_tokens: 200, intelligence_index: 95 },
+    { id: 'ok', name: 'Ok', credits_per_20k_tokens: 10, intelligence_index: 60 },
+    { id: 'meh', name: 'Meh', credits_per_20k_tokens: 5, intelligence_index: 40 },
+  ];
+  const out = rankAlternatives(lonely, lonely[0], rateOf);
+  // Nothing is within 12 points of 95, so it falls back to what is much cheaper.
+  assert.equal(out.length, 2);
+  assert.ok(out.some((m) => m.id === 'ok'));
+});
+
+test('a model with no intelligence score is never offered', () => {
+  const out = rankAlternatives(models, byId('fable-max'), rateOf, 5);
   assert.ok(!out.some((m) => m.id === 'unrated'));
 });
 
 test('the cheapest model has nothing to suggest', () => {
-  assert.deepEqual(rankAlternatives(models, models[3], rateOf), []);
+  assert.deepEqual(rankAlternatives(models, byId('tiny'), rateOf), []);
 });
 
-test('a plan-covered model sorts in as free and wins on price', () => {
-  const covered = { id: 'plan', name: 'Plan', credits_per_20k_tokens: 99, intelligence_index: 66 };
+test('a free or plan-covered model wins on price outright', () => {
+  const covered = { id: 'plan', name: 'Plan', credits_per_20k_tokens: 90, intelligence_index: 70 };
   const withPlan = [...models, covered];
-  // The plan makes it free, so at equal intelligence it beats the paid one.
-  const out = rankAlternatives(withPlan, models[0], (m) => (m.id === 'plan' ? 0 : rateOf(m)), 1);
-  assert.equal(out[0].id, 'plan');
+  const out = rankAlternatives(withPlan, byId('fable-max'), (m) => (m.id === 'plan' ? 0 : rateOf(m)), 2);
+  assert.equal(out[0].id, 'plan', 'free beats every price');
 });
 
 test('credits are rounded for reading, not for billing', () => {

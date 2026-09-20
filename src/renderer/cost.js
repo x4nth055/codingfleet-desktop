@@ -35,25 +35,55 @@
     return { credits: avgCredits * growth, basis: 'history', runs: used.length };
   }
 
+  // A suggestion has to be worth acting on. Ranking by intelligence alone just
+  // returns the next variant down of the same family -- nearly as clever and
+  // nearly as dear, which is no help to anyone. So a candidate must first save
+  // real money, and only then compete on how capable it is.
+  const MAX_COST_FRACTION = 0.5;  // at most half the price of the chosen model
+  const MAX_IQ_DROP = 12;         // and no further than this below it (index is 0-100)
+
+  const iqOf = (m) => m.intelligence_index || 0;
+
   /**
-   * The smartest models that cost less than this one. A model the plan covers
-   * counts as free, so it comes out on top when the plan includes something good.
+   * Two models worth switching to: the cheapest one that is still nearly as
+   * capable, and the most capable of the ones that are much cheaper. They are
+   * usually different models, which is the point -- one is the bargain, the
+   * other is the safe step down.
+   *
+   * A model the plan covers counts as free, so it wins on price outright.
    * @param {Function} rateOf model -> credits per 20k tokens
    */
   function rankAlternatives(models, current, rateOf, limit = 2) {
     const rate = rateOf(current);
     if (!rate) return [];
-    return (models || [])
-      .filter((m) => m.id !== current.id && rateOf(m) < rate && (m.intelligence_index || 0) > 0)
-      .sort((a, b) => ((b.intelligence_index || 0) - (a.intelligence_index || 0)) || (rateOf(a) - rateOf(b)))
-      .slice(0, limit);
+
+    // Anything that does not cut the bill meaningfully is not a suggestion.
+    const muchCheaper = (models || []).filter((m) => m.id !== current.id && iqOf(m) > 0
+      && rateOf(m) <= rate * MAX_COST_FRACTION);
+    if (!muchCheaper.length) return [];
+
+    // Prefer the ones that stay close in capability; if the chosen model is in
+    // a class of its own, fall back to the best of what is much cheaper.
+    const nearlyAsSmart = muchCheaper.filter((m) => iqOf(m) >= iqOf(current) - MAX_IQ_DROP);
+    const pool = nearlyAsSmart.length ? nearlyAsSmart : muchCheaper;
+
+    const cheapestFirst = [...pool].sort((a, b) => (rateOf(a) - rateOf(b)) || (iqOf(b) - iqOf(a)));
+    const smartestFirst = [...pool].sort((a, b) => (iqOf(b) - iqOf(a)) || (rateOf(a) - rateOf(b)));
+
+    const picks = [];
+    for (const model of [cheapestFirst[0], smartestFirst[0], ...cheapestFirst]) {
+      if (model && !picks.some((p) => p.id === model.id)) picks.push(model);
+      if (picks.length >= limit) break;
+    }
+    return picks;
   }
 
   // Credits are shown to a person, not billed from here: keep them readable.
   const round = (n) => (n >= 10 ? Math.round(n) : Math.round(n * 10) / 10);
 
   const api = {
-    WARN_CREDITS, ASSUMED_STEPS, ASSUMED_OUTPUT, fromModelPrice, fromHistory, rankAlternatives, round,
+    WARN_CREDITS, ASSUMED_STEPS, ASSUMED_OUTPUT, MAX_COST_FRACTION, MAX_IQ_DROP,
+    fromModelPrice, fromHistory, rankAlternatives, round,
   };
   root.CF_COST = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

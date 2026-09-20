@@ -3002,12 +3002,14 @@ function costDialog({ estimate, alternatives }) {
       for (const alt of alternatives) {
         const row = el('button', 'menu-item cost-option');
         const main = el('div', 'mi-main');
-        const saving = estimate.basis === 'model' && effectiveRate(estimate.model)
-          ? roundCredits(estimate.credits * (effectiveRate(alt) / effectiveRate(estimate.model)))
-          : null;
+        // The same run, priced at this model instead: the whole point is the gap.
+        const ownRate = effectiveRate(estimate.model);
+        const would = ownRate ? roundCredits(estimate.credits * (effectiveRate(alt) / ownRate)) : null;
+        const less = ownRate ? Math.round((1 - effectiveRate(alt) / ownRate) * 100) : 0;
         main.append(
           el('div', 'mi-name', alt.name),
-          el('div', 'mi-sub', saving != null ? `≈ ${fmtNum(saving)} credits for this run` : alt.id),
+          el('div', 'mi-sub', would == null ? alt.id
+            : `≈ ${fmtNum(would)} credits instead of ${fmtNum(roundCredits(estimate.credits))} — ${less}% less`),
         );
         row.append(main, modelColumns(
           alt.supports_vision,
