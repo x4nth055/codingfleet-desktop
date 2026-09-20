@@ -51,3 +51,7 @@ src/renderer/  the window: sidebar, transcript, composer, settings (no Node acce
 **Approvals.** Reads inside the project folder run at once. Commands, file
 changes and reads outside the folder wait for Allow / Deny, unless the composer
 is set to Auto-approve or you allowed that tool for the session.
+
+## License
+
+[MIT](LICENSE)
