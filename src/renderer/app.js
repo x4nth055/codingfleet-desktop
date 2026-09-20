@@ -2906,11 +2906,14 @@ function contextTokensOf(sessionId) {
 
 // What this session's past runs on this model really cost, scaled to the
 // conversation's size now. Nothing to say until a run has finished.
+// modelId null means any model: on Auto the server picks per message, so what
+// the session has cost so far is the only honest guide.
 function historyEstimate(sessionId, modelId, contextNow) {
   if (!sessionId) return null;
+  const sameModel = (i) => !modelId || !i.model || i.model === modelId
+    || modelLabel(i.model) === modelLabel(modelId);
   const past = transcriptOf(sessionId)
-    .filter((i) => i.type === 'footer' && i.usage && Number(i.usage.credits) > 0
-      && (!i.model || i.model === modelId || modelLabel(i.model) === modelLabel(modelId)))
+    .filter((i) => i.type === 'footer' && i.usage && Number(i.usage.credits) > 0 && sameModel(i))
     .slice(-3)
     .map((i) => ({ credits: Number(i.usage.credits), contextTokens: i.usage.context_tokens || 0 }));
   return COST.fromHistory(past, contextNow);
@@ -2918,8 +2921,12 @@ function historyEstimate(sessionId, modelId, contextNow) {
 
 /** @returns {{known: boolean, credits?: number, basis?: string, model?: object}} */
 function estimateRun({ sessionId, modelId, promptText }) {
-  // "Auto" is the server's choice, made per message: there is nothing to price.
-  if (!modelId || modelId === 'auto') return { known: false, basis: 'auto' };
+  // "Auto" is the server's choice, made per message, so there is no price list
+  // to read. What this session has already cost is the one honest guide.
+  if (!modelId || modelId === 'auto') {
+    const past = historyEstimate(sessionId, null, contextTokensOf(sessionId));
+    return past ? { known: true, ...past, model: null } : { known: false, basis: 'auto' };
+  }
   const model = modelById(modelId);
   if (!model) return { known: false, basis: 'unknown' };
   const contextNow = contextTokensOf(sessionId);
@@ -2937,26 +2944,36 @@ function cheaperAlternatives(model, limit = 2) {
   return COST.rankAlternatives(S.models, model, effectiveRate, limit);
 }
 
-// The quiet line in the composer bar.
-function costHintText() {
-  if (S.current && S.running.has(S.current)) return 'Enter to steer';
+// The pill beside the model button: what this run looks likely to cost. It
+// sits next to the model because that is what it depends on, and it stays put
+// when the sub-agent panel opens.
+function updateCostHint() {
+  const pill = $('costPill');
+  if (!pill) return;
   const estimate = estimateRun({
     sessionId: S.current, modelId: S.model, promptText: $('prompt').value,
   });
-  if (!estimate.known || !estimate.credits) return '';
+  // Nothing to say yet: Auto before its first run, or a model we do not know.
+  if (!estimate.known) {
+    pill.hidden = true;
+    return;
+  }
   const n = roundCredits(estimate.credits);
-  if (n < 1) return '';
-  return `≈ ${fmtNum(n)} credits`;
-}
-
-function updateCostHint() {
-  const hint = $('hint');
-  if (!hint) return;
-  hint.textContent = costHintText();
-  hint.title = hint.textContent
-    ? 'A rough estimate for this run, from what earlier runs cost and the model’s price. '
-      + 'The real cost depends on how much work the agent does.'
-    : '';
+  pill.hidden = false;
+  pill.classList.toggle('high', estimate.credits >= WARN_CREDITS);
+  if (!estimate.credits) {
+    pill.textContent = estimate.basis === 'plan' ? 'Included' : 'Free';
+    pill.title = estimate.basis === 'plan'
+      ? 'Your plan covers this model: this run costs no credits.'
+      : 'A free model: this run costs no credits.';
+    return;
+  }
+  pill.textContent = n < 1 ? '≈ <1 cr' : `≈ ${fmtNum(n)} cr`;
+  pill.title = `${estimate.basis === 'history'
+    ? `A rough estimate from this session's last ${estimate.runs === 1 ? 'run' : `${estimate.runs} runs`}`
+    : "A rough estimate from the model's price and a run of about 5 steps"}`
+    + ', scaled to how long the conversation is now. The real cost depends on how much '
+    + 'work the agent does.';
 }
 
 // Above the threshold, offer the smartest cheaper models before spending.
@@ -2968,11 +2985,14 @@ function costDialog({ estimate, alternatives }) {
     modal.setAttribute('role', 'alertdialog');
     const credits = roundCredits(estimate.credits);
     modal.append(el('h2', 'confirm-title', `This run could cost about ${fmtNum(credits)} credits`));
+    const runs = estimate.runs === 1 ? 'run' : `${estimate.runs} runs`;
     const why = estimate.basis === 'history'
-      ? `Based on what this session's last ${estimate.runs === 1 ? 'run' : `${estimate.runs} runs`} cost on `
-        + `${modelLabel(estimate.model.id)}, and how long the conversation has grown.`
+      ? `Based on what this session's last ${runs} cost${estimate.model ? ` on ${modelLabel(estimate.model.id)}` : ''}, `
+        + 'and how long the conversation has grown.'
       : `Based on ${modelLabel(estimate.model.id)}'s price and a run of about ${ASSUMED_STEPS} steps.`;
-    modal.append(el('p', 'confirm-text', `${why} The real cost depends on how much work the agent does.`));
+    const pickOne = estimate.model ? '' : ' Choose a model instead of Auto to see cheaper ones suggested here.';
+    modal.append(el('p', 'confirm-text',
+      `${why} The real cost depends on how much work the agent does.${pickOne}`));
 
     if (alternatives.length) {
       modal.append(el('div', 'cost-lead', alternatives.length === 1
@@ -3031,8 +3051,10 @@ function costDialog({ estimate, alternatives }) {
 async function clearedToSpend(sessionId, promptText) {
   const estimate = estimateRun({ sessionId, modelId: S.model, promptText });
   if (!estimate.known || estimate.credits < WARN_CREDITS) return true;
+  // On Auto there is no chosen model to be dearer than, so there is nothing to
+  // recommend: the warning still stands, without a list.
   const answer = await costDialog({
-    estimate, alternatives: cheaperAlternatives(estimate.model),
+    estimate, alternatives: estimate.model ? cheaperAlternatives(estimate.model) : [],
   });
   if (answer === 'cancel') return false;
   if (answer !== 'send') {
@@ -3123,6 +3145,7 @@ function renderComposer() {
     icon('caret', 'icon caret'),
   );
 
+  $('hint').textContent = running ? 'Enter to steer' : '';
   updateCostHint();
   updateSendButton();
 }

@@ -555,6 +555,19 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .bar-button .caret { width: 13px; height: 13px; margin-left: -3px; opacity: .7; }
 .bar-spacer { flex: 1; }
 .hint { font-size: 11.5px; color: var(--faint); margin-right: 6px; }
+/* What this run looks likely to cost, beside the model it depends on. */
+.cost-pill {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: default;
+}
+.cost-pill.high { border-color: var(--red); color: var(--red); }
 .send { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: var(--accent); color: var(--accent-ink); transition: filter .15s; }
 .send:hover:not(:disabled) { filter: brightness(1.08); }
 .send:disabled { background: var(--panel-2); color: var(--faint); }
