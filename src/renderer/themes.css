@@ -1,0 +1,165 @@
+/* Themes. Dark is the default in styles.css :root; these replace its tokens. */
+
+/* ── Light ───────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --sidebar: #f5f6f8;
+  --panel: #f8f9fb;
+  --panel-2: #eff1f4;
+  --hover: #eaedf1;
+  --line: #e2e5ea;
+  --line-2: #d3d8df;
+  --line-3: #b9c0ca;
+  --text: #1b1f24;
+  --muted: #5b6470;
+  --faint: #8a929d;
+  --accent: #4f5ee8;
+  --accent-ink: #ffffff;
+  --green: #14a066;
+  --red: #d63843;
+  --amber: #b7770f;
+  --well: #f6f8fa;
+  --well-2: #eef1f4;
+  --red-ink: #c02a35;
+  --green-ink: #11804f;
+  --iq: #7c3aed;
+  --iq-ink: #6d28d9;
+  --scroll: #d0d5dc;
+  --scroll-hover: #b6bdc7;
+  --switch-off: #cfd4db;
+  --knob: #ffffff;
+  --overlay: rgba(24, 28, 36, .32);
+  color-scheme: light;
+}
+:root[data-theme="light"] :is(.quota-pop, .tip, .scroll-down, .composer, .menu, .modal) {
+  box-shadow: 0 10px 30px rgba(20, 28, 40, .12), 0 1px 3px rgba(20, 28, 40, .08);
+}
+:root[data-theme="light"] .quota-bar { box-shadow: inset 0 0 0 1px var(--line); }
+
+/* ── Hacker ──────────────────────────────────────────────── */
+:root[data-theme="hacker"] {
+  --bg: #020604;
+  --sidebar: #010302;
+  --panel: #04100a;
+  --panel-2: #071a0f;
+  --hover: #0a2414;
+  --line: #0f3620;
+  --line-2: #16502e;
+  --line-3: #22773f;
+  --text: #b4ffc8;
+  --muted: #4fdc7f;
+  --faint: #2a8a4c;
+  --accent: #39ff7a;
+  --accent-ink: #001a08;
+  --green: #39ff7a;
+  --red: #ff4d5e;
+  --amber: #e2ff4a;
+  --well: #000000;
+  --well-2: #031109;
+  --red-ink: #ff8a95;
+  --green-ink: #7dffa6;
+  --iq: #39ff7a;
+  --iq-ink: #a6ffbf;
+  --scroll: #0f3a21;
+  --scroll-hover: #1a5c34;
+  --switch-off: #0f3a21;
+  --knob: #b4ffc8;
+  --overlay: rgba(0, 8, 3, .78);
+  --font: "Cascadia Code", "Cascadia Mono", Consolas, "Lucida Console", monospace;
+  --mono: "Cascadia Code", "Cascadia Mono", Consolas, "Lucida Console", monospace;
+  color-scheme: dark;
+}
+:root[data-theme="hacker"] body { font-size: 13px; }
+:root[data-theme="hacker"] ::selection { background: var(--accent); color: var(--accent-ink); }
+
+/* CRT scanlines and a soft vignette over everything; they never catch the mouse. */
+:root[data-theme="hacker"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0) 2px, rgba(0, 0, 0, .18) 3px),
+    radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, .45) 100%);
+}
+
+/* Phosphor glow. */
+:root[data-theme="hacker"] :is(.brand, .markdown h1, .markdown h2, .markdown h3, .pane-head h3, .theme-card.active .theme-name) {
+  color: var(--accent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+:root[data-theme="hacker"] .markdown { text-shadow: 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent); }
+:root[data-theme="hacker"] .markdown a { color: var(--accent); }
+:root[data-theme="hacker"] .brand > span:last-child::before { content: "> "; color: var(--faint); }
+:root[data-theme="hacker"] .brand > span:last-child::after {
+  content: "_";
+  margin-left: 2px;
+  animation: cf-blink 1.1s steps(1) infinite;
+}
+@keyframes cf-blink { 50% { opacity: 0; } }
+
+/* Terminal headings: "# Title". */
+:root[data-theme="hacker"] .markdown h1::before { content: "# "; opacity: .55; }
+:root[data-theme="hacker"] .markdown h2::before { content: "## "; opacity: .55; }
+:root[data-theme="hacker"] .markdown h3::before { content: "### "; opacity: .55; }
+
+/* The logo turns green. */
+:root[data-theme="hacker"] .logo stop:first-child { stop-color: #39ff7a; }
+:root[data-theme="hacker"] .logo stop:last-child { stop-color: #0fbf52; }
+
+/* Square corners and hard borders, like a terminal window. */
+:root[data-theme="hacker"] :is(.composer, .menu, .modal, .bubble, .code-block, .markdown pre, .tool, .tool-group,
+  .btn, .chip, .new-session, .quota-card, .quota-pop, .set-row, .notice, .bar-button, .att, .theme-card, .seg,
+  .scroll-down, .tip, input, textarea, select) {
+  border-radius: 2px;
+}
+:root[data-theme="hacker"] .composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 18px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+:root[data-theme="hacker"] :is(textarea, input) { caret-color: var(--accent); }
+:root[data-theme="hacker"] .bubble { background: var(--panel-2); border-color: var(--line-2); }
+:root[data-theme="hacker"] .bubble::before { content: "$ "; color: var(--accent); }
+
+/* ── Theme picker (Preferences) ──────────────────────────── */
+.pane-section.first { margin-top: 4px; }
+.theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 4px; }
+.theme-card {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  text-align: left;
+  background: var(--panel);
+  transition: border-color .12s, box-shadow .12s;
+}
+.theme-card:hover { border-color: var(--line-3); }
+.theme-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.theme-label { display: grid; gap: 1px; padding: 0 2px 2px; }
+.theme-name { font-size: 13px; font-weight: 600; }
+.theme-desc { font-size: 11.5px; color: var(--muted); }
+
+/* A small drawing of the app in each theme's own colors. */
+.theme-preview {
+  display: flex;
+  height: 70px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--p-line);
+  background: var(--p-bg);
+}
+.tp-side { width: 30%; display: grid; align-content: start; gap: 5px; padding: 7px 6px; background: var(--p-side); }
+.tp-body { flex: 1; display: grid; align-content: start; gap: 5px; padding: 7px 8px; position: relative; }
+.tp-dot { width: 9px; height: 9px; border-radius: 3px; background: var(--p-accent); }
+.tp-line { height: 4px; border-radius: 2px; background: var(--p-text); opacity: .55; width: 70%; }
+.tp-line.short { width: 45%; opacity: .3; }
+.tp-line.wide { width: 90%; }
+.tp-bubble { justify-self: end; width: 42%; height: 9px; border-radius: 3px; background: var(--p-panel); border: 1px solid var(--p-line); }
+.tp-input { position: absolute; left: 8px; right: 8px; bottom: 6px; height: 12px; border-radius: 4px; background: var(--p-panel); border: 1px solid var(--p-line); }
+.theme-card[data-preview="dark"] { --p-bg: #0d0f12; --p-side: #090b0e; --p-panel: #181c22; --p-line: #2a3039; --p-text: #e7eaef; --p-accent: #7b8cff; }
+.theme-card[data-preview="light"] { --p-bg: #ffffff; --p-side: #f1f3f6; --p-panel: #f4f6f8; --p-line: #d3d8df; --p-text: #1b1f24; --p-accent: #4f5ee8; }
+.theme-card[data-preview="hacker"] { --p-bg: #020604; --p-side: #010302; --p-panel: #071a0f; --p-line: #16502e; --p-text: #39ff7a; --p-accent: #39ff7a; }
+.theme-card[data-preview="hacker"] .tp-line { box-shadow: 0 0 4px #39ff7a; border-radius: 0; }
+.theme-card[data-preview="hacker"] .theme-name { font-family: "Cascadia Code", Consolas, monospace; }

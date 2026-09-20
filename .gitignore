@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-next/
+*.asar
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+credentials.json
+
+# Screenshots and local scratch
+*.png
+shot.png
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log

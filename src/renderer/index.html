@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https: http:; font-src 'self'">
+<title>CodingFleet</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="settings.css">
+<link rel="stylesheet" href="themes.css">
+<link rel="stylesheet" id="hljsTheme" href="../../node_modules/@highlightjs/cdn-assets/styles/github-dark.min.css" data-dark="../../node_modules/@highlightjs/cdn-assets/styles/github-dark.min.css" data-light="../../node_modules/@highlightjs/cdn-assets/styles/github.min.css" data-hacker="../../node_modules/@highlightjs/cdn-assets/styles/base16/green-screen.min.css">
+<script src="theme-boot.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand drag"><span class="logo" id="brandLogo"></span><span>CodingFleet</span></div>
+    <button class="new-session" id="newSession"><span class="icon" id="plusIcon"></span>New session<kbd>Ctrl N</kbd></button>
+    <nav class="session-list" id="sessionList"></nav>
+    <div class="account" id="account"></div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar drag" id="topbar"></header>
+    <section class="transcript" id="transcript"></section>
+    <nav class="thread-nav" id="threadNav" hidden aria-label="Messages in this session"></nav>
+    <footer class="composer-wrap">
+      <div class="banner" id="banner" hidden></div>
+      <div class="composer" id="composer">
+        <button class="scroll-down" id="scrollDown" hidden title="Go to the newest message"></button>
+        <div class="attachments" id="attachments" hidden></div>
+        <textarea id="prompt" rows="1" spellcheck="false"></textarea>
+        <div class="composer-bar">
+          <button class="bar-button attach-button" id="attachButton" title="Attach files or a screenshot"></button>
+          <button class="bar-button" id="folderButton"></button>
+          <button class="bar-button" id="modelButton"></button>
+          <button class="bar-button" id="effortButton" hidden></button>
+          <button class="bar-button" id="permButton"></button>
+          <div class="bar-spacer"></div>
+          <span class="hint" id="hint"></span>
+          <button class="bar-button mic-button" id="micButton" title="Voice input"></button>
+          <button class="send" id="send"></button>
+        </div>
+        <div class="menu attach-menu" id="attachMenu" hidden>
+          <div class="menu-list" id="attachList"></div>
+        </div>
+        <div class="menu folder-menu" id="folderMenu" hidden>
+          <div class="menu-list" id="folderList"></div>
+        </div>
+        <div class="menu model-menu" id="modelMenu" hidden>
+          <input id="modelSearch" placeholder="Search models or providers" autocomplete="off" spellcheck="false">
+          <div class="menu-list" id="modelList"></div>
+        </div>
+        <div class="menu effort-menu" id="effortMenu" hidden>
+          <div class="menu-list" id="effortList"></div>
+        </div>
+        <div class="menu perm-menu" id="permMenu" hidden>
+          <div class="menu-list" id="permList"></div>
+        </div>
+      </div>
+    </footer>
+  </main>
+
+  <aside class="agents-panel" id="agentsPanel" hidden aria-label="Sub-agents"></aside>
+</div>
+
+<div class="drop-overlay" id="dropOverlay" hidden>
+  <div class="drop-card"><span class="icon" id="dropIcon"></span><strong id="dropTitle">Drop to attach</strong>
+    <span id="dropSub">Images, documents, code — up to 20 MB each</span></div>
+</div>
+
+<div class="menu session-menu" id="sessionMenu" hidden>
+  <div class="menu-list" id="sessionMenuList"></div>
+</div>
+
+<div class="overlay" id="settings" hidden>
+  <div class="modal settings-modal" role="dialog" aria-labelledby="settingsTitle">
+    <div class="modal-head">
+      <h2 id="settingsTitle">Settings</h2>
+      <button class="icon-button" id="settingsClose" title="Close"></button>
+    </div>
+    <div class="settings-body">
+      <nav class="settings-tabs" id="settingsTabs" aria-label="Settings">
+        <button data-tab="account" data-icon="user" class="active">Account</button>
+        <button data-tab="privacy" data-icon="lock">Data privacy</button>
+        <button data-tab="preferences" data-icon="sliders">Preferences</button>
+        <button data-tab="mcp" data-icon="plug">MCP integrations</button>
+        <button data-tab="keys" data-icon="key">Your API keys</button>
+        <button data-tab="billing" data-icon="card">Billing</button>
+      </nav>
+
+      <div class="settings-pane" data-pane="account">
+        <p class="modal-intro" id="settingsIntro"></p>
+        <div class="signed-in" id="signedIn" hidden></div>
+
+        <div id="signInBlock">
+        <button class="btn primary wide" id="browserSignIn">Sign in with your browser</button>
+        <p class="field-hint" id="signInHint">Opens codingfleet.com. Approve there, and this app gets its own key.</p>
+        <div class="or-line"><span>or paste a key</span></div>
+
+        <label class="field-label" for="keyInput">CodingFleet API key</label>
+        <div class="key-row">
+          <input id="keyInput" type="password" autocomplete="off" spellcheck="false">
+          <button class="btn" id="keyShow" type="button">Show</button>
+        </div>
+        <p class="field-hint">Create a key on <a id="keyLink" href="https://codingfleet.com/agent-api/">codingfleet.com/agent-api</a>.
+          It is stored encrypted on this computer.</p>
+        </div>
+
+        <details class="advanced" id="advanced">
+          <summary>Advanced</summary>
+          <label class="field-label" for="baseInput">API server</label>
+          <input id="baseInput" type="text" autocomplete="off" spellcheck="false">
+          <p class="field-hint">Leave it on https://codingfleet.com/v1 unless you run your own server.</p>
+        </details>
+
+        <div class="modal-status" id="settingsStatus"></div>
+        <div class="modal-actions">
+          <button class="btn danger" id="keyRemove">Remove key</button>
+          <div class="bar-spacer"></div>
+          <button class="btn" id="settingsCancel">Cancel</button>
+          <button class="btn primary" id="settingsSave">Save</button>
+        </div>
+      </div>
+      <div class="settings-pane" data-pane="privacy" id="privacyPane" hidden></div>
+      <div class="settings-pane" data-pane="preferences" id="prefsPane" hidden></div>
+      <div class="settings-pane" data-pane="mcp" id="mcpPane" hidden></div>
+      <div class="settings-pane" data-pane="keys" id="keysPane" hidden></div>
+      <div class="settings-pane" data-pane="billing" id="billingPane" hidden></div>
+    </div>
+  </div>
+</div>
+
+<script src="mcp-catalog.js"></script>
+<script src="../../node_modules/marked/lib/marked.umd.js"></script>
+<script src="../../node_modules/dompurify/dist/purify.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/highlight.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/dockerfile.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/powershell.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/dart.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/scala.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/elixir.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/haskell.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/nginx.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/protobuf.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/groovy.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/gradle.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/cmake.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/julia.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/clojure.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/erlang.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/fsharp.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/ocaml.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/latex.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/properties.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/nix.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/apache.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/vim.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/x86asm.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/llvm.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/fortran.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/matlab.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/twig.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/handlebars.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/prolog.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/crystal.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/d.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/nim.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/elm.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/vbscript.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/applescript.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/awk.min.js"></script>
+<script src="../../node_modules/@highlightjs/cdn-assets/languages/tcl.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
