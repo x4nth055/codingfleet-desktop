@@ -732,7 +732,7 @@ function renderSidebar() {
     list.append(el('div', 'sidebar-empty', 'Your sessions will show here.'));
     return;
   }
-  const when = (s) => new Date(s.last_used_at || s.created_at).getTime();
+  const when = (s) => new Date(s.last_used_at || s.last_message_at || s.created_at).getTime();
   const sorted = [...S.sessions].sort((a, b) => when(b) - when(a));
 
   // Pinned sessions first, whatever their folder. The rest by folder, as in
@@ -747,7 +747,17 @@ function renderSidebar() {
     groups.get(name).push(session);
   }
 
-  for (const [name, sessions] of groups) {
+  // A folder sits where its most recently used session sits, so the one you
+  // just worked in is always at the top -- and the sessions inside it already
+  // follow the same order, having been pushed in it.
+  const newest = (sessions) => Math.max(...sessions.map(when));
+  const ordered = [...groups.entries()].sort(([a, sa], [b, sb]) => {
+    if (a === 'Pinned') return b === 'Pinned' ? 0 : -1;
+    if (b === 'Pinned') return 1;
+    return newest(sb) - newest(sa);
+  });
+
+  for (const [name, sessions] of ordered) {
     const collapsed = S.collapsed.has(name);
     const head = el('button', `group-head${collapsed ? ' collapsed' : ''}${name === 'Pinned' ? ' pinned' : ''}`);
     const cwd = name === 'Pinned' ? null : local(sessions[0].id).cwd;
@@ -1008,9 +1018,11 @@ function renderAccount() {
 // balance instead.
 let quotaOpen = false;
 
-function quotaLevel(pct) {
+function quotaLevel(pct, backed = false) {
   if (pct >= 50) return 'good';
-  if (pct >= 20) return 'low';
+  // With credits behind the allowance, running the weekly down is a warning,
+  // not a wall. Red is kept for the case where there is nothing left to spend.
+  if (pct >= 20 || backed) return 'low';
   return 'out';
 }
 
@@ -1022,31 +1034,56 @@ function renderQuota(credits) {
   const pct = hasAllowance ? Math.max(0, Math.min(100, Math.round((left / total) * 100))) : null;
 
   const balance = Number(credits.credits) || 0;
+  // The weekly allowance is spent, but the balance is not: runs carry on, paid
+  // by credits. The card says so in green rather than shouting 0% in red.
+  const onCredits = hasAllowance && balance > 0 && left <= 0;
+  const level = quotaLevel(pct, balance > 0);
 
   const wrap = el('div', `quota${quotaOpen ? ' open' : ''}`);
+  // The bar of what is left. A zero-width fill would still paint its glow as a
+  // stray mark at the left end of an empty track, so nothing is drawn at all.
+  const meterFor = (percent, cls) => {
+    const bar = el('div', 'quota-bar');
+    if (percent > 0) {
+      const fill = el('div', `quota-fill ${cls}`);
+      fill.style.width = `${percent}%`;
+      bar.append(fill);
+    }
+    return bar;
+  };
   const card = el('button', 'quota-card');
   card.setAttribute('aria-expanded', String(quotaOpen));
   const head = el('div', 'quota-head');
-  head.append(
-    el('span', 'quota-plan', plan.name || 'Your plan'),
-    el('span', `quota-pct${hasAllowance ? ` ${quotaLevel(pct)}` : ''}`,
-      hasAllowance ? `${pct}%` : `${fmtNum(credits.credits)} credits`),
-  );
+  const status = el('span', 'quota-pct');
+  if (!hasAllowance) {
+    status.textContent = `${fmtNum(credits.credits)} credits`;
+  } else if (onCredits) {
+    status.classList.add('credits');
+    status.textContent = 'On credits';
+    status.title = `Your weekly allowance is used up. Runs now spend your ${fmtNum(balance)} credits, which never expire.`;
+  } else {
+    status.classList.add(level);
+    status.textContent = `${pct}%`;
+  }
+  head.append(el('span', 'quota-plan', plan.name || 'Your plan'), status);
   card.append(head);
   if (hasAllowance) {
-    const bar = el('div', 'quota-bar');
-    const fill = el('div', `quota-fill ${quotaLevel(pct)}`);
-    fill.style.width = `${pct}%`;
-    bar.append(fill);
     // Running out of the allowance is not running out of credits: say what is
-    // left to spend, right on the card, while the bar is red or nearly so.
-    const lowOnAllowance = balance > 0 && pct < 25;
+    // left to spend, right on the card, while the bar is low or spent.
     const sub = el('div', 'quota-sub');
-    sub.append(el('span', 'quota-left', lowOnAllowance
-      ? `${fmtNum(left)} of ${fmtNum(total)} weekly`
-      : `${fmtNum(left)} of ${fmtNum(total)} weekly allowance left`));
-    if (lowOnAllowance) sub.append(el('span', 'quota-then', `then ${fmtNum(balance)} credits`));
-    card.append(bar, sub);
+    if (onCredits) {
+      sub.append(
+        el('span', 'quota-then', `${fmtNum(balance)} credits left`),
+        el('span', null, 'Resets Monday'),
+      );
+    } else {
+      const lowOnAllowance = balance > 0 && pct < 25;
+      sub.append(el('span', 'quota-left', lowOnAllowance
+        ? `${fmtNum(left)} of ${fmtNum(total)} weekly`
+        : `${fmtNum(left)} of ${fmtNum(total)} weekly allowance left`));
+      if (lowOnAllowance) sub.append(el('span', 'quota-then', `then ${fmtNum(balance)} credits`));
+    }
+    card.append(meterFor(pct, onCredits ? 'credits' : level), sub);
   } else {
     card.append(el('div', 'quota-sub', 'Credits never expire'));
   }
@@ -1065,12 +1102,8 @@ function renderQuota(credits) {
   };
   pop.append(el('div', 'qp-title', plan.name ? `${plan.name} plan` : 'Your account'));
   if (hasAllowance) {
-    pop.append(line('Weekly allowance left', `${fmtNum(left)} / ${fmtNum(total)}`));
-    const meter = el('div', 'quota-bar');
-    const fill = el('div', `quota-fill ${quotaLevel(pct)}`);
-    fill.style.width = `${pct}%`;
-    meter.append(fill);
-    pop.append(meter);
+    pop.append(line('Weekly allowance', `${fmtNum(left)} / ${fmtNum(total)}`));
+    pop.append(meterFor(pct, onCredits ? 'credits' : level));
   }
   pop.append(line('Credits', fmtNum(credits.credits)));
   if (credits.quota_remaining != null && hasAllowance) {
@@ -3330,8 +3363,10 @@ function updateCostHint() {
   const n = roundCredits(estimate.credits);
   pill.hidden = false;
   pill.classList.toggle('high', estimate.credits >= WARN_CREDITS);
+  // The pill is a price and nothing else. A word like "Included" took the place
+  // of the number, which is the one thing this is here to say.
   if (!estimate.credits) {
-    pill.textContent = estimate.basis === 'plan' ? 'Included' : 'Free';
+    pill.textContent = '0 cr';
     pill.title = estimate.basis === 'plan'
       ? 'Your plan covers this model: this run costs no credits.'
       : 'A free model: this run costs no credits.';

@@ -15,7 +15,9 @@
     "e2e": "node test/e2e-run.mjs",
     "test:layout": "electron test/layout.cjs",
     "shot": "electron . --screenshot=shot.png",
+    "predist": "node scripts/check-dist-lock.cjs",
     "dist": "electron-builder --win portable",
+    "dist:next": "electron-builder --win portable --config.directories.output=dist-next",
     "dist:mac": "electron-builder --mac dmg zip",
     "dist:linux": "electron-builder --linux AppImage deb"
   },

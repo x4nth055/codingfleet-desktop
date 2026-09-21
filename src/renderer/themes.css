@@ -46,9 +46,11 @@
   --line: #0f3620;
   --line-2: #16502e;
   --line-3: #22773f;
-  --text: #b4ffc8;
-  --muted: #4fdc7f;
-  --faint: #2a8a4c;
+  /* A little hue drift, so the screen is not one flat green: body text leans
+     mint, secondary text teal, the quietest labels sea green, links cyan. */
+  --text: #c2ffd4;
+  --muted: #57e0a8;
+  --faint: #2c9a6b;
   --accent: #39ff7a;
   --accent-ink: #001a08;
   --green: #39ff7a;
@@ -57,7 +59,7 @@
   --well: #000000;
   --well-2: #031109;
   --red-ink: #ff8a95;
-  --green-ink: #7dffa6;
+  --green-ink: #86ffc4;
   --iq: #39ff7a;
   --iq-ink: #a6ffbf;
   --scroll: #0f3a21;
@@ -70,6 +72,11 @@
   color-scheme: dark;
 }
 :root[data-theme="hacker"] body { font-size: 13px; }
+/* The composer reads a touch smaller here: the monospace face is wide, and the
+   bar carries the folder, model, price, effort and permissions side by side. */
+:root[data-theme="hacker"] #prompt { font-size: 13px; }
+:root[data-theme="hacker"] .composer-bar .bar-button { font-size: 11.5px; }
+:root[data-theme="hacker"] .composer-bar .cost-pill { font-size: 10.5px; }
 :root[data-theme="hacker"] ::selection { background: var(--accent); color: var(--accent-ink); }
 
 /* CRT scanlines and a soft vignette over everything; they never catch the mouse. */
@@ -90,7 +97,7 @@
   text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 :root[data-theme="hacker"] .markdown { text-shadow: 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent); }
-:root[data-theme="hacker"] .markdown a { color: var(--accent); }
+:root[data-theme="hacker"] .markdown a { color: #5cffd0; }
 :root[data-theme="hacker"] .brand > span:last-child::before { content: "> "; color: var(--faint); }
 :root[data-theme="hacker"] .brand > span:last-child::after {
   content: "_";

@@ -41,7 +41,7 @@ app.whenReady().then(async () => {
               // Include all optional controls, as on a reasoning model.
               $('effortButton').hidden = false;
               $('effortButton').replaceChildren(icon('gauge'), el('span', null, 'High'), icon('caret', 'icon caret'));
-              $('costPill').hidden = false; $('costPill').textContent = 'Included';
+              $('costPill').hidden = false; $('costPill').textContent = '0 cr';
               const box = (n) => { const r = n.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
               const composer = box($('composer'));
               const sidebar = box(document.querySelector('.sidebar'));
@@ -67,6 +67,55 @@ app.whenReady().then(async () => {
             checks++;
           }
         }
+      }
+    }
+    // The quota tooltip, in the state that matters: the weekly allowance is
+    // spent and credits are not. The card used to shout a red "0%"; now it says
+    // so calmly, every row of the tooltip stays on one line, the numbers never
+    // break in two, and the three actions fit in two even rows.
+    for (const width of [940, 1100, 1320, 1600]) {
+      win.setContentSize(width, 850);
+      await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      for (const theme of ['dark', 'light', 'hacker']) {
+        const result = await win.webContents.executeJavaScript(`(() => {
+          document.documentElement.dataset.theme = ${JSON.stringify(theme)};
+          quotaOpen = true;
+          renderAccount();
+          const rect = (n) => { const r = n.getBoundingClientRect(); return { x: r.x, right: r.right, width: r.width }; };
+          const errors = [];
+          const pop = document.querySelector('.quota-pop');
+          const card = document.querySelector('.quota-card');
+          // Nothing left to spend: the track is drawn empty, with no stub on it.
+          if (card.querySelector('.quota-fill')) errors.push('a spent allowance still draws a fill');
+          for (const row of pop.querySelectorAll('.qp-row')) {
+            if (row.getClientRects().length !== 1) errors.push(row.textContent + ' wraps');
+            if (row.scrollWidth > row.clientWidth + 1) errors.push(row.textContent + ' is cut off');
+            const value = row.querySelector('strong');
+            if (value.getClientRects().length !== 1) errors.push(value.textContent + ' breaks in two');
+          }
+          const buttons = [...pop.querySelectorAll('.account-actions .btn')];
+          const actions = rect(pop.querySelector('.account-actions'));
+          // One action takes the whole row, the other two split the next evenly:
+          // the shape that fits this 272px sidebar at every window width.
+          const [first, ...rest] = buttons;
+          if (Math.abs(rect(first).width - actions.width) > 1) errors.push('the first action does not span the tooltip');
+          if (new Set(rest.map((b) => Math.round(b.getBoundingClientRect().top))).size !== 1) errors.push('the last two actions are not on one row');
+          if (Math.abs(rect(rest[0]).width - rect(rest[1]).width) > 1) errors.push('the last two actions are not equal');
+          for (const b of buttons) {
+            if (b.scrollWidth > b.clientWidth + 1) errors.push(b.textContent + ' is cut off');
+            const r = rect(b);
+            if (r.x < rect(pop).x || r.right > rect(pop).right + 1) errors.push(b.textContent + ' leaves the tooltip');
+            if (rect(b).width < 40) errors.push(b.textContent + ' is too narrow to read');
+          }
+          const sidebar = rect(document.querySelector('.sidebar'));
+          if (rect(pop).right > sidebar.right - 4) errors.push('the tooltip leaves the sidebar');
+          return { errors, status: card.querySelector('.quota-pct').textContent,
+            actions: buttons.map((b) => b.textContent) };
+        })()`);
+        assert.deepEqual(result.errors, [], `${width}/${theme}/quota`);
+        assert.equal(result.status, 'On credits', `${width}/${theme}: a spent allowance still reads as 0%`);
+        assert.deepEqual(result.actions, ['Plans', 'Buy credits', 'Billing'], `${width}/${theme}: actions`);
+        checks++;
       }
     }
     const replay = await win.webContents.executeJavaScript(`(() => {

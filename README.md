@@ -269,6 +269,14 @@ npm run dist:mac    # macOS dmg + zip
 npm run dist:linux  # Linux AppImage + deb
 ```
 
+On Windows the portable .exe in `dist/` *is* the running app, so rebuilding
+over it would block forever on a file lock. `dist` now stops at once and says
+so; to build while the app is open, use:
+
+```bash
+npm run dist:next   # same build, written to dist-next/ so nothing is locked
+```
+
 Screenshot and debugging flags:
 
 ```
