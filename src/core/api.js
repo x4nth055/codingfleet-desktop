@@ -57,7 +57,8 @@ function unreachable(err) {
 }
 
 async function fail(res) {
-  const text = await res.text();
+  let text;
+  try { text = await res.text(); } catch (err) { throw unreachable(err); }
   let payload = null;
   try { payload = JSON.parse(text); } catch { /* not JSON */ }
   return new ApiError(res.status, payload, plainError(res.status, text));
@@ -74,16 +75,23 @@ function plainError(status, text) {
   return body.slice(0, 200);
 }
 
-async function request(method, path, body) {
-  const init = { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body) };
+async function request(method, path, body, signal, timeoutMs) {
+  const timeout = timeoutMs ? AbortSignal.timeout(timeoutMs) : null;
+  const init = { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body),
+    signal: timeout ? (signal ? AbortSignal.any([signal, timeout]) : timeout) : signal };
   let res;
   try {
     res = await fetch(credentials.base + path, init);
   } catch (err) {
+    if (signal?.aborted) throw signal.reason;
     throw unreachable(err);
   }
   if (!res.ok) throw await fail(res);
-  const text = await res.text();
+  let text;
+  try { text = await res.text(); } catch (err) {
+    if (signal?.aborted) throw signal.reason;
+    throw unreachable(err);
+  }
   return text ? JSON.parse(text) : null;
 }
 
@@ -106,11 +114,12 @@ function parseFrame(raw) {
 
 // Server-sent events, one { event, data } at a time. Frames are rebuilt from
 // the byte stream, since a transport can split one anywhere.
-async function* readEvents(body) {
+async function* readEvents(body, onActivity = () => {}) {
   const decoder = new TextDecoder();
   let buffer = '';
   for await (const chunk of body) {
-    buffer += decoder.decode(chunk, { stream: true }).replace(/\r\n/g, '\n');
+    onActivity();
+    buffer = (buffer + decoder.decode(chunk, { stream: true })).replace(/\r\n/g, '\n');
     let cut;
     while ((cut = buffer.indexOf('\n\n')) !== -1) {
       const frame = parseFrame(buffer.slice(0, cut));
@@ -123,16 +132,39 @@ async function* readEvents(body) {
 }
 
 async function openStream(method, path, body, signal) {
-  const init = { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body), signal };
+  // A half-open socket can otherwise wait forever. Server keepalives arrive
+  // every 20 seconds even while a tool or approval takes hours.
+  const watchdog = new AbortController();
+  let timer;
+  const touch = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => watchdog.abort(), 75000);
+    timer.unref?.();
+  };
+  const init = { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body),
+    signal: signal ? AbortSignal.any([signal, watchdog.signal]) : watchdog.signal };
   let res;
   try {
+    touch();
     res = await fetch(credentials.base + path, init);
+    if (!res.ok) throw await fail(res);
   } catch (err) {
-    if (err.name === 'AbortError') throw err;
+    clearTimeout(timer);
+    if (signal?.aborted) throw signal.reason;
+    if (err instanceof ApiError) throw err;
     throw unreachable(err);
   }
-  if (!res.ok) throw await fail(res);
-  return readEvents(res.body);
+  return (async function* () {
+    try {
+      yield* readEvents(res.body, touch);
+    } catch (err) {
+      if (signal?.aborted) throw signal.reason;
+      throw unreachable(err);
+    } finally {
+      clearTimeout(timer);
+      watchdog.abort();
+    }
+  }());
 }
 
 // Browser sign-in. These two calls carry no key: they are how one is obtained.
@@ -244,12 +276,13 @@ module.exports = {
   updateSettings: (body) => request('PATCH', '/settings', body),
   startRun: (sessionId, body, signal) => openStream('POST', `/sessions/${id(sessionId)}/runs`, body, signal),
   runEvents: (runId, signal) => openStream('GET', `/runs/${id(runId)}/events`, undefined, signal),
+  heartbeat: (runId, signal) => request('POST', `/runs/${id(runId)}/heartbeat`, {}, signal, 30000),
   cancelRun: (runId) => request('POST', `/runs/${id(runId)}/cancel`, {}),
   steerRun: (runId, message, files) =>
     request('POST', `/runs/${id(runId)}/steer`, files && files.length ? { message, files } : { message }),
   uploadFile: upload,
   deleteFile: (fileId) => request('DELETE', `/files/${id(fileId)}`),
   fileContent: (fileId) => download(`/files/${id(fileId)}/content`),
-  toolResult: (runId, callId, output, isError) =>
-    request('POST', `/runs/${id(runId)}/tool_results`, { call_id: callId, output, is_error: Boolean(isError) }),
+  toolResult: (runId, callId, output, isError, signal) =>
+    request('POST', `/runs/${id(runId)}/tool_results`, { call_id: callId, output, is_error: Boolean(isError) }, signal, 30000),
 };

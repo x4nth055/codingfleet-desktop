@@ -256,7 +256,8 @@ microphone (for voice input) and no other device.
 ## Development
 
 ```bash
-npm test          # 49 unit tests: tools, approvals, MCP, diffs, undo, cost
+npm test          # Tools, approvals, reconnects, result retries, MCP, diffs, undo, cost
+npm run test:layout # Isolated render checks across themes and window sizes
 npm run e2e       # a real run against the API (needs CODINGFLEET_API_KEY)
 ```
 

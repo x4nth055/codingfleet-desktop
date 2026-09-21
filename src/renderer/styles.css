@@ -62,6 +62,7 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
 }
@@ -123,8 +124,8 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
   100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
 }
 .sidebar-empty { color: var(--faint); font-size: 13px; padding: 16px 10px; }
-.account { border-top: 1px solid var(--line); padding: 12px 16px 12px; display: grid; gap: 5px; font-size: 12.5px; }
-.account-row { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); }
+.account { min-width: 0; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--line); padding: 12px 16px 12px; display: grid; gap: 5px; font-size: 12.5px; }
+.account-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; color: var(--muted); }
 .account-row strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .account-foot { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
 .account-server { flex: 1; min-width: 0; font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -139,10 +140,11 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .or-line::before, .or-line::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 
 /* ── Quota card ──────────────────────────────────────────── */
-.quota { position: relative; }
+.quota { position: relative; min-width: 0; }
 .quota-card {
   width: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   padding: 10px 11px 9px;
   border: 1px solid var(--line-2);
@@ -164,10 +166,10 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .quota-fill.low { background: linear-gradient(90deg, #e0902a, #f5c35c); box-shadow: 0 0 10px color-mix(in srgb, var(--amber) 30%, transparent); }
 .quota-fill.out { background: linear-gradient(90deg, #e04850, #ff8a8f); box-shadow: 0 0 10px color-mix(in srgb, var(--red) 35%, transparent); }
 .quota-sub { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums;
-  display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; }
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; }
 .quota-left { overflow: hidden; text-overflow: ellipsis; }
 /* Credits are still there when the weekly allowance runs low: say so plainly. */
-.quota-then { color: var(--green); font-weight: 600; flex: none; }
+.quota-then { color: var(--green); font-weight: 600; overflow-wrap: anywhere; }
 .quota-pop {
   position: absolute;
   left: 0;
@@ -516,7 +518,7 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .tn-item.active .tn-tick { width: 18px; background: var(--accent); }
 
 /* ── Composer ────────────────────────────────────────────── */
-.composer-wrap { padding: 10px 24px 30px; flex: none; }
+.composer-wrap { padding: 10px 24px 10px; flex: none; min-width: 0; }
 .composer {
   position: relative;
   max-width: 820px;
@@ -541,10 +543,11 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
   font: 14px/1.5 var(--font);
 }
 .composer textarea::placeholder { color: var(--faint); }
-.composer-bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px 8px 8px; }
+.composer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 8px 8px 8px; }
 .bar-button {
   height: 30px;
   max-width: 260px;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -558,7 +561,8 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .bar-button .icon { width: 15px; height: 15px; }
 .bar-button .caret { width: 13px; height: 13px; margin-left: -3px; opacity: .7; }
 .bar-spacer { flex: 1; }
-.hint { font-size: 11.5px; color: var(--faint); margin-right: 6px; }
+.hint { font-size: 11.5px; color: var(--faint); }
+.composer-wrap > .hint { height: 20px; max-width: 820px; margin: 0 auto; padding-top: 2px; text-align: right; }
 /* What this run looks likely to cost, beside the model it depends on. */
 .cost-pill {
   flex: none;
@@ -572,7 +576,7 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
   cursor: default;
 }
 .cost-pill.high { border-color: var(--red); color: var(--red); }
-.send { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: var(--accent); color: var(--accent-ink); transition: filter .15s; }
+.send { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: var(--accent); color: var(--accent-ink); transition: filter .15s; }
 .send:hover:not(:disabled) { filter: brightness(1.08); }
 .send:disabled { background: var(--panel-2); color: var(--faint); }
 .send.stop { background: var(--text); color: var(--bg); }
@@ -781,10 +785,7 @@ body.panel-resizing * { cursor: ew-resize !important; }
 .tool.agent-tool > .tool-head .tool-verb .icon { width: 14px; height: 14px; }
 .tool-open-panel { margin-left: 6px; flex: none; font-size: 11.5px; color: var(--accent); }
 .waiting-note { color: var(--amber); }
-/* A narrower main column (panel open): keep the send button whole. */
-.send { flex: none; }
 .hint { white-space: nowrap; }
-.app.with-panel .hint { display: none; }
 
 /* ── Attachments ─────────────────────────────────────────── */
 .attach-button { padding: 0 7px; }

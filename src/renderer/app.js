@@ -1863,6 +1863,7 @@ function onAgentEvent(sessionId, event, data) {
         agentAddTool(agent, {
           id: data.id, name: data.name, arguments: data.arguments || {},
           status: data.executor === 'client' ? 'queued' : 'running',
+          ...S.running.get(sessionId)?.replayTools?.get(data.id),
         });
       }
       break;
@@ -2333,6 +2334,10 @@ function renderDiff(file) {
 function onRunEvent({ sessionId, event, data }) {
   const run = S.running.get(sessionId);
   if (event.startsWith('subagent.') || (data && data.agent_id && (event === 'tool.call' || event === 'tool.result'))) {
+    if (run && data?.agent_id) {
+      if (!run.agentIds) run.agentIds = new Set();
+      run.agentIds.add(data.agent_id);
+    }
     onAgentEvent(sessionId, event, data || {});
     return;
   }
@@ -2377,6 +2382,7 @@ function onRunEvent({ sessionId, event, data }) {
           name: data.name,
           arguments: data.arguments || {},
           status: data.executor === 'client' ? 'queued' : 'running',
+          ...run?.replayTools?.get(data.id),
         });
       }
       break;
@@ -2447,6 +2453,23 @@ function onRunEvent({ sessionId, event, data }) {
     case 'client.reconnecting':
       // The whole run is about to be replayed: drop what this turn drew so far.
       if (run) {
+        // Approval requests and local progress are not in the server replay.
+        // Keep them, or reconnecting would hide an unanswered approval forever.
+        if (!run.replayTools) run.replayTools = new Map();
+        const remember = (items) => {
+          for (const item of items) {
+            for (const tool of item.tools || []) {
+              const { status, reason, image, imageTitle } = tool;
+              run.replayTools.set(tool.id, { status, reason, image, imageTitle });
+            }
+          }
+        };
+        remember(transcriptOf(sessionId).slice(run.turnStart));
+        for (const id of run.agentIds || []) {
+          const agent = agentsOf(sessionId).get(id);
+          if (agent) remember(agent.items);
+          agentsOf(sessionId).delete(id);
+        }
         transcriptOf(sessionId).length = run.turnStart;
         run.stamped = false;
         if (sessionId === S.current) renderTranscript();

@@ -13,6 +13,7 @@
     "start": "electron .",
     "test": "node --test \"test/*.test.js\"",
     "e2e": "node test/e2e-run.mjs",
+    "test:layout": "electron test/layout.cjs",
     "shot": "electron . --screenshot=shot.png",
     "dist": "electron-builder --win portable",
     "dist:mac": "electron-builder --mac dmg zip",

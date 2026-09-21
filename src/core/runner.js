@@ -4,6 +4,7 @@
 // Shared by the desktop app and the CLI.
 const fs = require('fs');
 const path = require('path');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const api = require('./api');
 const { diffLines } = require('./diff');
@@ -51,6 +52,7 @@ class Run {
     this.changes = new Map(); // absolute path -> { before, after }
     this.controller = new AbortController();
     this.streamDone = new Promise((resolve) => { this.markStreamDone = resolve; });
+    this.heartbeatJob = null;
   }
 
   emit(event, data) {
@@ -59,15 +61,27 @@ class Run {
 
   async start(body) {
     try {
-      await this.consume(await api.startRun(this.sessionId, body, this.controller.signal));
-      if (!this.ended && this.runId && !this.controller.signal.aborted) {
-        // The connection dropped. The run goes on on the server: attach again.
-        // The buffer replays the whole run, so the listener redraws the turn.
-        this.emit('client.reconnecting', {});
-        await this.consume(await api.runEvents(this.runId, this.controller.signal));
+      let attempts = 0;
+      while (!this.ended && !this.controller.signal.aborted) {
+        try {
+          const replay = Boolean(this.runId);
+          const events = replay
+            ? await api.runEvents(this.runId, this.controller.signal)
+            : await api.startRun(this.sessionId, body, this.controller.signal);
+          // Redraw only once the replay is available; retain the transcript
+          // while offline. Keep handled calls so replay never executes twice.
+          if (replay) this.emit('client.reconnecting', {});
+          await this.consume(events);
+          attempts = 0;
+        } catch (err) {
+          // Never repeat a start POST: it could create a second paid turn.
+          if (!this.runId || !err.transient || this.controller.signal.aborted) throw err;
+        }
+        if (this.ended || !this.runId) break;
+        await this.retryDelay(attempts++);
       }
     } catch (err) {
-      if (err.name !== 'AbortError') {
+      if (!this.ended && err.name !== 'AbortError') {
         this.emit('client.error', { message: err.message, status: err.status || null, code: err.code || null });
       }
     }
@@ -75,15 +89,36 @@ class Run {
     // answered, and a command still running is of no use to anyone.
     this.markStreamDone();
     this.controller.abort();
-    await Promise.allSettled([...this.pending]);
+    await Promise.allSettled([...this.pending, this.heartbeatJob]);
     const files = this.fileChanges();
     if (files.length) this.emit('client.files_changed', { run_id: this.runId, files });
     this.emit('client.finished', { run_id: this.runId, reason: this.ended ? this.ended.reason : null });
   }
 
+  retryDelay(attempt) {
+    const ms = Math.min(30000, 1000 * 2 ** Math.min(attempt, 5));
+    return delay(ms + Math.floor(Math.random() * ms * 0.2), undefined, { signal: this.controller.signal });
+  }
+
+  async keepAlive() {
+    while (!this.controller.signal.aborted && !this.ended) {
+      try {
+        await api.heartbeat(this.runId, this.controller.signal);
+      } catch (err) {
+        // Older servers do not expose heartbeats yet. Other permanent errors
+        // are resolved by the event stream; an outage is retried below.
+        if (!err.transient) return;
+      }
+      try { await delay(15000, undefined, { signal: this.controller.signal }); } catch { return; }
+    }
+  }
+
   async consume(events) {
     for await (const { event, data } of events) {
-      if (event === 'run.started') this.runId = data.run_id;
+      if (event === 'run.started') {
+        this.runId = data.run_id;
+        if (!this.heartbeatJob) this.heartbeatJob = this.keepAlive();
+      }
       if (event === 'run.ended') this.ended = data;
       this.emit(event, data);
       if (event === 'tool.call' && data.executor === 'client'
@@ -122,12 +157,28 @@ class Run {
     } catch (err) {
       result = { output: `The client could not run this tool: ${err.message}`, is_error: true };
     }
-    try {
-      await api.toolResult(this.runId, call.id, result.output, result.is_error);
-    } catch (err) {
-      // After a cancel or a timeout the server no longer waits for the result.
-      if (err.code !== 'call_not_pending' && err.code !== 'not_running') {
-        this.emit('client.error', { message: `Could not send the ${call.name} result: ${err.message}` });
+    // Retain the result until delivery succeeds. Retrying the POST must never
+    // re-run the command or ask for approval again.
+    let rejectedOutput = false;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await api.toolResult(this.runId, call.id, result.output, result.is_error, this.controller.signal);
+        break;
+      } catch (err) {
+        if (this.controller.signal.aborted || err.code === 'call_not_pending' || err.code === 'not_running') break;
+        if (!rejectedOutput && (err.status === 413 || err.code === 'invalid_body')) {
+          rejectedOutput = true;
+          result = { output: `The tool ran, but its output could not be returned: ${err.message}`, is_error: true };
+          continue;
+        }
+        if (!err.transient) {
+          this.emit('client.error', { message: `Could not send the ${call.name} result: ${err.message}` });
+          // No usable result can reach this run. Stop heartbeats as well,
+          // rather than leaving the server waiting on this call forever.
+          this.controller.abort();
+          break;
+        }
+        try { await this.retryDelay(attempt); } catch { break; }
       }
     }
   }
