@@ -48,7 +48,10 @@ Windows, macOS and Linux. MIT licensed.
 
 **Input that isn't just text**
 - Attach files, drag-and-drop, paste images straight into the composer
-- Capture a screenshot from inside the app and attach it
+- Screenshots from inside the app: drag out a region (Ctrl+Shift+S), pick one
+  open window, or take a whole screen — then the model looks at it
+- Images the agent makes in your folder are drawn in the conversation, and
+  what `view_image` looked at is shown in its step
 - Voice input, transcribed by the API
 
 **Sessions and cost**
@@ -268,7 +271,7 @@ Screenshot and debugging flags:
 --open=<session id>      open straight into a session
 --screenshot=out.png     render, capture, quit
 --shot-delay=<ms>        wait before capturing (default 3500)
---shot-menu=models|permissions|settings
+--shot-menu=models|permissions|settings|attach|shot
 --shot-cwd=<dir>         --shot-prompt=<text>    --shot-model=<id>
 --shot-permission=auto   --shot-expand           --shot-scroll=<n>
 --shot-attach=<path>     --theme=dark|light|hacker

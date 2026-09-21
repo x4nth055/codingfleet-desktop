@@ -812,6 +812,24 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 }
 .markdown img.ready { opacity: 1; }
 .markdown img.broken { cursor: default; background: none; }
+.markdown img[hidden] { display: none; }
+
+/* What view_image looked at, inside its tool step. */
+.tool-image {
+  display: block;
+  max-width: min(100%, 420px);
+  max-height: 260px;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  object-fit: contain;
+  cursor: zoom-in;
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+.tool-image.ready { opacity: 1; }
 
 .viewer {
   position: fixed;
@@ -869,6 +887,44 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .attach-menu { width: 320px; }
 .attach-note { margin: 4px 4px 6px; padding: 9px 11px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); font-size: 12px; line-height: 1.45; color: var(--muted); }
 .attach-note strong { color: var(--text); font-weight: 600; }
+
+/* Choosing a window to take a picture of. */
+.menu-rows { display: contents; }
+.shot-picker { width: min(760px, 92vw); }
+.shot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 2px;
+  margin-bottom: 14px;
+}
+.shot-card {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.shot-card:hover { border-color: var(--accent); }
+.shot-frame {
+  display: grid;
+  place-items: center;
+  height: 110px;
+  border-radius: 7px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.shot-frame img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.shot-frame .icon { color: var(--faint); }
+.shot-name { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; }
+.shot-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shot-icon { width: 16px; height: 16px; flex: none; }
 .att.ref { border-style: dashed; }
 .att.ref .att-icon { color: var(--green); }
 .drop-card span:last-child { max-width: 360px; text-align: center; }

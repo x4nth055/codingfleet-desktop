@@ -1,14 +1,15 @@
 'use strict';
 const {
-  app, BrowserWindow, Menu, Notification, clipboard, desktopCapturer, dialog, ipcMain, nativeImage, safeStorage, screen,
-  session, shell,
+  app, BrowserWindow, Menu, Notification, clipboard, dialog, ipcMain, nativeImage, safeStorage, session, shell,
 } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const api = require('../core/api');
+const capture = require('./capture');
 const config = require('../core/config');
+const images = require('../core/images');
 const tools = require('../core/tools');
 const { LocalMcp } = require('../core/mcp');
 const { Run } = require('../core/runner');
@@ -17,7 +18,7 @@ const { revertRun } = require('../core/undo');
 // Development flags: --open=<session id>, --screenshot=<file.png>,
 // --shot-delay=<ms>, --shot-menu=models|permissions|settings,
 // --shot-cwd=<dir>, --shot-prompt=<text>, --shot-permission=auto, --shot-expand,
-// --shot-model=<model id> (not saved), --shot-menu=effort|folder|attach|agents|quota, --shot-scroll=top,
+// --shot-model=<model id> (not saved), --shot-menu=effort|folder|attach|shot|agents|quota, --shot-scroll=top,
 // --shot-attach=<path>[|<path>...] (attaches files on start).
 const argv = process.argv.slice(1);
 const flag = (name) => {
@@ -606,6 +607,72 @@ async function uploadedImage(fileId) {
 
 const dataUrl = (image) => `data:${image.type};base64,${image.data.toString('base64')}`;
 
+// ---------------------------------------------------------------------------
+// Images in the session's own folder. The agent writes ![a chart](out/plot.png)
+// for a file it made there, and the window, which has no filesystem, asks for
+// the picture. Only files inside that folder: an answer that names another path
+// is not a reason to read it, and the folder is the one this process holds for
+// the session, never a folder the window names.
+// ---------------------------------------------------------------------------
+const INLINE_MAX_SIDE = 1400;     // shown in the conversation
+const VIEWER_MAX_SIDE = 2600;     // opened over the app
+const INLINE_MAX_BYTES = 4 * 1024 * 1024;
+const VIEWER_MAX_BYTES = 12 * 1024 * 1024;
+const LOCAL_IMAGE_MAX_FILE = 40 * 1024 * 1024;
+
+async function localImage({ sessionId, path: shown, full } = {}) {
+  const src = images.localImageSource(shown);
+  const cwd = (state.sessions[sessionIdOf(sessionId)] || {}).cwd;
+  if (!src) throw new Error('Not an image file.');
+  if (!cwd) throw new Error('This session has no folder on this computer.');
+  const file = tools.resolvePath(cwd, src);
+  if (!tools.isInside(cwd, file)) throw new Error(`${src} is outside the session folder.`);
+  let stat;
+  try {
+    stat = await fs.promises.stat(file);
+  } catch {
+    throw new Error(`${src} is not there.`);
+  }
+  if (!stat.isFile()) throw new Error(`${src} is not a file.`);
+  if (stat.size > LOCAL_IMAGE_MAX_FILE) throw new Error(`${src} is too large to show.`);
+
+  const limit = full ? VIEWER_MAX_BYTES : INLINE_MAX_BYTES;
+  const bytes = await fs.promises.readFile(file);
+  const found = { name: path.basename(file), bytes: stat.size, mtime: stat.mtimeMs };
+  const untouched = () => ({ ...found, url: `data:${images.mimeOf(file)};base64,${bytes.toString('base64')}` });
+  // An animation or a drawing: an image decoder would flatten the one and
+  // rasterize the other, and the window draws both as they are.
+  if (images.keepsAsIs(file)) {
+    if (bytes.length > limit) throw new Error(`${src} is too large to show.`);
+    return untouched();
+  }
+  const image = nativeImage.createFromBuffer(bytes);
+  if (image.isEmpty()) {
+    // A format this decoder does not read. The window's is newer; let it try.
+    if (bytes.length > limit) throw new Error(`${src} could not be read.`);
+    return untouched();
+  }
+  const size = image.getSize();
+  const side = full ? VIEWER_MAX_SIDE : INLINE_MAX_SIDE;
+  const scale = Math.min(1, side / Math.max(size.width, size.height));
+  const sized = scale < 1
+    ? image.resize({
+      width: Math.max(1, Math.round(size.width * scale)),
+      height: Math.max(1, Math.round(size.height * scale)),
+      quality: 'best',
+    })
+    : image;
+  if (scale === 1 && bytes.length <= limit) return { ...untouched(), ...sized.getSize() };
+  let data = sized.toPNG();
+  for (const quality of [92, 80, 65]) {
+    if (data.length <= limit) break;
+    data = sized.toJPEG(quality);
+  }
+  if (data.length > limit) throw new Error(`${src} is too large to show.`);
+  const type = data.length && data[0] === 0x89 ? 'image/png' : 'image/jpeg';
+  return { ...found, ...sized.getSize(), url: `data:${type};base64,${data.toString('base64')}` };
+}
+
 async function uploadBytes(data, name, type, sessionId) {
   if (!data || !data.length) throw new Error(`${name} is empty.`);
   if (data.length > MAX_UPLOAD_BYTES) throw new Error(`${name} is larger than 20 MB.`);
@@ -738,25 +805,30 @@ function registerIpc() {
     return small || dataUrl(image);
   });
 
-  // A picture of the screen the window is on, taken with the window out of the way.
-  handle('files:screenshot', async () => {
-    const display = screen.getDisplayMatching(win.getBounds());
-    const scale = display.scaleFactor || 1;
-    const size = { width: Math.round(display.size.width * scale), height: Math.round(display.size.height * scale) };
-    win.hide();
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 350));
-      const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
-      const source = sources.find((s) => String(s.display_id) === String(display.id)) || sources[0];
-      if (!source || source.thumbnail.isEmpty()) throw new Error('The screen could not be captured.');
-      const png = source.thumbnail.toPNG();
-      const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
-      return { name: `screenshot-${stamp}.png`, type: 'image/png', data: png, preview: previewOf(source.thumbnail) };
-    } finally {
-      win.show();
-      win.focus();
-    }
+  // What a screenshot can be taken of: the screens, and the open windows.
+  handle('files:screenTargets', () => capture.listTargets(win));
+
+  // A screenshot, attached to the message so the model can see it. A region or
+  // a window when one is asked for, otherwise the screen the app is on. The
+  // window is out of the way for a screen or a region, never for a window.
+  // null when the user pressed Esc instead of dragging a region.
+  handle('files:screenshot', async ({ mode, id } = {}) => {
+    const image = mode === 'region' ? await capture.captureRegion(win)
+      : mode === 'window' ? await capture.captureWindow(id)
+        : await capture.captureScreen(win, id);
+    if (!image) return null;
+    const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+    const kind = mode === 'region' ? 'region' : mode === 'window' ? 'window' : 'screen';
+    return {
+      name: `${kind}-${stamp}.png`,
+      type: 'image/png',
+      data: image.toPNG(),
+      preview: previewOf(image),
+    };
   });
+
+  // An image the agent made in the session's folder, for the conversation.
+  handle('files:localImage', (arg) => localImage(arg));
 
   // The window has no clipboard permission; copying goes through here.
   handle('clipboard:write', (text) => {

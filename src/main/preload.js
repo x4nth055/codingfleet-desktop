@@ -54,8 +54,10 @@ contextBridge.exposeInMainWorld('cf', {
   uploadData: call('files:uploadData'),
   deleteFile: call('files:delete'),
   image: call('files:image'),
+  localImage: call('files:localImage'),
   copyText: call('clipboard:write'),
   screenshot: call('files:screenshot'),
+  screenTargets: call('files:screenTargets'),
   // The path of a file dropped on the window (Electron no longer puts it on File).
   pathForFile: (file) => {
     try { return webUtils.getPathForFile(file) || ''; } catch { return ''; }

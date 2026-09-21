@@ -21,6 +21,7 @@ const ICON = {
   gauge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5a8 8 0 1 1 15 0"/><path d="M12 15l4-5"/></svg>',
   paperclip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>',
   monitor: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+  crop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M2 6h14a2 2 0 0 1 2 2v14"/></svg>',
   image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-9 9"/></svg>',
   upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>',
   robot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01M9.5 16.5h5"/></svg>',
@@ -261,8 +262,12 @@ function setMarkdown(node, text) {
     holder.remove();
     if (block && block !== node && !block.textContent.trim() && !block.querySelector('img')) block.remove();
   }
+  // A path instead of a URL is a file in the session's folder: nothing serves
+  // it, so the picture is read through the main process.
+  for (const img of node.querySelectorAll('img')) adoptLocalImage(img);
   for (const img of node.querySelectorAll('img')) {
     img.decoding = 'async';
+    if (img.dataset.local && !img.getAttribute('src')) continue;
     const known = imageSizes.get(img.src);
     if (known) {
       img.width = known.width;
@@ -276,6 +281,93 @@ function setMarkdown(node, text) {
     }, { once: true });
     img.addEventListener('error', () => img.classList.add('ready', 'broken'), { once: true });
   }
+}
+
+// ── Images in the session's folder ─────────────────────────────────────────
+// The agent writes ![a chart](out/plot.png) for an image it made on this
+// computer. Nothing serves that path and the window has no filesystem, so the
+// main process reads the file and sends the picture back. Each one is fetched
+// once and kept: streamed text redraws its markdown every frame.
+const localImages = new Map();        // `${sessionId}\n${path}` -> entry
+const LOCAL_IMAGE_RECHECK_MS = 4000;  // a file written again is picked up this soon
+
+function localImageEntry(sessionId, src) {
+  const key = `${sessionId}\n${src}`;
+  let entry = localImages.get(key);
+  if (!entry) {
+    entry = { key, sessionId, src, url: null, error: null, at: 0, pending: null };
+    localImages.set(key, entry);
+  }
+  if (!entry.pending && Date.now() - entry.at > LOCAL_IMAGE_RECHECK_MS) {
+    entry.pending = call(cf.localImage, { sessionId, path: src }).then((data) => {
+      entry.url = data.url;
+      entry.error = null;
+    }, (err) => {
+      entry.url = null;
+      entry.error = err.message || 'This image could not be read.';
+    }).then(() => {
+      entry.pending = null;
+      entry.at = Date.now();
+      for (const img of document.querySelectorAll('img[data-local]')) {
+        if (img.dataset.local === key) paintLocalImage(img, entry);
+      }
+    });
+  }
+  return entry;
+}
+
+function paintLocalImage(img, entry) {
+  if (entry.url) {
+    img.classList.remove('broken');
+    if (img.getAttribute('src') !== entry.url) {
+      img.addEventListener('load', () => img.classList.add('ready'), { once: true });
+      img.src = entry.url;
+    }
+  } else if (entry.error) {
+    // In a tool step the picture is an extra, not the message: drop it rather
+    // than leave a broken box where the agent already reported what it saw.
+    if (img.classList.contains('tool-image')) {
+      img.remove();
+      return;
+    }
+    img.removeAttribute('src');
+    img.classList.add('ready', 'broken');
+    img.alt = `${entry.src} — ${entry.error}`;
+    img.title = img.alt;
+  }
+}
+
+// Makes one <img> a picture of a local file, or leaves it alone when its src
+// is a URL. Returns whether it took it over.
+function adoptLocalImage(img, sessionId = S.current) {
+  const raw = img.getAttribute('src') || '';
+  const src = window.CF_IMAGES ? CF_IMAGES.localImageSource(raw) : null;
+  const folder = Boolean(sessionId && local(sessionId).cwd);
+  if (!src) {
+    // Half a path, because the answer is still being written. Keep it out of
+    // sight instead of letting the window load it and draw a broken box.
+    if (folder && raw && !/^[a-z][a-z0-9+.-]+:/i.test(raw)) {
+      img.removeAttribute('src');
+      img.hidden = true;
+      return true;
+    }
+    return false;
+  }
+  if (!folder) return false;
+  img.hidden = false;
+  img.removeAttribute('src');
+  img.dataset.local = `${sessionId}\n${src}`;
+  img.dataset.localPath = src;
+  img.alt = img.alt || src;
+  img.title = src;
+  paintLocalImage(img, localImageEntry(sessionId, src));
+  return true;
+}
+
+// The same picture, larger, for the viewer.
+function fullLocalImage(img) {
+  const [sessionId, src] = String(img.dataset.local || '').split('\n');
+  return call(cf.localImage, { sessionId, path: src, full: true }).then((data) => data.url);
 }
 
 function originOf(base) {
@@ -1950,6 +2042,23 @@ function outputBlock(output) {
   return codeBlock(JSON.stringify(output, null, 2));
 }
 
+// What view_image looked at, shown where the agent looked at it: a file in the
+// folder, read through the main process, or a picture on the web.
+function toolImage(source) {
+  const src = String(source == null ? '' : source);
+  if (!src) return null;
+  const img = el('img', 'tool-image');
+  img.decoding = 'async';
+  img.setAttribute('src', src);
+  img.alt = src;
+  img.title = src;
+  if (adoptLocalImage(img)) return img;
+  if (!/^https?:\/\//i.test(src)) return null;
+  img.addEventListener('load', () => img.classList.add('ready'), { once: true });
+  img.addEventListener('error', () => img.remove(), { once: true });
+  return img;
+}
+
 function toolBody(tool) {
   const body = el('div', 'tool-body');
   const args = tool.arguments || {};
@@ -1976,6 +2085,9 @@ function toolBody(tool) {
       break;
     case 'fs_read':
     case 'fs_glob':
+      break;
+    case 'view_image':
+      section(args.source || 'Image', toolImage(args.source));
       break;
     default:
       if (Object.keys(args).length) section('Arguments', codeBlock(JSON.stringify(args, null, 2)));
@@ -2468,15 +2580,131 @@ async function attachBlobs(blobs, fallbackName) {
   }
 }
 
-async function takeScreenshot() {
+// A screenshot, attached so the model can see it. `mode` is 'region' (the user
+// drags a rectangle), 'window' (one open window) or a screen.
+async function takeScreenshot(mode, id) {
   closeMenus();
   if (!roomFor(1)) return;
   try {
-    const shot = await call(cf.screenshot);
+    const shot = await call(cf.screenshot, { mode, id });
+    if (!shot) return;   // the region was cancelled with Esc
     addAttachment({ name: shot.name, size: shot.data.length, kind: 'image', preview: shot.preview },
       (sessionId) => call(cf.uploadData, { name: shot.name, type: shot.type, data: shot.data, sessionId }));
   } catch (err) {
     showBanner(err.message);
+  }
+}
+
+// One open window, chosen from its picture. Resolves to a source id, or null.
+function pickWindowDialog(windows) {
+  return new Promise((resolve) => {
+    const overlay = el('div', 'overlay');
+    const modal = el('div', 'modal shot-picker');
+    modal.setAttribute('role', 'dialog');
+    const head = el('div', 'modal-head');
+    head.append(el('h2', null, 'Which window?'));
+    modal.append(head, el('p', 'modal-intro', 'The picture is taken of the whole window, even where '
+      + 'something covers it.'));
+    const close = (answer) => {
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      resolve(answer);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        close(null);
+      }
+    };
+    if (windows.length) {
+      const grid = el('div', 'shot-grid');
+      for (const item of windows) {
+        const card = el('button', 'shot-card');
+        card.type = 'button';
+        const frame = el('div', 'shot-frame');
+        if (item.thumbnail) {
+          const img = el('img');
+          img.src = item.thumbnail;
+          img.alt = '';
+          frame.append(img);
+        } else {
+          frame.append(icon('monitor'));
+        }
+        const name = el('div', 'shot-name');
+        if (item.icon) {
+          const badge = el('img', 'shot-icon');
+          badge.src = item.icon;
+          badge.alt = '';
+          name.append(badge);
+        }
+        name.append(el('span', null, item.name));
+        card.title = item.name;
+        card.append(frame, name);
+        card.addEventListener('click', () => close(item.id));
+        grid.append(card);
+      }
+      modal.append(grid);
+    } else {
+      modal.append(el('p', 'confirm-text', 'No other window is open.'));
+    }
+    const cancel = el('button', 'btn', 'Cancel');
+    cancel.addEventListener('click', () => close(null));
+    const actions = el('div', 'modal-actions');
+    actions.append(el('div', 'bar-spacer'), cancel);
+    modal.append(actions);
+    overlay.append(modal);
+    overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) close(null); });
+    document.addEventListener('keydown', onKey, true);
+    document.body.append(overlay);
+    setTimeout(() => cancel.focus(), 0);
+  });
+}
+
+async function pickWindowShot() {
+  closeMenus();
+  if (!roomFor(1)) return;
+  let targets;
+  try {
+    targets = await call(cf.screenTargets);
+  } catch (err) {
+    showBanner(err.message);
+    return;
+  }
+  const id = await pickWindowDialog(targets.windows || []);
+  if (id) takeScreenshot('window', id);
+}
+
+// The screenshot choices, in the place the attach menu was.
+async function openScreenshotMenu() {
+  const menu = $('attachMenu');
+  const list = $('attachList');
+  list.replaceChildren();
+  const note = el('div', 'attach-note');
+  note.append(el('strong', null, 'Screenshot.'),
+    el('span', null, ' It is uploaded with your message, so the model can see it.'));
+  list.append(note);
+  menuOption(list, 'crop', 'Select a region', 'Drag a rectangle on any screen. Esc cancels.',
+    () => takeScreenshot('region'));
+  menuOption(list, 'monitor', 'A window', 'Pick one open window, covered or not', pickWindowShot);
+  const screens = el('div', 'menu-rows');
+  list.append(screens);
+  menu.hidden = false;
+  let targets = null;
+  try {
+    targets = await call(cf.screenTargets);
+  } catch { /* the screen row still works without the list */ }
+  if (menu.hidden) return;
+  const found = (targets && targets.screens) || [];
+  if (found.length < 2) {
+    menuOption(screens, 'monitor', 'The whole screen', 'The screen CodingFleet is on',
+      () => takeScreenshot('screen'));
+    return;
+  }
+  for (const item of found) {
+    menuOption(screens, 'monitor', item.label,
+      [`${item.width} × ${item.height}`, item.current ? 'where CodingFleet is' : '', item.primary ? 'main' : '']
+        .filter(Boolean).join(' · '),
+      () => takeScreenshot('screen', item.id));
   }
 }
 
@@ -2544,20 +2772,24 @@ function renderAttachments() {
   box.hidden = S.attachments.length === 0;
 }
 
+// One row of the attach menu: an icon, a name and a line about it.
+function menuOption(list, iconName, name, sub, run) {
+  const row = el('button', 'menu-item');
+  const main = el('div', 'mi-main');
+  main.append(el('div', 'mi-name', name), el('div', 'mi-sub', sub));
+  row.append(icon(iconName), main);
+  row.addEventListener('click', run);
+  list.append(row);
+  return row;
+}
+
 function openAttachMenu() {
   closeMenus();
   const menu = $('attachMenu');
   menu.style.left = `${$('attachButton').offsetLeft}px`;
   const list = $('attachList');
   list.replaceChildren();
-  const option = (iconName, name, sub, run) => {
-    const row = el('button', 'menu-item');
-    const main = el('div', 'mi-main');
-    main.append(el('div', 'mi-name', name), el('div', 'mi-sub', sub));
-    row.append(icon(iconName), main);
-    row.addEventListener('click', run);
-    list.append(row);
-  };
+  const option = (iconName, name, sub, run) => menuOption(list, iconName, name, sub, run);
   const target = attachTarget();
   if (target.mode === 'folder') {
     const where = target.cwd ? baseName(target.cwd) : 'your project folder';
@@ -2567,11 +2799,11 @@ function openAttachMenu() {
     list.append(note);
     option('file', 'Add files', 'Passed by path, nothing uploaded. Files outside the folder need your approval.',
       pickAttachments);
-    option('monitor', 'Screenshot', 'Uploaded, so the model can see it', takeScreenshot);
+    option('monitor', 'Screenshot', 'A region, a window or a whole screen', openScreenshotMenu);
     list.append(el('div', 'menu-empty', 'Images and PDF or Office documents are uploaded; the model reads them on CodingFleet.'));
   } else {
     option('upload', 'Upload to the sandbox', 'Any file: code, pages, data, images', pickAttachments);
-    option('monitor', 'Screenshot', 'Of the screen this window is on', takeScreenshot);
+    option('monitor', 'Screenshot', 'A region, a window or a whole screen', openScreenshotMenu);
     list.append(el('div', 'menu-empty', target.draft
       ? 'Files go into the new session\'s sandbox when you send. Or drop them anywhere, or paste an image.'
       : 'Or drop files anywhere, or paste an image.'));
@@ -3395,8 +3627,9 @@ function imageCard(file) {
 }
 
 // The whole image over the app. Esc, or a click anywhere, closes it.
-function openViewer({ src, fileId, name }) {
-  if (!src && !fileId) return;
+// `full` is a promise of a larger copy, shown as soon as it arrives.
+function openViewer({ src, fileId, name, full }) {
+  if (!src && !fileId && !full) return;
   closeViewer();
   const overlay = el('div', 'viewer');
   overlay.id = 'viewer';
@@ -3409,9 +3642,10 @@ function openViewer({ src, fileId, name }) {
   overlay.addEventListener('click', closeViewer);
   document.body.append(overlay);
   requestAnimationFrame(() => overlay.classList.add('open'));
-  if (fileId) {
-    call(cf.image, { fileId, full: true }).then((full) => {
-      if (overlay.isConnected) img.src = full;
+  const larger = fileId ? call(cf.image, { fileId, full: true }) : full;
+  if (larger) {
+    Promise.resolve(larger).then((url) => {
+      if (url && overlay.isConnected) img.src = url;
     }, () => {});
   }
 }
@@ -5170,13 +5404,23 @@ function wire() {
     if (!event.target.closest('.menu, .session-more, .pref-toggle, #modelButton, #effortButton, #permButton, #attachButton, #folderButton')) closeMenus();
   });
   document.addEventListener('click', (event) => {
-    const img = event.target.closest('.markdown img');
-    if (img && !img.classList.contains('broken')) openViewer({ src: img.currentSrc || img.src, name: img.alt });
+    const img = event.target.closest('.markdown img, .tool-image');
+    if (!img || img.classList.contains('broken')) return;
+    openViewer({
+      src: img.currentSrc || img.src,
+      name: img.dataset.localPath || img.alt,
+      full: img.dataset.local ? fullLocalImage(img) : null,
+    });
   });
   document.addEventListener('keydown', (event) => {
     if (event.ctrlKey && event.key.toLowerCase() === 'n') {
       event.preventDefault();
       newSession();
+    }
+    // The shortcut every screenshot tool has: drag a region into the message.
+    if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      takeScreenshot('region');
     }
     if (event.ctrlKey && event.key === ',') {
       event.preventDefault();
@@ -5263,6 +5507,10 @@ async function boot() {
   }
   if (S.init.shotMenu === 'folder') openFolderMenu();
   if (S.init.shotMenu === 'attach') openAttachMenu();
+  if (S.init.shotMenu === 'shot') {
+    openAttachMenu();
+    openScreenshotMenu();
+  }
   // Development: start a real session from the composer, as a user would.
   if (S.init.shotCwd) {
     S.draftCwd = S.init.shotCwd;
