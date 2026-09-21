@@ -32,8 +32,10 @@ class Run {
    * @param {(call) => 'allow'|'deny'|Promise<'allow'|'deny'>} o.approve
    * @param {(event: string, data: object) => void} o.onEvent
    * @param {Map} [o.localTools] Declared tool name -> { server, tool }: local MCP tools.
-   * @param {Map} [o.clientHandlers] Tool name -> async (args, { cwd, signal }) => { output, is_error }:
-   *   tools the host app runs itself (view_image needs an image decoder).
+   * @param {Map} [o.clientHandlers] Tool name -> async (args, { cwd, signal, call }) => { output, is_error }:
+   *   tools the host app runs itself (view_image needs an image decoder, a
+   *   screenshot needs the screen). `call` is the tool call, so a handler can
+   *   report progress of its own against the call's id.
    */
   constructor({ sessionId, cwd, approve, onEvent, localTools, clientHandlers }) {
     this.sessionId = sessionId;
@@ -103,7 +105,7 @@ class Run {
         const local = this.localTools.get(call.name);
         const own = this.clientHandlers.get(call.name);
         if (own) {
-          result = await own(call.arguments || {}, { cwd: this.cwd, signal: this.controller.signal });
+          result = await own(call.arguments || {}, { cwd: this.cwd, signal: this.controller.signal, call });
         } else if (local) {
           result = await local.server.call(local.tool, call.arguments, this.controller.signal);
         } else {

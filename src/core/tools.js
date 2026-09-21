@@ -253,6 +253,9 @@ function approvalReason(name, args, cwd) {
   if (name === 'view_image') {
     return isInside(cwd, resolvePath(cwd, args.source)) ? null : 'reads outside the project folder';
   }
+  // A picture of the screen can hold anything that is open on it, project or
+  // not, so it always waits for the user.
+  if (name === 'take_screenshot') return 'takes a picture of your screen';
   if (name === 'fs_read' || name === 'fs_glob') {
     return isInside(cwd, resolvePath(cwd, args.path)) && !path.isAbsolute(String(args.pat || ''))
       ? null

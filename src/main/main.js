@@ -476,6 +476,16 @@ async function viewLocalImage(args, { cwd }) {
     }
     return { output: { data }, is_error: false };
   }
+  const shrunk = forVision(image);
+  return shrunk
+    ? { output: shrunk, is_error: false }
+    : { output: `${source} could not be made small enough to send.`, is_error: true };
+}
+
+// A picture the model can be given: small enough for its vision input and for
+// one tool result. Returns { data, width, height }, or null when even the
+// smallest try is too big.
+function forVision(image) {
   const { width, height } = image.getSize();
   let side = Math.min(VIEW_MAX_SIDE, Math.max(width, height));
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -490,14 +500,57 @@ async function viewLocalImage(args, { cwd }) {
     }
     if (Math.ceil(data.length / 3) * 4 <= VIEW_MAX_B64) {
       const { width: w, height: h } = sized.getSize();
-      return { output: { data: data.toString('base64'), width: w, height: h }, is_error: false };
+      return { data: data.toString('base64'), width: w, height: h };
     }
     side = Math.round(side * 0.7);
   }
-  return { output: `${source} could not be made small enough to send.`, is_error: true };
+  return null;
 }
 
-const CLIENT_HANDLERS = new Map([['view_image', viewLocalImage]]);
+// take_screenshot: the agent asks for a picture of the screen, or of one
+// window by part of its title. Only the desktop app is offered this tool, and
+// the user approves the call like any other, unless they allowed screenshots
+// for the session.
+async function screenshotForAgent(args, { call, sessionId } = {}) {
+  const wanted = String(args.window || '').trim();
+  let image;
+  let taken;
+  if (wanted) {
+    const { windows } = await capture.listTargets(win);
+    const hit = windows.find((w) => w.name.toLowerCase().includes(wanted.toLowerCase()));
+    if (!hit) {
+      const open = windows.map((w) => w.name).slice(0, 20).join(', ');
+      return { output: `No open window matches '${wanted}'. Open windows: ${open || 'none'}.`, is_error: true };
+    }
+    image = await capture.captureWindow(hit.id);
+    taken = hit.name;
+  } else {
+    const { screens } = await capture.listTargets(win);
+    const index = Number(args.screen);
+    const pick = index >= 1 && screens[index - 1] ? screens[index - 1] : screens.find((s) => s.current);
+    image = await capture.captureScreen(win, pick && pick.id);
+    taken = pick ? pick.label : 'the screen';
+  }
+  if (!image || image.isEmpty()) return { output: 'The screen could not be captured.', is_error: true };
+  const shrunk = forVision(image);
+  if (!shrunk) return { output: 'The picture could not be made small enough to send.', is_error: true };
+  // What the agent saw, shown in its step in the conversation.
+  if (call && call.id && sessionId) {
+    send('run:event', {
+      sessionId,
+      event: 'client.tool_image',
+      data: { id: call.id, url: previewOf(image), title: taken },
+    });
+  }
+  return { output: { data: shrunk.data, width: shrunk.width, height: shrunk.height }, is_error: false };
+}
+
+// The tools this process runs itself, for one session: a decoder for an image
+// file, and the screen for a screenshot.
+const handlersFor = (sessionId) => new Map([
+  ['view_image', viewLocalImage],
+  ['take_screenshot', (args, context) => screenshotForAgent(args, { ...context, sessionId })],
+]);
 
 const FINISHED_TEXT = {
   completed: 'The agent finished.',
@@ -992,7 +1045,7 @@ function registerIpc() {
       sessionId,
       cwd: local.cwd,
       localTools,
-      clientHandlers: CLIENT_HANDLERS,
+      clientHandlers: handlersFor(sessionId),
       approve: (call) => approve(sessionId, local.cwd, call, localTools),
       onEvent: (event, data) => {
         send('run:event', { sessionId, event, data });

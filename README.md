@@ -52,6 +52,9 @@ Windows, macOS and Linux. MIT licensed.
   open window, or take a whole screen — then the model looks at it
 - Images the agent makes in your folder are drawn in the conversation, and
   what `view_image` looked at is shown in its step
+- The agent can ask for a screenshot itself when the answer is on your screen —
+  it asks first, you see the picture it got, and the tool only exists while
+  tools run on your computer, never in a cloud sandbox
 - Voice input, transcribed by the API
 
 **Sessions and cost**

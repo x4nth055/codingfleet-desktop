@@ -123,3 +123,18 @@ test('approval: reads inside the folder run; commands, writes and outside reads 
   assert.equal(tools.approvalReason('fs_write', { path: 'a.txt', content: '' }, cwd), 'changes files');
   assert.equal(tools.approvalReason('fs_edit', { path: 'a.txt', old: 'a', new: 'b' }, cwd), 'changes files');
 });
+
+test('a screenshot always waits for the user, wherever the folder is', () => {
+  const cwd = tmp();
+  assert.equal(tools.approvalReason('take_screenshot', {}, cwd), 'takes a picture of your screen');
+  assert.equal(tools.approvalReason('take_screenshot', { window: 'Chrome' }, cwd),
+    'takes a picture of your screen');
+  // It is not one of the tools this module runs: the app takes the picture.
+  assert.equal(tools.CLIENT_TOOLS.has('take_screenshot'), false);
+});
+
+test('a tool this computer does not have is refused by name', async () => {
+  const result = await tools.executeTool('take_screenshot', {}, { cwd: tmp() });
+  assert.equal(result.is_error, true);
+  assert.match(result.output, /cannot run on this computer/);
+});

@@ -1813,6 +1813,7 @@ const VERBS = {
   update_memory: () => ['Update memory', ''],
   credit_status: () => ['Check credits', ''],
   view_image: (a) => ['View image', a.source],
+  take_screenshot: (a) => ['Take a screenshot', a.window ? `window: ${a.window}` : 'the screen'],
   generate_image: (a) => ['Generate image', a.prompt],
   read_file: (a) => ['Read attachment', a.path || a.file_id],
 };
@@ -1838,6 +1839,7 @@ const ALLOW_LABELS = {
   'runs a command': 'Allow all commands this session',
   'changes files': 'Allow all file changes this session',
   'reads outside the project folder': 'Allow reads outside the folder this session',
+  'takes a picture of your screen': 'Allow screenshots this session',
   'uses a local MCP tool': 'Allow local MCP tools this session',
 };
 
@@ -1845,6 +1847,7 @@ const REASONS = {
   'runs a command': 'wants to run a command',
   'changes files': 'wants to change a file',
   'reads outside the project folder': 'wants to read outside the project folder',
+  'takes a picture of your screen': 'wants to take a picture of your screen',
   'uses a local MCP tool': 'wants to use a tool from a local MCP server',
 };
 
@@ -2059,6 +2062,15 @@ function toolImage(source) {
   return img;
 }
 
+// A picture already in hand, shown in a tool step.
+function shownImage(url, name) {
+  const img = el('img', 'tool-image ready');
+  img.decoding = 'async';
+  img.src = url;
+  img.alt = name || 'Screenshot';
+  return img;
+}
+
 function toolBody(tool) {
   const body = el('div', 'tool-body');
   const args = tool.arguments || {};
@@ -2088,6 +2100,11 @@ function toolBody(tool) {
       break;
     case 'view_image':
       section(args.source || 'Image', toolImage(args.source));
+      break;
+    case 'take_screenshot':
+      // The picture comes from the main process when the call runs, so there
+      // is nothing to show for a past run.
+      if (tool.image) section(tool.imageTitle || 'Screenshot', shownImage(tool.image));
       break;
     default:
       if (Object.keys(args).length) section('Arguments', codeBlock(JSON.stringify(args, null, 2)));
@@ -2292,6 +2309,10 @@ function onRunEvent({ sessionId, event, data }) {
       break;
     case 'client.tool_denied':
       updateTool(sessionId, data.id, { status: 'denied' });
+      break;
+    // The picture take_screenshot just took, so the step shows what the agent saw.
+    case 'client.tool_image':
+      updateTool(sessionId, data.id, { image: data.url, imageTitle: data.title, open: true });
       break;
     case 'tool.result': {
       const tool = findTool(sessionId, data.id);
