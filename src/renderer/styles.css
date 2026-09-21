@@ -53,7 +53,7 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .del, .bad { color: var(--red); }
 
 .app { display: grid; grid-template-columns: 272px minmax(0, 1fr); height: 100vh; }
-.app.with-panel { grid-template-columns: 272px minmax(0, 1fr) minmax(340px, 30vw); }
+.app.with-panel { grid-template-columns: 272px minmax(0, 1fr) var(--agents-panel-width, minmax(340px, 30vw)); }
 /* With the panel open the window buttons sit over the panel, not the main column. */
 .app.with-panel .topbar { padding-right: 22px; }
 
@@ -673,6 +673,8 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 
 /* ── Sub-agents panel ────────────────────────────────────── */
 .agents-panel {
+  position: relative;
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -680,6 +682,32 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
   background: var(--sidebar);
   border-left: 1px solid var(--line);
 }
+/* Drag the left edge of the panel to set its width. */
+.ap-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 9px;
+  z-index: 6;
+  cursor: ew-resize;
+  -webkit-app-region: no-drag;
+}
+.ap-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background .12s;
+}
+.ap-resizer:hover::after { background: var(--accent); width: 2px; }
+body.panel-resizing { cursor: ew-resize; user-select: none; }
+body.panel-resizing * { cursor: ew-resize !important; }
+/* The width buttons in the panel's header. */
+.ap-width { display: flex; align-items: center; gap: 2px; flex: none; }
 .ap-head {
   height: 44px;
   flex: none;
@@ -690,12 +718,28 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
   border-bottom: 1px solid var(--line);
 }
 .platform-darwin .ap-head { padding-right: 14px; }
-.ap-title { font-weight: 600; font-size: 13.5px; }
-.ap-count { font-size: 12px; color: var(--faint); }
-.ap-tabs { flex: none; display: flex; gap: 6px; padding: 10px 12px 8px; overflow-x: auto; border-bottom: 1px solid var(--line); }
-.ap-tabs::-webkit-scrollbar { height: 0; }
-.ap-tab {
+.ap-title { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ap-count { font-size: 12px; color: var(--faint); flex: none; }
+/* A very narrow panel keeps its buttons: only the label gives way. */
+@container (max-width: 380px) {
+  .ap-head .icon, .ap-count { display: none; }
+}
+/* Tabs wrap onto more rows, so every sub-agent stays visible and clickable. */
+.ap-tabs {
   flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px 8px;
+  max-height: 116px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--line);
+}
+.ap-tabs::-webkit-scrollbar { width: 0; height: 0; }
+.ap-tab {
+  flex: 0 1 auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -921,6 +965,15 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
   overflow: hidden;
 }
 .shot-frame img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.shot-frame .icon { color: var(--faint); }
+.shot-name { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; }
+.shot-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shot-icon { width: 16px; height: 16px; flex: none; }
+.att.ref { border-style: dashed; }
+.att.ref .att-icon { color: var(--green); }
+.drop-card span:last-child { max-width: 360px; text-align: center; }
+.attach-menu .mi-sub { white-space: normal; }
+t-frame img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .shot-frame .icon { color: var(--faint); }
 .shot-name { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; }
 .shot-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

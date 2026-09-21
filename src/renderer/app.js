@@ -29,6 +29,8 @@ const ICON = {
   eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>',
   compress: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>',
+  wider: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-6 6 6 6M12 6l-6 6 6 6"/></svg>',
+  narrower: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l6 6-6 6M12 6l6 6-6 6"/></svg>',
   card: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3 10h18M7 15h3"/></svg>',
   key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3M17 6l3 3M14.5 8.5l2.5 2.5"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
@@ -1592,6 +1594,73 @@ function agentAddTool(agent, tool) {
   agent.items.push(group);
 }
 
+// ── Panel width ────────────────────────────────────────────────────────────
+// The panel on the right can be widened with its two header buttons or by
+// dragging its left edge. The chosen width is remembered between runs.
+const PANEL_WIDTH_KEY = 'cf.panel-width';
+const PANEL_MIN_WIDTH = 280;
+const PANEL_STEP = 80;
+let panelWidth = null;      // px once the user has chosen one; null = the default
+
+const panelWidthMax = () => Math.max(PANEL_MIN_WIDTH, Math.round(window.innerWidth * 0.8));
+
+function storedPanelWidth() {
+  if (panelWidth != null) return panelWidth;
+  try {
+    const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY));
+    if (Number.isFinite(saved) && saved > 0) panelWidth = saved;
+  } catch { /* nothing remembered */ }
+  return panelWidth;
+}
+
+function applyPanelWidth(px) {
+  panelWidth = Math.round(Math.min(panelWidthMax(), Math.max(PANEL_MIN_WIDTH, px)));
+  document.documentElement.style.setProperty('--agents-panel-width', `${panelWidth}px`);
+  return panelWidth;
+}
+
+function savePanelWidth() {
+  try { localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth)); } catch { /* kept for this run only */ }
+}
+
+function restorePanelWidth() {
+  const saved = storedPanelWidth();
+  if (saved != null) applyPanelWidth(saved);
+}
+
+function stepPanelWidth(direction) {
+  const panel = $('agentsPanel');
+  const current = panelWidth != null ? panelWidth
+    : panel && !panel.hidden ? Math.round(panel.getBoundingClientRect().width) : 380;
+  applyPanelWidth(current + direction * PANEL_STEP);
+  savePanelWidth();
+}
+
+// Dragging the edge: the pointer events live on the document, so the drag
+// survives the panel being re-rendered while a sub-agent is working.
+function startPanelDrag(event) {
+  const panel = $('agentsPanel');
+  if (!panel || event.button !== 0) return;
+  event.preventDefault();
+  const startX = event.clientX;
+  const startWidth = Math.round(panel.getBoundingClientRect().width);
+  document.body.classList.add('panel-resizing');
+  const move = (e) => {
+    e.preventDefault();
+    applyPanelWidth(startWidth + (startX - e.clientX));
+  };
+  const up = () => {
+    document.body.classList.remove('panel-resizing');
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    document.removeEventListener('pointercancel', up);
+    savePanelWidth();
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+  document.addEventListener('pointercancel', up);
+}
+
 function openPanel(agentId) {
   S.panel = { open: true, agentId: agentId || S.panel.agentId };
   renderPanel();
@@ -1668,13 +1737,27 @@ function renderPanel() {
 
   panel.replaceChildren();
   panel.dataset.agent = agent.id;
+  const grip = el('div', 'ap-resizer');
+  grip.title = 'Drag to resize the panel';
+  grip.addEventListener('pointerdown', startPanelDrag);
+  panel.append(grip);
   const head = el('div', 'ap-head drag');
   const close = el('button', 'icon-button');
   close.title = 'Close the panel';
   close.innerHTML = ICON.x;
   close.addEventListener('click', closePanel);
+  const widthGroup = el('div', 'ap-width');
+  const narrower = el('button', 'icon-button');
+  narrower.title = 'Make the panel narrower';
+  narrower.innerHTML = ICON.narrower;
+  narrower.addEventListener('click', () => stepPanelWidth(-1));
+  const wider = el('button', 'icon-button');
+  wider.title = 'Make the panel wider';
+  wider.innerHTML = ICON.wider;
+  wider.addEventListener('click', () => stepPanelWidth(1));
+  widthGroup.append(narrower, wider);
   head.append(icon('robot', 'icon'), el('span', 'ap-title', 'Sub-agents'),
-    el('span', 'ap-count', String(agents.length)), el('div', 'top-spacer'), close);
+    el('span', 'ap-count', String(agents.length)), el('div', 'top-spacer'), widthGroup, close);
   head.querySelector('.icon').style.cssText = 'width:16px;height:16px;color:var(--accent)';
   panel.append(head);
 
@@ -5482,6 +5565,8 @@ function wire() {
     }
   });
   window.addEventListener('focus', () => scheduleLiveRefresh());
+  // A window made smaller than the chosen panel width takes the panel back down.
+  window.addEventListener('resize', () => { if (panelWidth != null) applyPanelWidth(panelWidth); });
   // Back online: fill in what a start without a connection could not load.
   window.addEventListener('online', () => {
     if (!S.settings.hasKey) return;
@@ -5509,6 +5594,7 @@ async function boot() {
   S.draftCwd = S.init.state.lastCwd || null;
   wire();
   restoreDraft();
+  restorePanelWidth();
   renderAccount();
   renderMain();
   if (!S.settings.hasKey) {
