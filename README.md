@@ -260,6 +260,7 @@ microphone (for voice input) and no other device.
 ```bash
 npm test          # Tools, approvals, reconnects, result retries, MCP, diffs, undo, cost
 npm run test:layout # Isolated render checks across themes and window sizes
+npm run test:transcript # Where a turn's tool calls sit in its answer
 npm run e2e       # a real run against the API (needs CODINGFLEET_API_KEY)
 ```
 

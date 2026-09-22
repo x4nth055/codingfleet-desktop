@@ -24,6 +24,13 @@ contextBridge.exposeInMainWorld('cf', {
   } }),
   onRunEvent: () => {}, onOpenSession: () => {}, onGitChanged: () => {},
   setState: async () => ({ ok: true }),
+  // A session's saved history, as the app reads it when it opens or refreshes
+  // one. Its answer is the one test/transcript.cjs has this window draw itself,
+  // so the reload has something to keep instead of the server's flat copy.
+  messages: async () => ({ ok: true, data: { compactions: [], messages: [
+    { role: 'user', text: 'Rework the sidebar.', created_at: '2026-09-22T10:00:00Z' },
+    { role: 'assistant', text: 'Drawing it as it happened.', created_at: '2026-09-22T10:11:55Z', tools: [] },
+  ] } }),
   gitStatus: async () => ({ ok: true, data: SUMMARY }),
   gitDiff: async () => ({ ok: true, data: {
     path: 'src/renderer/app.js',

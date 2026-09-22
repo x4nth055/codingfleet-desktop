@@ -576,7 +576,7 @@ async function reloadTranscript(id) {
   try {
     const data = await call(cf.messages, id);
     if (S.running.has(id)) return; // this app started a run meanwhile
-    S.transcripts.set(id, fromHistory(id, data.messages || [], data.compactions || []));
+    S.transcripts.set(id, rebuiltTranscript(id, data));
   } catch {
     return; // keep what is shown; the next tick tries again
   } finally {
@@ -4289,7 +4289,7 @@ async function loadSessionHistory(id) {
   let failed = null;
   try {
     const data = await call(cf.messages, id);
-    S.transcripts.set(id, [...fromHistory(id, data.messages || [], data.compactions || []), ...pending]);
+    S.transcripts.set(id, [...rebuiltTranscript(id, data), ...pending]);
     const known = S.sessions.find((x) => x.id === id);
     S.seenAnswer.set(id, (known && known.last_message_at) || null);
     S.loaded.add(id);

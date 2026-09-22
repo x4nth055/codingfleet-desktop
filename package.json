@@ -14,6 +14,7 @@
     "test": "node --test \"test/*.test.js\"",
     "e2e": "node test/e2e-run.mjs",
     "test:layout": "electron test/layout.cjs",
+    "test:transcript": "electron test/transcript.cjs",
     "shot": "electron . --screenshot=shot.png",
     "predist": "node scripts/check-dist-lock.cjs",
     "dist": "electron-builder --win portable",
