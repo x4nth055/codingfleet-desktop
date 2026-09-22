@@ -96,12 +96,32 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+  cursor: pointer;
+  outline: 0;
 }
+.group-head:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
 .group-head:hover { background: var(--hover); color: var(--text); }
 .group-head .chev { transform: rotate(90deg); }
 .group-head.collapsed .chev { transform: none; }
 .group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-count { margin-left: auto; color: var(--faint); font-weight: 500; font-variant-numeric: tabular-nums; }
+/* New session in this folder. Kept in the layout at all times so the count
+   does not jump when the pointer arrives, as with a session's own menu. */
+.group-add {
+  width: 20px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity .12s ease, background .12s ease;
+}
+.group-add svg { width: 13px; height: 13px; }
+.group-head:hover .group-add,
+.group-head:focus-within .group-add,
+.group-add:focus-visible { opacity: 1; }
+.group-add:hover { background: var(--line-2); color: var(--text); }
 .session {
   width: 100%;
   display: grid;

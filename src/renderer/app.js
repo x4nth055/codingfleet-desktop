@@ -759,16 +759,41 @@ function renderSidebar() {
 
   for (const [name, sessions] of ordered) {
     const collapsed = S.collapsed.has(name);
-    const head = el('button', `group-head${collapsed ? ' collapsed' : ''}${name === 'Pinned' ? ' pinned' : ''}`);
+    // A div, not a button: the header carries a button of its own, and a
+    // button inside a button is not something a browser will render.
+    const head = el('div', `group-head${collapsed ? ' collapsed' : ''}${name === 'Pinned' ? ' pinned' : ''}`);
     const cwd = name === 'Pinned' ? null : local(sessions[0].id).cwd;
     head.title = cwd || name;
+    head.tabIndex = 0;
+    head.setAttribute('role', 'button');
     head.append(chevron());
     if (name === 'Pinned') head.append(icon('pin', 'icon group-icon'));
     head.append(el('span', 'group-name', name), el('span', 'group-count', String(sessions.length)));
-    head.addEventListener('click', () => {
+    // The folder is already known, so a new session in it is one click: the
+    // same thing as New session, with the folder picked for you.
+    if (cwd) {
+      const add = el('button', 'group-add');
+      add.title = `New session in ${cwd}`;
+      add.setAttribute('aria-label', `New session in ${name}`);
+      add.innerHTML = ICON.plus;
+      add.addEventListener('click', (event) => {
+        event.stopPropagation();
+        newSessionIn(cwd);
+      });
+      head.append(add);
+    }
+    const toggle = () => {
       if (collapsed) S.collapsed.delete(name);
       else S.collapsed.add(name);
       renderSidebar();
+    };
+    head.addEventListener('click', toggle);
+    head.addEventListener('keydown', (event) => {
+      if (event.target !== head) return; // the + button answers its own keys
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggle();
+      }
     });
     list.append(head);
     if (collapsed) continue;
@@ -1523,19 +1548,23 @@ function renderFooter(item) {
   if (item.model) node.append(el('span', null, modelLabel(item.model)));
   if (usage) {
     if (usage.credits != null) node.append(creditsLabel(usage, item.model));
-    const input = usage.prompt_tokens || 0;
-    const cacheRead = usage.cache_read_input_tokens || 0;
-    const cacheWrite = usage.cache_creation_input_tokens || 0;
+    // Anthropic reports its cache tokens beside the prompt and OpenAI-compatible
+    // providers report them inside it; COST knows which, so the total is right
+    // for both. See promptParts in cost.js.
+    const entry = entryOf(item.model);
+    const parts = COST.promptParts(usage, {
+      modelId: item.model, provider: entry && entry.provider ? entry.provider.name : '',
+    });
     const output = usage.completion_tokens || 0;
-    const total = input + cacheRead + cacheWrite + output;
+    const total = parts.prompt + output;
     const tokens = el('span', 'has-tip');
     tokens.tabIndex = 0;
     tokens.append(el('span', 'tip-anchor', fmtTokens(total)));
     const tip = el('span', 'tip');
     const rows = [
-      ['Input (not cached)', input],
-      ['Cache read', cacheRead],
-      ['Cache write', cacheWrite],
+      ['Input (not cached)', parts.fresh],
+      ['Cache read', parts.cacheRead],
+      ['Cache write', parts.cacheWrite],
       ['Output', output],
     ];
     if (usage.reasoning_tokens) rows.push(['of which reasoning', usage.reasoning_tokens, 'sub']);
@@ -3747,6 +3776,16 @@ async function stopRun() {
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────
+// A new session in a folder the sidebar already knows. Same as New session,
+// except the folder is chosen for us instead of being asked for.
+function newSessionIn(cwd) {
+  S.draftSandbox = false;
+  S.draftCwd = cwd;
+  S.init.state.lastCwd = cwd;
+  cf.setState({ lastCwd: cwd });
+  newSession();
+}
+
 function newSession() {
   closeMenus();
   hideBanner();

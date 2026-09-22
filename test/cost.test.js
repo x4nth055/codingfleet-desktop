@@ -5,7 +5,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const cost = require('../src/renderer/cost');
-const { fromModelPrice, fromHistory, rankAlternatives, round, WARN_CREDITS } = cost;
+const {
+  fromModelPrice, fromHistory, rankAlternatives, round, WARN_CREDITS, cacheApart, promptParts,
+} = cost;
 
 const rateOf = (m) => m.credits_per_20k_tokens || 0;
 
@@ -143,4 +145,50 @@ test('credits are rounded for reading, not for billing', () => {
   assert.equal(round(512.03), 512);
   assert.equal(round(3.14159), 3.1);
   assert.equal(round(0.04), 0);
+});
+
+// ── Tokens a run moved ─────────────────────────────────────────────────────
+// Anthropic reports the cache beside the prompt: input_tokens is neither what
+// was read from nor what was written to the cache, so the parts are disjoint.
+test('Claude reports the cache beside the prompt, so the parts add up', () => {
+  const usage = { prompt_tokens: 120, cache_read_input_tokens: 48000, cache_creation_input_tokens: 9000 };
+  assert.deepEqual(promptParts(usage, { modelId: 'claude-opus-5', provider: 'Anthropic' }),
+    { fresh: 120, cacheRead: 48000, cacheWrite: 9000, prompt: 57120 });
+});
+
+test('an Anthropic model is recognised by its provider or by its id', () => {
+  assert.ok(cacheApart('claude-opus-5', 'Anthropic'));
+  assert.ok(cacheApart('claude-sonnet-5', ''), 'the id alone can say so');
+  assert.ok(cacheApart('', 'Anthropic'));
+  assert.ok(!cacheApart('gpt-5.6-luna', 'OpenAI'));
+  assert.ok(!cacheApart('', ''));
+});
+
+// Everywhere else the cache hits and misses together are prompt_tokens, so the
+// cached part has to come out of it or the same tokens are counted twice.
+test('cache hits are inside the prompt elsewhere, so they are not counted again', () => {
+  const usage = { prompt_tokens: 50000, cache_read_input_tokens: 48000, cache_creation_input_tokens: 0 };
+  assert.deepEqual(promptParts(usage, { modelId: 'gpt-5.6-luna', provider: 'OpenAI' }),
+    { fresh: 2000, cacheRead: 48000, cacheWrite: 0, prompt: 50000 });
+});
+
+test('a prompt that is all cache still leaves a whole prompt', () => {
+  const parts = promptParts({ prompt_tokens: 48000, cache_read_input_tokens: 48000 },
+    { modelId: 'gemini-3.6-flash', provider: 'Google' });
+  assert.equal(parts.fresh, 0);
+  assert.equal(parts.prompt, 48000, 'the prompt stays what the provider charged for');
+});
+
+test('a provider that over-reports the cache never yields a negative input', () => {
+  const usage = { prompt_tokens: 1000, cache_read_input_tokens: 900, cache_creation_input_tokens: 400 };
+  assert.equal(promptParts(usage, { modelId: 'deepseek-v4.1-flash' }).fresh, 0);
+});
+
+test('a run with nothing cached is just its prompt', () => {
+  assert.deepEqual(promptParts({ prompt_tokens: 700 }, { modelId: 'claude-opus-5' }),
+    { fresh: 700, cacheRead: 0, cacheWrite: 0, prompt: 700 });
+});
+
+test('a run that says nothing about tokens moved none', () => {
+  assert.deepEqual(promptParts(null), { fresh: 0, cacheRead: 0, cacheWrite: 0, prompt: 0 });
 });

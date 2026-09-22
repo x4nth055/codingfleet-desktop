@@ -78,12 +78,49 @@
     return picks;
   }
 
+  // ── Token accounting ────────────────────────────────────────────────────
+  // Providers disagree about cache tokens, and it is the one place to get the
+  // sum wrong.
+  //
+  // Anthropic (Claude) counts them *beside* the prompt: its `input_tokens` is
+  // only what was neither read from nor written to the cache, and it reports
+  // the cache figures separately, so the three parts add up.
+  //
+  // OpenAI-compatible providers (OpenAI, Gemini, DeepSeek, ...) fold both
+  // kinds into `prompt_tokens` -- cache hits and misses together *are* the
+  // prompt. There, both cache figures are slices of it, and adding them again
+  // counts the same tokens twice.
+  const APART = /anthropic|claude/i;
+
+  /** True when this model's provider reports cache tokens beside the prompt. */
+  function cacheApart(modelId, provider) {
+    return APART.test(`${provider || ''} ${modelId || ''}`);
+  }
+
+  /**
+   * One run's numbers, split so they add up to the tokens that really moved.
+   * @param {object} usage prompt_tokens, cache_read_input_tokens, cache_creation_input_tokens
+   * @param {{modelId?: string, provider?: string}} who the model that ran
+   * @returns {{fresh: number, cacheRead: number, cacheWrite: number, prompt: number}}
+   */
+  function promptParts(usage, who = {}) {
+    const prompt = (usage && usage.prompt_tokens) || 0;
+    const cacheRead = (usage && usage.cache_read_input_tokens) || 0;
+    const cacheWrite = (usage && usage.cache_creation_input_tokens) || 0;
+    if (cacheApart(who.modelId, who.provider)) {
+      return { fresh: prompt, cacheRead, cacheWrite, prompt: prompt + cacheRead + cacheWrite };
+    }
+    return {
+      fresh: Math.max(0, prompt - cacheRead - cacheWrite), cacheRead, cacheWrite, prompt,
+    };
+  }
+
   // Credits are shown to a person, not billed from here: keep them readable.
   const round = (n) => (n >= 10 ? Math.round(n) : Math.round(n * 10) / 10);
 
   const api = {
     WARN_CREDITS, ASSUMED_STEPS, ASSUMED_OUTPUT, MAX_COST_FRACTION, MAX_IQ_DROP,
-    fromModelPrice, fromHistory, rankAlternatives, round,
+    fromModelPrice, fromHistory, rankAlternatives, round, cacheApart, promptParts,
   };
   root.CF_COST = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
