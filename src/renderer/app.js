@@ -573,8 +573,9 @@ async function reloadTranscript(id) {
   const box = $('transcript');
   const wasAtBottom = nearBottom();
   const offset = box.scrollTop;
+  let data;
   try {
-    const data = await call(cf.messages, id);
+    data = await call(cf.messages, id);
     if (S.running.has(id)) return; // this app started a run meanwhile
     S.transcripts.set(id, rebuiltTranscript(id, data));
   } catch {
@@ -582,10 +583,11 @@ async function reloadTranscript(id) {
   } finally {
     S.loading.delete(id);
   }
-  if (S.current !== id) return;
+  if (S.current !== id) return data;
   renderTranscript();
   if (!wasAtBottom) box.scrollTop = offset;
   updateScrollButton();
+  return data;
 }
 
 // Whether a turn is going in the open session somewhere else.
@@ -2415,9 +2417,19 @@ function onRunEvent({ sessionId, event, data }) {
   switch (event) {
     case 'client.recovering':
       if (!run) {
+        const transcript = transcriptOf(sessionId);
+        const startedAt = Date.parse(data.started_at);
+        const promptAt = transcript.findLastIndex((item) => item.type === 'user' && item.checkpointId
+          && Math.abs(Date.parse(item.at) - startedAt) < 60000);
+        if (promptAt >= 0) {
+          const checkpointId = transcript[promptAt].checkpointId;
+          let end = promptAt + 1;
+          while (end < transcript.length && transcript[end].checkpointId === checkpointId) end++;
+          transcript.splice(promptAt + 1, end - promptAt - 1);
+        }
         S.running.set(sessionId, {
           runId: data.run_id, started: Date.parse(data.started_at) || Date.now(),
-          turnStart: transcriptOf(sessionId).length,
+          turnStart: transcript.length,
         });
         S.remoteBusy.delete(sessionId);
         if (sessionId === S.current) renderMain();
@@ -2425,9 +2437,11 @@ function onRunEvent({ sessionId, event, data }) {
       }
       break;
     case 'client.recovered_finished':
-      reloadTranscript(sessionId).then(() => {
+      reloadTranscript(sessionId).then((history) => {
         if (data.status === 'error') {
-          if (data.progress?.text) addItem(sessionId, { type: 'assistant', text: data.progress.text, live: false });
+          if (data.progress?.text && !history?.messages?.some((message) => message.partial)) {
+            addItem(sessionId, { type: 'assistant', text: data.progress.text, live: false });
+          }
           addItem(sessionId, { type: 'error', text: data.error || 'The run stopped before it finished. Its partial progress is saved.' });
         }
       });
@@ -4199,6 +4213,7 @@ function fromHistory(sessionId, messages, compactions = []) {
   };
   for (const message of messages) {
     if (message.created_at) flushCompactions(message.created_at);
+    const firstItem = items.length;
     if (message.role === 'user') {
       const { text, refs } = splitReferences(message.text);
       items.push({
@@ -4211,6 +4226,9 @@ function fromHistory(sessionId, messages, compactions = []) {
       for (const steer of message.steers || []) {
         const parts = splitReferences(String(steer));
         items.push({ type: 'user', text: parts.text, files: parts.refs, steer: true });
+      }
+      if (message.checkpoint_id) {
+        for (const item of items.slice(firstItem)) item.checkpointId = message.checkpoint_id;
       }
       continue;
     }
@@ -4237,7 +4255,7 @@ function fromHistory(sessionId, messages, compactions = []) {
       }
       const entry = {
         id: null, group, name: tool.name, arguments: tool.arguments || {},
-        status: tool.ok ? 'done' : 'failed', history: true,
+        status: tool.state === 'called' ? 'cancelled' : tool.ok ? 'done' : 'failed', history: true,
       };
       if (tool.subagent && tool.subagent.id) {
         entry.agentId = tool.subagent.id;
@@ -4254,8 +4272,16 @@ function fromHistory(sessionId, messages, compactions = []) {
       group.tools.push(entry);
     }
     pushText(text.length);
+    if (message.partial) {
+      items.push({ type: 'notice', text: message.interrupted
+        ? 'This run stopped before finishing. Its partial work is saved; you can continue here.'
+        : 'This run is still in progress. Its partial work is saved.' });
+    }
     if (message.model || message.usage) {
       items.push({ type: 'footer', model: message.model, usage: message.usage || null });
+    }
+    if (message.checkpoint_id) {
+      for (const item of items.slice(firstItem)) item.checkpointId = message.checkpoint_id;
     }
   }
   flushCompactions(null);
