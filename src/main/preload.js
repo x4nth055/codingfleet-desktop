@@ -42,8 +42,11 @@ contextBridge.exposeInMainWorld('cf', {
   transcribe: call('audio:transcribe'),
   setTheme: call('theme:set'),
   pickFolder: call('dialog:pickFolder'),
+  gitStatus: call('git:status'),
+  gitDiff: call('git:diff'),
   openFolder: call('shell:openFolder'),
   startRun: call('run:start'),
+  recoverRuns: call('run:recover'),
   cancelRun: call('run:cancel'),
   steerRun: call('run:steer'),
   undoRun: call('run:undo'),
@@ -71,5 +74,10 @@ contextBridge.exposeInMainWorld('cf', {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on('run:event', wrapped);
     return () => ipcRenderer.removeListener('run:event', wrapped);
+  },
+  onGitChanged: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on('git:changed', wrapped);
+    return () => ipcRenderer.removeListener('git:changed', wrapped);
   },
 });

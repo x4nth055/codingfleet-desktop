@@ -38,18 +38,21 @@ class Run {
    *   screenshot needs the screen). `call` is the tool call, so a handler can
    *   report progress of its own against the call's id.
    */
-  constructor({ sessionId, cwd, approve, onEvent, localTools, clientHandlers }) {
+  constructor({ sessionId, cwd, approve, onEvent, localTools, clientHandlers, recovery, journal, confirmRetry }) {
     this.sessionId = sessionId;
     this.cwd = cwd;
     this.localTools = localTools || new Map();
     this.clientHandlers = clientHandlers || new Map();
     this.approve = approve;
     this.onEvent = onEvent;
-    this.runId = null;
+    this.journal = journal || null;
+    this.confirmRetry = confirmRetry || (() => 'deny');
+    this.runId = recovery?.runId || null;
     this.ended = null;
     this.handled = new Set();
     this.pending = new Set();
-    this.changes = new Map(); // absolute path -> { before, after }
+    this.changes = new Map(Object.entries(recovery?.changes || {})); // absolute path -> { before, after }
+    this.suspended = false;
     this.controller = new AbortController();
     this.streamDone = new Promise((resolve) => { this.markStreamDone = resolve; });
     this.heartbeatJob = null;
@@ -75,7 +78,25 @@ class Run {
           attempts = 0;
         } catch (err) {
           // Never repeat a start POST: it could create a second paid turn.
-          if (!this.runId || !err.transient || this.controller.signal.aborted) throw err;
+          if (this.controller.signal.aborted || !err.transient) throw err;
+          if (!this.runId) {
+            // The POST may have succeeded while its first response frame was
+            // lost. Discover that run by session instead of paying twice.
+            try {
+              const session = await api.getSession(this.sessionId);
+              if (session.active_run_id) {
+                this.runId = session.active_run_id;
+                this.journal?.setRunId(this.runId);
+              }
+            } catch (lookupError) {
+              if (!lookupError.transient) throw lookupError;
+            }
+            if (!this.runId) {
+              if (attempts >= 10) throw err;
+              await this.retryDelay(attempts++);
+              continue;
+            }
+          }
         }
         if (this.ended || !this.runId) break;
         await this.retryDelay(attempts++);
@@ -90,6 +111,7 @@ class Run {
     this.markStreamDone();
     this.controller.abort();
     await Promise.allSettled([...this.pending, this.heartbeatJob]);
+    if (this.suspended) return;
     const files = this.fileChanges();
     if (files.length) this.emit('client.files_changed', { run_id: this.runId, files });
     this.emit('client.finished', { run_id: this.runId, reason: this.ended ? this.ended.reason : null });
@@ -117,6 +139,7 @@ class Run {
     for await (const { event, data } of events) {
       if (event === 'run.started') {
         this.runId = data.run_id;
+        this.journal?.setRunId(data.run_id);
         if (!this.heartbeatJob) this.heartbeatJob = this.keepAlive();
       }
       if (event === 'run.ended') this.ended = data;
@@ -124,6 +147,8 @@ class Run {
       if (event === 'tool.call' && data.executor === 'client'
           && (CLIENT_TOOLS.has(data.name) || this.localTools.has(data.name) || this.clientHandlers.has(data.name))
           && !this.handled.has(data.id)) {
+        if (this.journal?.call(data.id)?.state === 'delivered') continue;
+        if (!this.journal?.call(data.id)) this.journal?.setCall(data.id, { state: 'received' });
         this.handled.add(data.id);
         const job = this.handle(data).finally(() => this.pending.delete(job));
         this.pending.add(job);
@@ -134,41 +159,75 @@ class Run {
   async handle(call) {
     let result;
     try {
-      const decision = await Promise.race([this.approve(call), this.streamDone.then(() => 'deny')]);
-      if (decision === 'allow') {
-        this.emit('client.tool_running', { id: call.id });
-        const local = this.localTools.get(call.name);
-        const own = this.clientHandlers.get(call.name);
-        if (own) {
-          result = await own(call.arguments || {}, { cwd: this.cwd, signal: this.controller.signal, call });
-        } else if (local) {
-          result = await local.server.call(local.tool, call.arguments, this.controller.signal);
-        } else {
-          const target = writeTarget(call.name, call.arguments, this.cwd);
-          // The first version of a file in this run is the one the card compares against.
-          if (target && !this.changes.has(target)) this.changes.set(target, { before: await readForDiff(target) });
-          result = await executeTool(call.name, call.arguments, { cwd: this.cwd, signal: this.controller.signal });
-          if (target) this.changes.get(target).after = await readForDiff(target);
-        }
+      const saved = this.journal?.call(call.id);
+      if (saved?.state === 'result') {
+        result = { output: saved.output, is_error: saved.is_error };
       } else {
-        this.emit('client.tool_denied', { id: call.id });
-        result = { output: 'The user declined this tool call.', is_error: true };
+        let retryApproved = false;
+        if (saved?.state === 'executing') {
+          const retry = await Promise.race([this.confirmRetry(call), this.streamDone.then(() => 'deny')]);
+          if (retry !== 'allow') {
+            result = { output: 'The desktop stopped while this tool was running. Its outcome is unknown; the user chose not to repeat it.', is_error: true };
+          } else retryApproved = true;
+        }
+        if (!result) {
+          const decision = retryApproved ? 'allow'
+            : await Promise.race([this.approve(call), this.streamDone.then(() => 'deny')]);
+          if (decision === 'allow') {
+            this.emit('client.tool_running', { id: call.id });
+            this.journal?.setCall(call.id, { state: 'executing' });
+            const local = this.localTools.get(call.name);
+            const own = this.clientHandlers.get(call.name);
+            if (own) {
+              result = await own(call.arguments || {}, { cwd: this.cwd, signal: this.controller.signal, call });
+            } else if (local) {
+              result = await local.server.call(local.tool, call.arguments, this.controller.signal);
+            } else {
+              const target = writeTarget(call.name, call.arguments, this.cwd);
+              // The first version of a file in this run is the one the card compares against.
+              if (target && !this.changes.has(target)) {
+                this.changes.set(target, { before: await readForDiff(target) });
+                this.journal?.setChange(target, this.changes.get(target));
+              }
+              try {
+                result = await executeTool(call.name, call.arguments, { cwd: this.cwd, signal: this.controller.signal });
+              } finally {
+                if (target) {
+                  this.changes.get(target).after = await readForDiff(target);
+                  this.journal?.setChange(target, this.changes.get(target));
+                }
+              }
+            }
+          } else {
+            this.emit('client.tool_denied', { id: call.id });
+            result = { output: 'The user declined this tool call.', is_error: true };
+          }
+        }
       }
     } catch (err) {
       result = { output: `The client could not run this tool: ${err.message}`, is_error: true };
     }
+    if (this.suspended) return;
+    try { this.journal?.setCall(call.id, { state: 'result', output: result.output, is_error: Boolean(result.is_error) }); }
+    catch (err) { this.emit('client.error', { message: `Could not save the ${call.name} result: ${err.message}` }); return; }
     // Retain the result until delivery succeeds. Retrying the POST must never
     // re-run the command or ask for approval again.
     let rejectedOutput = false;
     for (let attempt = 0; ; attempt++) {
       try {
         await api.toolResult(this.runId, call.id, result.output, result.is_error, this.controller.signal);
+        this.journal?.setCall(call.id, { state: 'delivered' });
         break;
       } catch (err) {
-        if (this.controller.signal.aborted || err.code === 'call_not_pending' || err.code === 'not_running') break;
+        if (this.controller.signal.aborted) break;
+        if (err.code === 'call_not_pending' || err.code === 'not_running') {
+          this.journal?.setCall(call.id, { state: 'delivered' });
+          break;
+        }
         if (!rejectedOutput && (err.status === 413 || err.code === 'invalid_body')) {
           rejectedOutput = true;
           result = { output: `The tool ran, but its output could not be returned: ${err.message}`, is_error: true };
+          this.journal?.setCall(call.id, { state: 'result', output: result.output, is_error: true });
           continue;
         }
         if (!err.transient) {
@@ -219,6 +278,11 @@ class Run {
   async cancel() {
     if (!this.runId) throw new Error('The run has not started yet. Try again in a moment.');
     return api.cancelRun(this.runId);
+  }
+
+  suspend() {
+    this.suspended = true;
+    this.controller.abort();
   }
 
   async steer(message, files) {

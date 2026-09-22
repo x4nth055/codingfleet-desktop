@@ -28,6 +28,9 @@
       <div class="composer" id="composer">
         <button class="scroll-down" id="scrollDown" hidden title="Go to the newest message"></button>
         <div class="attachments" id="attachments" hidden></div>
+        <div class="changes" id="changes" hidden>
+          <button class="changes-pill" id="changesPill"></button>
+        </div>
         <textarea id="prompt" rows="1" spellcheck="false"></textarea>
         <div class="composer-bar">
           <button class="bar-button attach-button" id="attachButton" title="Attach files or a screenshot"></button>
@@ -55,6 +58,11 @@
         </div>
         <div class="menu perm-menu" id="permMenu" hidden>
           <div class="menu-list" id="permList"></div>
+        </div>
+        <div class="menu changes-menu" id="changesMenu" hidden>
+          <div class="changes-head" id="changesHead"></div>
+          <div class="menu-list" id="changesList"></div>
+          <div class="changes-foot" id="changesFoot"></div>
         </div>
       </div>
       <div class="hint" id="hint" aria-live="polite"></div>

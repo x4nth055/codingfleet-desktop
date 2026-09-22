@@ -118,6 +118,85 @@ app.whenReady().then(async () => {
         checks++;
       }
     }
+    // Uncommitted changes above the prompt: the pill says "+531 −12", and the
+    // list it opens stays inside the window, above the composer it belongs to.
+    for (const width of [940, 1100, 1320, 1600]) {
+      win.setContentSize(width, 850);
+      await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      for (const theme of ['dark', 'light', 'hacker']) {
+        const result = await win.webContents.executeJavaScript(`(() => {
+          document.documentElement.dataset.theme = ${JSON.stringify(theme)};
+          S.gitOpen.clear();
+          S.gitDiffs.clear();
+          S.git = { repo: { root: 'C:/workspace/a-long-project-folder-name', name: 'a-long-project-folder-name', branch: 'feature/a-fairly-long-branch-name' },
+            files: [
+              { path: 'src/renderer/app.js', added: 480, removed: 12, status: 'modified', binary: false },
+              { path: 'src/main/git.js', added: 51, removed: 0, status: 'untracked', binary: false },
+              { path: 'assets/logo-final-final.png', added: 0, removed: 0, status: 'modified', binary: true },
+            ], added: 531, removed: 12, count: 3, truncated: false, stamp: 1 };
+          S.gitFor = gitTag(gitTarget());
+          renderComposer();
+          const errors = [];
+          const rect = (n) => n.getBoundingClientRect();
+          const composer = rect($('composer'));
+          const pill = $('changesPill');
+          if ($('changes').hidden) errors.push('the changes pill is hidden while the repository has changes');
+          const said = [...pill.children].map((n) => n.textContent.trim()).filter(Boolean).join(' ');
+          if (said !== 'feature/a-fairly-long-branch-name 3 files +531 −12') {
+            errors.push('the pill reads "' + said + '"');
+          }
+          const p = rect(pill);
+          if (p.x < composer.x - 1 || p.right > composer.right + 1) errors.push('the pill leaves the composer');
+          if (p.bottom > rect($('prompt')).top + 1) errors.push('the pill is not above the prompt');
+          openChangesMenu();
+          const menu = rect($('changesMenu'));
+          const rows = [...document.querySelectorAll('#changesList .file-row')];
+          if (rows.length !== 3) errors.push(rows.length + ' file rows');
+          for (const text of ['+531', '−12']) {
+            if (!$('changesHead').textContent.includes(text)) errors.push('the header does not say ' + text);
+          }
+          if (menu.left < 0 || menu.right > window.innerWidth + 1) errors.push('the list leaves the window');
+          if (menu.top < 0) errors.push('the list is cut off at the top');
+          if (menu.bottom > composer.bottom + 1) errors.push('the list is not above the composer');
+          if (rows[0].scrollWidth > rows[0].clientWidth + 1) errors.push('a file row is cut off');
+          const shot = { menu: { top: menu.top, height: menu.height }, rows: rows.length };
+          rows[0].click();
+          return { errors, shot, open: S.gitOpen.size, note: document.querySelector('#changesList .diff-note') ? document.querySelector('#changesList .diff-note').textContent : '' };
+        })()`);
+        assert.deepEqual(result.errors, [], `${width}/${theme}/changes`);
+        assert.equal(result.shot.rows, 3, `${width}/${theme}: one row per changed file`);
+        await win.webContents.executeJavaScript('new Promise(resolve => setTimeout(resolve, 60))');
+        const unfolded = await win.webContents.executeJavaScript(`(() => {
+          const box = document.querySelector('#changesList .file-diff .diff');
+          return { diff: Boolean(box), lines: box ? box.querySelectorAll('.dl').length : 0,
+            added: box ? box.querySelectorAll('.dl.add').length : 0 };
+        })()`);
+        assert.ok(unfolded.diff && unfolded.lines === 4 && unfolded.added === 2,
+          `${width}/${theme}: a clicked file unfolds its diff: ${JSON.stringify(unfolded)}`);
+        checks++;
+      }
+    }
+    // Asked for on its own when a session is shown, and never asked for in a
+    // session that runs in the cloud: there is no folder here to look at.
+    const asked = await win.webContents.executeJavaScript(`(async () => {
+      S.current = 'layout';
+      S.init.state.sessions.layout = { cwd: 'C:/workspace/a-long-project-folder-name' };
+      S.sessions[0].executor = 'client';
+      S.git = null; S.gitFor = ''; S.gitOpen.clear(); S.gitDiffs.clear();
+      renderComposer();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      const here = { hidden: $('changes').hidden, said: [...$('changesPill').children].map((n) => n.textContent.trim()).filter(Boolean).join(' ') };
+      S.sessions[0].executor = 'sandbox';
+      S.git = null; S.gitFor = ''; S.gitOpen.clear(); S.gitDiffs.clear();
+      renderComposer();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      const cloud = $('changes').hidden;
+      S.sessions[0].executor = 'client';
+      return { here, cloud };
+    })()`);
+    assert.deepEqual(asked.here, { hidden: false, said: 'feature/a-fairly-long-branch-name 3 files +531 −12' }, 'a folder session shows its changes');
+    assert.equal(asked.cloud, true, 'a cloud sandbox shows none');
+    checks++;
     const replay = await win.webContents.executeJavaScript(`(() => {
       S.running.set('layout', { started: Date.now(), turnStart: 0 });
       S.transcripts.set('layout', []);

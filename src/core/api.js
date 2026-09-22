@@ -276,6 +276,7 @@ module.exports = {
   updateSettings: (body) => request('PATCH', '/settings', body),
   startRun: (sessionId, body, signal) => openStream('POST', `/sessions/${id(sessionId)}/runs`, body, signal),
   runEvents: (runId, signal) => openStream('GET', `/runs/${id(runId)}/events`, undefined, signal),
+  runDetail: (runId) => request('GET', `/runs/${id(runId)}`),
   heartbeat: (runId, signal) => request('POST', `/runs/${id(runId)}/heartbeat`, {}, signal, 30000),
   cancelRun: (runId) => request('POST', `/runs/${id(runId)}/cancel`, {}),
   steerRun: (runId, message, files) =>

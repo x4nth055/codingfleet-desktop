@@ -19,6 +19,8 @@ Windows, macOS and Linux. MIT licensed.
 - Six client tools run locally: `run_command`, `execute_code`, `fs_read`,
   `fs_write`, `fs_edit`, `fs_glob`
 - Every edit is shown as a line diff in an "edited files" card
+- Uncommitted changes in the session's folder are counted above the prompt
+  (`+531 −12`); a click lists the files and shows any one file's diff
 - Sub-agents: the agent can split work into parallel tasks, which run through
   the same approval rules
 - **Steer a run mid-flight** — send a correction without stopping the agent

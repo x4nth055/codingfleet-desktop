@@ -8,6 +8,65 @@ const test = require('node:test');
 const api = require('../src/core/api');
 const { Run } = require('../src/core/runner');
 
+test('recovered uncertain tool waits for an explicit retry decision', async () => {
+  const before = { runEvents: api.runEvents, toolResult: api.toolResult, heartbeat: api.heartbeat };
+  const sent = [];
+  let executed = 0;
+  let decisions = 0;
+  try {
+    api.heartbeat = async () => ({});
+    api.runEvents = async () => (async function* () {
+      yield { event: 'run.started', data: { run_id: 'run' } };
+      yield { event: 'tool.call', data: { id: 'call', name: 'local', executor: 'client', arguments: {} } };
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      yield { event: 'run.ended', data: { reason: 'completed' } };
+    }());
+    api.toolResult = async (_run, _call, output, isError) => { sent.push({ output, isError }); };
+    const calls = { call: { state: 'executing' } };
+    const journal = {
+      call: (id) => calls[id], setCall: (id, patch) => { calls[id] = { ...calls[id], ...patch }; },
+      setRunId: () => {}, setChange: () => {},
+    };
+    const run = new Run({ sessionId: 'session', recovery: { runId: 'run' }, journal,
+      approve: () => 'allow', confirmRetry: () => { decisions++; return 'deny'; }, onEvent: () => {},
+      clientHandlers: new Map([['local', async () => { executed++; return { output: 'ran', is_error: false }; }]]),
+    });
+    await run.start();
+    assert.equal(decisions, 1);
+    assert.equal(executed, 0);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].isError, true);
+    assert.match(sent[0].output, /outcome is unknown/);
+    assert.equal(calls.call.state, 'delivered');
+  } finally { Object.assign(api, before); }
+});
+
+test('a saved result is resent after restart without running the tool again', async () => {
+  const before = { runEvents: api.runEvents, toolResult: api.toolResult, heartbeat: api.heartbeat };
+  let executions = 0;
+  const posted = [];
+  try {
+    api.heartbeat = async () => ({});
+    api.runEvents = async () => (async function* () {
+      yield { event: 'run.started', data: { run_id: 'run' } };
+      yield { event: 'tool.call', data: { id: 'call', name: 'local', executor: 'client', arguments: {} } };
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      yield { event: 'run.ended', data: { reason: 'completed' } };
+    }());
+    api.toolResult = async (_run, _call, output) => { posted.push(output); };
+    const calls = { call: { state: 'result', output: 'finished earlier', is_error: false } };
+    const run = new Run({ sessionId: 'session', recovery: { runId: 'run' },
+      journal: { call: (id) => calls[id], setCall: (id, patch) => { calls[id] = { ...calls[id], ...patch }; }, setRunId: () => {} },
+      approve: () => { throw new Error('should not ask'); }, onEvent: () => {},
+      clientHandlers: new Map([['local', async () => { executions++; return { output: 'again' }; }]]),
+    });
+    await run.start();
+    assert.equal(executions, 0);
+    assert.deepEqual(posted, ['finished earlier']);
+    assert.equal(calls.call.state, 'delivered');
+  } finally { Object.assign(api, before); }
+});
+
 // A stream of server events, as an async iterator of { event, data }.
 function events(list) {
   return (async function* stream() {

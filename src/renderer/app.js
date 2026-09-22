@@ -43,6 +43,8 @@ const ICON = {
   sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
   plug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v4"/></svg>',
   sparkle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>',
+  branch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="5.5" r="2.4"/><circle cx="6.5" cy="18.5" r="2.4"/><circle cx="17.5" cy="9" r="2.4"/><path d="M6.5 7.9v8.2"/><path d="M17.5 11.4a5 5 0 0 1-5 4.6H9.4"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.6 6"/><path d="M20 4.5V11h-6"/></svg>',
 };
 const LOGO = '<svg viewBox="0 0 32 32"><defs><linearGradient id="cfg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b9bff"/><stop offset="1" stop-color="#b48cff"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#cfg)"/><path d="M9.5 11l5 5-5 5M16.5 21h6.5" fill="none" stroke="#0b0d12" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
@@ -400,6 +402,10 @@ const S = {
   panel: { open: false, agentId: null },
   images: new Map(),        // uploaded file id -> preview data URL
   attachments: [],          // the composer's: { key, name, size, kind, preview, status, fileId, error }
+  git: null,                // what is uncommitted in this session's folder
+  gitFor: '',               // the session (or draft folder) `git` answers for
+  gitOpen: new Set(),       // paths whose diff is unfolded in the changes list
+  gitDiffs: new Map(),      // path -> the diff the main process gave for it
   model: 'auto',
   defaultModel: null,       // the account's default model, from its settings
   account: null,            // GET /v1/settings
@@ -620,7 +626,7 @@ function scheduleLiveRefresh() {
   const delay = busy ? 3000 : document.hasFocus() ? 6000 : 30000;
   liveTimer = setTimeout(async () => {
     if (S.settings && S.settings.hasKey) {
-      await Promise.allSettled([loadSessions({ quiet: true }), checkCurrentSession(), ensureModels()]);
+      await Promise.allSettled([loadSessions({ quiet: true }), checkCurrentSession(), ensureModels(), call(cf.recoverRuns)]);
     }
     scheduleLiveRefresh();
   }, delay);
@@ -1990,6 +1996,7 @@ const ALLOW_LABELS = {
 };
 
 const REASONS = {
+  'retry interrupted tool': 'closed while this tool was running. Its effects are uncertain. Check them before choosing Retry',
   'runs a command': 'wants to run a command',
   'changes files': 'wants to change a file',
   'reads outside the project folder': 'wants to read outside the project folder',
@@ -2263,6 +2270,7 @@ function toolBody(tool) {
 
 function approvalBar(tool) {
   const bar = el('div', 'approval');
+  const retry = tool.reason === 'retry interrupted tool';
   bar.append(el('span', 'approval-text', `CodingFleet ${REASONS[tool.reason] || 'wants to use a tool'}.`));
   const decide = (decision) => async () => {
     tool.status = decision === 'deny' ? 'denied' : 'queued';
@@ -2270,13 +2278,14 @@ function approvalBar(tool) {
     if (tool.group.agentId) agentChanged(tool.group.sessionId, tool.group.agentId);
     await cf.decide({ callId: tool.id, decision });
   };
-  const deny = el('button', 'btn danger', 'Deny');
+  const deny = el('button', 'btn danger', retry ? 'Do not retry' : 'Deny');
   deny.addEventListener('click', decide('deny'));
   const always = el('button', 'btn', ALLOW_LABELS[tool.reason] || 'Allow all calls this session');
   always.addEventListener('click', decide('allow-session'));
-  const allow = el('button', 'btn primary', 'Allow');
+  const allow = el('button', 'btn primary', retry ? 'Retry tool' : 'Allow');
   allow.addEventListener('click', decide('allow'));
-  bar.append(deny, always, allow);
+  if (retry) bar.append(deny, allow);
+  else bar.append(deny, always, allow);
   return bar;
 }
 
@@ -2404,6 +2413,25 @@ function onRunEvent({ sessionId, event, data }) {
     return;
   }
   switch (event) {
+    case 'client.recovering':
+      if (!run) {
+        S.running.set(sessionId, {
+          runId: data.run_id, started: Date.parse(data.started_at) || Date.now(),
+          turnStart: transcriptOf(sessionId).length,
+        });
+        S.remoteBusy.delete(sessionId);
+        if (sessionId === S.current) renderMain();
+        renderSidebar();
+      }
+      break;
+    case 'client.recovered_finished':
+      reloadTranscript(sessionId).then(() => {
+        if (data.status === 'error') {
+          if (data.progress?.text) addItem(sessionId, { type: 'assistant', text: data.progress.text, live: false });
+          addItem(sessionId, { type: 'error', text: data.error || 'The run stopped before it finished. Its partial progress is saved.' });
+        }
+      });
+      break;
     case 'context.compacted':
       if (data.agent_id) break;
       closeLiveText(sessionId);
@@ -2586,6 +2614,18 @@ function finishRun(sessionId) {
   const usage = run && run.usage;
   if (usage || note) {
     addItem(sessionId, { type: 'footer', model: (run && run.model) || (usage && usage.model), usage, note });
+  }
+  // What this window drew for the turn, for a rebuild to keep instead of the
+  // server's flat copy of it. The whole turn is kept, not just its answer:
+  // every tool group stays where it ran, with the text between them.
+  if (run) {
+    const items = transcriptOf(sessionId).slice(run.turnStart || 0);
+    if (items.length) {
+      ownTurns.set(sessionId, {
+        text: items.filter((item) => item.type === 'assistant').map((item) => item.text).join('\n\n'),
+        items,
+      });
+    }
   }
 
   if (S.init.shotExpand) expandForScreenshot(sessionId);
@@ -3583,6 +3623,7 @@ function renderComposer() {
   $('hint').textContent = running ? 'Enter to steer' : '';
   updateCostHint();
   updateSendButton();
+  ensureGit();
 }
 
 function updateSendButton() {
@@ -3606,6 +3647,244 @@ function updateSendButton() {
   send.title = stop ? 'Stop' : running ? 'Steer (Enter)' : 'Send (Enter)';
   send.disabled = (!stop && !hasText) || S.sending;
   send.title = uploading && !stop ? 'Sends once the files finish uploading' : send.title;
+}
+
+// ── Uncommitted changes, above the prompt ─────────────────────────────────
+// The folder a session works in may be a git repository. When it is, and when
+// something in it is uncommitted, the composer says by how much — "+531 −12" —
+// and a click lists the files and shows any one file's diff. A sandbox session
+// runs on CodingFleet's servers, so it has no changes here to show.
+let gitFetching = null;
+let gitRetryAt = 0;
+let gitStamp = 0;
+
+// Which folder's changes this window is showing: the session on screen, or the
+// folder a new session would start in. Null when there is nothing to look at.
+function gitTarget() {
+  const session = currentSession();
+  if (session) {
+    if (session.executor !== 'client') return null;
+    const cwd = local(session.id).cwd;
+    return cwd ? { sessionId: session.id, cwd } : null;
+  }
+  if (S.draftSandbox || !S.draftCwd) return null;
+  return { sessionId: null, cwd: S.draftCwd };
+}
+
+// A session and the folder it works in: moving the session to another folder
+// is a different set of changes, even though it is the same session.
+const gitTag = (target) => `${target.sessionId || 'draft'}|${target.cwd}`;
+
+function ensureGit() {
+  const bar = $('changes');
+  if (!bar) return;
+  const target = gitTarget();
+  if (!target || typeof cf.gitStatus !== 'function') {
+    if (S.git) {
+      S.git = null;
+      S.gitFor = '';
+      S.gitDiffs.clear();
+    }
+    renderChanges();
+    return;
+  }
+  const tag = gitTag(target);
+  if (S.gitFor === tag) {
+    renderChanges();
+    return;
+  }
+  if (gitFetching === tag || Date.now() < gitRetryAt) return;
+  gitFetching = tag;
+  // The last folder's count is not this folder's: it goes before the new one
+  // arrives, rather than sitting there wrong while the answer travels.
+  if (S.git) {
+    S.git = null;
+    S.gitDiffs.clear();
+    renderChanges();
+  }
+  const arg = target.sessionId ? { sessionId: target.sessionId, cwd: target.cwd } : { cwd: target.cwd };
+  call(cf.gitStatus, arg).then((summary) => {
+    if (gitFetching === tag) gitFetching = null;
+    const now = gitTarget();
+    if (!now || gitTag(now) !== tag) return; // the window moved on
+    S.gitFor = tag;
+    S.git = { ...summary, stamp: ++gitStamp };
+    renderChanges();
+  }).catch(() => {
+    if (gitFetching === tag) gitFetching = null;
+    // A folder that vanished, or a slow repository: ask again later, not in a
+    // loop while the composer is painted.
+    gitRetryAt = Date.now() + 15_000;
+  });
+}
+
+function renderChanges() {
+  const bar = $('changes');
+  if (!bar) return;
+  const summary = S.git;
+  if (!summary || !summary.repo || !summary.files.length) {
+    bar.hidden = true;
+    if (!$('changesMenu').hidden) $('changesMenu').hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  const repo = summary.repo;
+  const branch = repo.branch || repo.commit || 'detached';
+  const files = summary.files.length;
+  const pill = $('changesPill');
+  pill.title = `${files} uncommitted file${files === 1 ? '' : 's'} in ${repo.name} (${branch})`
+    + `\n+${summary.added} −${summary.removed} lines\nClick to see the files and their diffs`;
+  pill.replaceChildren(
+    icon('branch'),
+    el('span', 'changes-branch', branch),
+    el('span', 'changes-files', `${files} file${files === 1 ? '' : 's'}`),
+    el('span', 'add', `+${summary.added}`),
+    el('span', 'del', `−${summary.removed}`),
+  );
+  if (!$('changesMenu').hidden && $('changesList').dataset.stamp !== String(summary.stamp)) renderChangesMenu();
+}
+
+function openChangesMenu() {
+  if (!S.git || !S.git.repo || !S.git.files.length) return;
+  closeMenus();
+  $('changesMenu').style.left = `${$('changesPill').offsetLeft}px`;
+  renderChangesMenu();
+  $('changesMenu').hidden = false;
+}
+
+function renderChangesMenu() {
+  const menu = $('changesMenu');
+  const summary = S.git;
+  if (!summary || !summary.repo || !summary.files.length) {
+    menu.hidden = true;
+    return;
+  }
+  const repo = summary.repo;
+  const files = summary.files.length;
+  const branch = repo.branch || repo.commit || 'detached';
+
+  const head = $('changesHead');
+  const title = el('div', 'mi-main');
+  title.append(
+    el('div', 'ch-title', `${files} uncommitted file${files === 1 ? '' : 's'}`),
+    el('div', 'ch-sub', `${repo.name} · ${branch}${repo.noCommits ? ' · no commits yet' : ''}`),
+  );
+  const stats = el('span', 'ch-stats');
+  stats.append(el('span', 'add', `+${summary.added}`), el('span', 'del', `−${summary.removed}`));
+  const again = el('button', 'icon-button');
+  again.title = 'Check again';
+  again.append(icon('refresh'));
+  again.addEventListener('click', () => reloadGit());
+  head.replaceChildren(title, stats, again);
+
+  const list = $('changesList');
+  const keep = list.scrollTop;
+  list.dataset.stamp = String(summary.stamp);
+  list.replaceChildren();
+  for (const file of summary.files) {
+    list.append(changesRow(file));
+    if (S.gitOpen.has(file.path)) list.append(gitDiffWrap(file.path));
+  }
+  if (summary.truncated) {
+    list.append(el('div', 'diff-note', `Only the first ${files} changed files are listed.`));
+  }
+  list.scrollTop = keep;
+
+  const foot = $('changesFoot');
+  const where = el('span', 'ch-path', repo.root);
+  where.title = repo.root;
+  const open = el('button', 'btn small', 'Open folder');
+  open.addEventListener('click', () => cf.openFolder(repo.root));
+  foot.replaceChildren(where, open);
+}
+
+function changesRow(file) {
+  const open = S.gitOpen.has(file.path);
+  const row = el('button', `file-row${open ? ' open' : ''}`);
+  const slash = file.path.lastIndexOf('/');
+  const name = el('span', 'file-name');
+  if (slash >= 0) name.append(el('span', 'file-dir', file.path.slice(0, slash + 1)));
+  name.append(file.path.slice(slash + 1));
+  row.append(name);
+  if (file.status && file.status !== 'modified') row.append(el('span', 'file-badge', file.status));
+  if (file.binary) row.append(el('span', 'file-badge', 'no diff'));
+  const stats = el('span', 'file-stats');
+  stats.append(el('span', 'add', `+${file.added}`), el('span', 'del', `−${file.removed}`));
+  row.append(stats, chevron());
+  row.addEventListener('click', () => toggleGitFile(file.path, row));
+  return row;
+}
+
+function gitDiffWrap(path) {
+  const wrap = el('div', 'file-diff');
+  wrap.append(gitDiffBox(path));
+  return wrap;
+}
+
+function toggleGitFile(path, row) {
+  const next = row.nextElementSibling;
+  const holder = next && next.classList.contains('file-diff') ? next : null;
+  if (S.gitOpen.has(path)) {
+    S.gitOpen.delete(path);
+    row.classList.remove('open');
+    if (holder) holder.remove();
+    return;
+  }
+  S.gitOpen.add(path);
+  row.classList.add('open');
+  row.after(gitDiffWrap(path));
+}
+
+function gitDiffBox(path) {
+  const known = S.gitDiffs.get(path);
+  if (known) return gitDiffNode(known);
+  const box = el('div', 'diff');
+  box.append(el('div', 'diff-note', 'Loading the diff…'));
+  loadGitDiff(path, box);
+  return box;
+}
+
+// A file whose diff holds no lines — a mode change, most of the time — says so
+// rather than unfolding an empty box.
+function gitDiffNode(file) {
+  if (!file.binary && !file.hunks.length) {
+    return el('div', 'diff-note', file.untracked ? 'This file is empty.' : 'No lines changed: only the file’s mode or name.');
+  }
+  return renderDiff(file);
+}
+
+function loadGitDiff(path, box) {
+  const target = gitTarget();
+  if (!target) return;
+  call(cf.gitDiff, { ...target, path }).then((file) => {
+    S.gitDiffs.set(path, file);
+    if (box.isConnected) box.replaceWith(gitDiffNode(file));
+  }).catch((err) => {
+    box.replaceChildren(el('div', 'diff-note', err.message));
+  });
+}
+
+// Asked for by the refresh button, and after the folder changes underfoot.
+function reloadGit() {
+  S.gitFor = '';
+  S.gitDiffs.clear();
+  gitRetryAt = 0;
+  ensureGit();
+}
+
+function onGitChanged({ sessionId, cwd, summary }) {
+  const target = gitTarget();
+  const tag = `${sessionId || 'draft'}|${cwd}`;
+  if (!target || gitTag(target) !== tag) return;
+  // A diff already unfolded stays as it is unless the numbers under it moved.
+  const before = new Map((S.git && S.git.files ? S.git.files : []).map((f) => [f.path, `${f.added}:${f.removed}`]));
+  if (summary.files.length !== before.size
+    || summary.files.some((f) => before.get(f.path) !== `${f.added}:${f.removed}`)) {
+    S.gitDiffs.clear();
+  }
+  S.gitFor = tag;
+  S.git = { ...summary, stamp: ++gitStamp };
+  renderChanges();
 }
 
 function showBanner(text, actions = []) {
@@ -3856,6 +4135,57 @@ function closeViewer() {
   if (overlay) overlay.remove();
 }
 
+// ── The turns this window drew itself ──────────────────────────────────────
+// A transcript rebuilt from history places each tool where its run said it
+// went (`text_offset`). A run that left no marks, or whose calls did not line
+// up with them, comes back as one group at the top of the turn with the answer
+// hanging below it -- nothing like the run that happened. What this window drew
+// from the events is where things really were, so a rebuild keeps it.
+const ownTurns = new Map(); // session id -> { text, items }
+
+const normalized = (text) => String(text || '').replace(/\s+/g, ' ').trim();
+
+// The end of an answer is what names its turn: the beginning is often a stock
+// line ("Now let me..."), the middle loses the chip markup the server cuts out,
+// so a whole-text comparison would refuse turns that are plainly the same.
+function sameAnswer(mine, theirs) {
+  const a = normalized(mine);
+  const b = normalized(theirs);
+  if (!a || !b) return false;
+  const tail = Math.min(120, a.length, b.length);
+  return a.slice(-tail) === b.slice(-tail);
+}
+
+// Where the last turn of a rebuilt transcript begins: after its prompt.
+function lastTurnStart(items) {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].type === 'user') return i + 1;
+  }
+  return null;
+}
+
+// A session's transcript from the server's history, with the newest turn kept
+// as this window drew it when that turn is one it streamed itself.
+function rebuiltTranscript(sessionId, data) {
+  const messages = data.messages || [];
+  const items = fromHistory(sessionId, messages, data.compactions || []);
+  const own = ownTurns.get(sessionId);
+  const last = [...messages].reverse().find((message) => message.role === 'assistant');
+  if (!own || !last || !sameAnswer(own.text, last.text)) {
+    // The newest turn is one from somewhere else, so ours is history now and
+    // is read the way every other past turn is.
+    ownTurns.delete(sessionId);
+    return items;
+  }
+  const start = lastTurnStart(items);
+  if (start == null) return items;
+  // A compaction belongs to a turn's window rather than to the turn's own
+  // items, so it is kept even though the rest of the flat copy is dropped.
+  const compactions = items.slice(start).filter((item) => item.type === 'compaction'
+    && !own.items.some((mine) => mine.type === 'compaction' && mine.at === item.at));
+  return [...items.slice(0, start), ...compactions, ...own.items];
+}
+
 function fromHistory(sessionId, messages, compactions = []) {
   const items = [];
   // A compaction goes before the first message that came after it: an
@@ -4022,6 +4352,7 @@ function closeMenus() {
   $('modelMenu').hidden = true;
   $('effortMenu').hidden = true;
   $('permMenu').hidden = true;
+  $('changesMenu').hidden = true;
 }
 
 // Where a new session runs: a folder on this computer, or a cloud sandbox.
@@ -5562,6 +5893,7 @@ function wire() {
   });
   $('send').addEventListener('click', () => ($('send').classList.contains('stop') ? stopRun() : sendMessage()));
   $('folderButton').addEventListener('click', () => ($('folderMenu').hidden ? openFolderMenu() : closeMenus()));
+  $('changesPill').addEventListener('click', () => ($('changesMenu').hidden ? openChangesMenu() : closeMenus()));
   $('attachButton').addEventListener('click', () => ($('attachMenu').hidden ? openAttachMenu() : closeMenus()));
   $('dropIcon').innerHTML = ICON.upload;
   wireDrop();
@@ -5602,7 +5934,7 @@ function wire() {
   });
 
   document.addEventListener('mousedown', (event) => {
-    if (!event.target.closest('.menu, .session-more, .pref-toggle, #modelButton, #effortButton, #permButton, #attachButton, #folderButton')) closeMenus();
+    if (!event.target.closest('.menu, .session-more, .pref-toggle, #modelButton, #effortButton, #permButton, #attachButton, #folderButton, #changesPill')) closeMenus();
   });
   document.addEventListener('click', (event) => {
     const img = event.target.closest('.markdown img, .tool-image');
@@ -5646,6 +5978,7 @@ function wire() {
   });
 
   cf.onRunEvent(onRunEvent);
+  if (typeof cf.onGitChanged === 'function') cf.onGitChanged(onGitChanged);
   cf.onOpenSession((sessionId) => {
     if (S.sessions.some((s) => s.id === sessionId)) selectSession(sessionId);
   });
@@ -5672,6 +6005,7 @@ function wire() {
     ensureModels();
     loadCredits({ quiet: true });
     loadSessions({ quiet: true });
+    call(cf.recoverRuns).catch(() => {});
   });
   scheduleLiveRefresh();
   setInterval(() => { if (S.settings.hasKey) loadCredits({ quiet: true }); }, CREDITS_REFRESH_MS);
@@ -5701,6 +6035,7 @@ async function boot() {
   }
   await loadAll();
   if (S.init.openSession) await selectSession(S.init.openSession);
+  await call(cf.recoverRuns);
   if (S.init.shotScroll === 'top') {
     $('transcript').scrollTop = 0;
     onTranscriptScroll();
@@ -5710,6 +6045,11 @@ async function boot() {
     renderComposer();
   }
   if (S.init.shotMenu === 'folder') openFolderMenu();
+  if (S.init.shotMenu === 'changes') {
+    // The pill is drawn by a lookup that has to come back first.
+    setTimeout(() => openChangesMenu(), 1500);
+    setTimeout(() => { const row = document.querySelector('#changesList .file-row'); if (row) row.click(); }, 2500);
+  }
   if (S.init.shotMenu === 'attach') openAttachMenu();
   if (S.init.shotMenu === 'shot') {
     openAttachMenu();

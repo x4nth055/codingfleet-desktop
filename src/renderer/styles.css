@@ -372,7 +372,7 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .files-head .undo-button { flex: none; }
 .files-undone { flex: none; font-size: 12px; color: var(--muted); }
 .file-row { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 12px; text-align: left; font-size: 13px; }
-.file-row + .file-row, .diff + .file-row { border-top: 1px solid var(--line); }
+.file-row + .file-row, .diff + .file-row, .file-diff + .file-row { border-top: 1px solid var(--line); }
 .file-row:hover { background: var(--hover); }
 .file-name { min-width: 0; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .file-dir { color: var(--faint); }
@@ -607,6 +607,41 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
   cursor: default;
 }
 .cost-pill.high { border-color: var(--red); color: var(--red); }
+/* What is uncommitted in the session's folder, above the prompt. */
+.changes { padding: 10px 14px 0; }
+.changes-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.changes-pill:hover { color: var(--text); border-color: var(--line-3); background: var(--hover); }
+.changes-pill .icon { width: 13px; height: 13px; color: var(--faint); flex: none; }
+.changes-pill .changes-branch { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.changes-pill .changes-files { color: var(--faint); }
+.changes-pill .add { color: var(--green); }
+.changes-pill .del { color: var(--red); }
+
+.changes-menu { width: 560px; max-width: calc(100vw - 60px); }
+.changes-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.changes-head .ch-title { font-size: 13.5px; font-weight: 600; }
+.changes-head .ch-sub { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.changes-head .ch-stats { margin-left: auto; display: flex; gap: 8px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.changes-menu .menu-list { max-height: min(60vh, 520px); padding: 0; }
+.changes-menu .file-row { border-radius: 0; }
+.changes-menu .file-row .file-badge { margin-left: 2px; }
+/* A diff inside the list scrolls with the list, not on its own. */
+.file-diff .diff { max-height: none; overflow: visible; }
+.changes-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.changes-foot .ch-path { flex: 1; min-width: 0; font: 11.5px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .send { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: var(--accent); color: var(--accent-ink); transition: filter .15s; }
 .send:hover:not(:disabled) { filter: brightness(1.08); }
 .send:disabled { background: var(--panel-2); color: var(--faint); }

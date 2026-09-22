@@ -9,16 +9,18 @@ const path = require('path');
 const api = require('../core/api');
 const capture = require('./capture');
 const config = require('../core/config');
+const git = require('./git');
 const images = require('../core/images');
 const tools = require('../core/tools');
 const { LocalMcp } = require('../core/mcp');
 const { Run } = require('../core/runner');
+const { RecoveryStore } = require('../core/recovery-store');
 const { revertRun } = require('../core/undo');
 
 // Development flags: --open=<session id>, --screenshot=<file.png>,
 // --shot-delay=<ms>, --shot-menu=models|permissions|settings,
 // --shot-cwd=<dir>, --shot-prompt=<text>, --shot-permission=auto, --shot-expand,
-// --shot-model=<model id> (not saved), --shot-menu=effort|folder|attach|shot|agents|quota, --shot-scroll=top,
+// --shot-model=<model id> (not saved), --shot-menu=effort|folder|attach|shot|agents|quota|changes, --shot-scroll=top,
 // --shot-attach=<path>[|<path>...] (attaches files on start).
 const argv = process.argv.slice(1);
 const flag = (name) => {
@@ -354,6 +356,9 @@ function createWindow() {
       win.webContents.toggleDevTools();
     }
   });
+  // Coming back to the window after editing elsewhere: the count above the
+  // prompt is the first thing that should be true again.
+  win.on('focus', () => { if (gitWatch) refreshGit(gitWatch); });
   // Links open in the browser, never inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
@@ -386,11 +391,22 @@ function handle(channel, fn) {
 }
 
 const runs = new Map();       // session id -> Run
-// What it would take to undo a finished run: run id -> { sessionId, at, files }.
-// Kept in memory only, and only for the last few runs: the copies are the file
-// contents themselves, and a stale one would put back a version nobody wants.
 const undoable = new Map();
 const MAX_UNDO_RUNS = 20;
+let recoveryStore;
+function loadRecovery() {
+  recoveryStore = new RecoveryStore(path.join(app.getPath('userData'), 'run-recovery.json'));
+  for (const [id, saved] of Object.entries(recoveryStore.data.undo)) undoable.set(id, saved);
+}
+
+function journalFor(sessionId) {
+  return {
+    call: (id) => recoveryStore.call(sessionId, id),
+    setCall: (id, patch) => recoveryStore.setCall(sessionId, id, patch),
+    setChange: (file, change) => recoveryStore.setChange(sessionId, file, change),
+    setRunId: (id) => recoveryStore.setRunId(sessionId, id),
+  };
+}
 
 // The path as the edited-files card shows it: relative to the session folder.
 function shownPath(saved, abs) {
@@ -400,11 +416,11 @@ function shownPath(saved, abs) {
 }
 
 function rememberUndo(sessionId, run) {
-  if (!run.runId) return;
+  if (!run.ended) return; // Keep an interrupted run's journal for reattachment.
   const files = run.restorePoints();
-  if (!files.length) return;
-  undoable.set(run.runId, { sessionId, at: Date.now(), files });
-  while (undoable.size > MAX_UNDO_RUNS) undoable.delete(undoable.keys().next().value);
+  recoveryStore.finish(sessionId, run.runId, files, MAX_UNDO_RUNS);
+  undoable.clear();
+  for (const [id, saved] of Object.entries(recoveryStore.data.undo)) undoable.set(id, saved);
 }
 
 let signIn = null;            // the browser sign-in waiting for approval, if any
@@ -571,6 +587,44 @@ function approve(sessionId, cwd, call, localTools) {
   });
 }
 
+function confirmInterruptedTool(sessionId, call) {
+  const reason = 'retry interrupted tool';
+  return new Promise((resolve) => {
+    approvals.set(call.id, { resolve, sessionId, reason });
+    send('run:event', { sessionId, event: 'client.approval', data: { id: call.id, reason } });
+    notify(sessionId, `Check whether ${call.name} ran before retrying it.`);
+  });
+}
+
+function makeRun(sessionId, localTools, recovery) {
+  const local = state.sessions[sessionId] || {};
+  return new Run({
+    sessionId,
+    cwd: recovery?.cwd || local.cwd,
+    recovery,
+    journal: journalFor(sessionId),
+    localTools,
+    clientHandlers: handlersFor(sessionId),
+    approve: (call) => approve(sessionId, recovery?.cwd || local.cwd, call, localTools),
+    confirmRetry: (call) => confirmInterruptedTool(sessionId, call),
+    onEvent: (event, data) => {
+      send('run:event', { sessionId, event, data });
+      if (event === 'client.finished' && FINISHED_TEXT[data.reason]) notify(sessionId, FINISHED_TEXT[data.reason]);
+    },
+  });
+}
+
+function runInBackground(sessionId, run, body) {
+  runs.set(sessionId, run);
+  run.start(body).finally(() => {
+    rememberUndo(sessionId, run);
+    runs.delete(sessionId);
+    for (const [callId, waiting] of approvals) {
+      if (waiting.sessionId === sessionId) approvals.delete(callId);
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Attachments. The window hands over a path it was given (file picker, drag and
 // drop) or bytes it made (camera, paste); this process reads, checks and
@@ -730,6 +784,52 @@ async function uploadBytes(data, name, type, sessionId) {
   if (!data || !data.length) throw new Error(`${name} is empty.`);
   if (data.length > MAX_UPLOAD_BYTES) throw new Error(`${name} is larger than 20 MB.`);
   return api.uploadFile(data, name, type || MIME_BY_EXT[path.extname(name).toLowerCase()], sessionIdOf(sessionId));
+}
+
+// ---------------------------------------------------------------------------
+// Uncommitted changes. The window asks for the session it is showing; the
+// repository that answer came from is then followed, so the count above the
+// prompt corrects itself whether the agent, an editor or a terminal writes
+// next. Only one folder is watched: the one on screen.
+// ---------------------------------------------------------------------------
+const gitCache = new Map();   // key -> { at, dir, summary }
+let gitWatch = null;          // { key, sessionId, dir }
+let gitBusy = false;
+let gitQueued = null;
+
+function gitFolder({ sessionId, cwd } = {}) {
+  const id = sessionIdOf(sessionId);
+  const local = state.sessions[id] || {};
+  const dir = local.cwd || (typeof cwd === 'string' && cwd ? cwd : null);
+  if (!dir || !fs.existsSync(dir)) throw new Error('This session has no folder on this computer.');
+  return { id, dir };
+}
+
+async function refreshGit(target, push = true) {
+  if (gitBusy) {
+    gitQueued = target;
+    return;
+  }
+  gitBusy = true;
+  try {
+    const summary = await git.summary(target.dir);
+    gitCache.set(target.key, { at: Date.now(), dir: target.dir, summary });
+    if (push) send('git:changed', { sessionId: target.sessionId, cwd: target.dir, summary });
+  } catch {
+    // The folder went away, or git is not installed: the window keeps what it
+    // had until the next session or click asks again.
+  } finally {
+    gitBusy = false;
+    const queued = gitQueued;
+    gitQueued = null;
+    if (queued && gitWatch && queued.key === gitWatch.key) setTimeout(() => refreshGit(queued), 250);
+  }
+}
+
+function pointGitWatch(target) {
+  if (gitWatch && gitWatch.key === target.key) return;
+  gitWatch = target;
+  git.watch(target.dir, () => refreshGit(target));
 }
 
 function registerIpc() {
@@ -983,6 +1083,25 @@ function registerIpc() {
     return true;
   });
 
+  // What is uncommitted in the folder this session works in. Answered from a
+  // half-second cache so a window that asks twice — on a switch, and again when
+  // a run ends — costs one look rather than two.
+  handle('git:status', async ({ sessionId, cwd } = {}) => {
+    const { id, dir } = gitFolder({ sessionId, cwd });
+    const target = { key: id || `draft:${dir}`, sessionId: id, dir };
+    pointGitWatch(target);
+    const cached = gitCache.get(target.key);
+    if (cached && cached.dir === dir && Date.now() - cached.at < 600) return cached.summary;
+    const summary = await git.summary(dir);
+    gitCache.set(target.key, { at: Date.now(), dir, summary });
+    return summary;
+  });
+
+  handle('git:diff', async ({ sessionId, cwd, path: file } = {}) => {
+    const { dir } = gitFolder({ sessionId, cwd });
+    return git.diffFor(dir, file);
+  });
+
   // No folder means a cloud sandbox: the tools run on CodingFleet's servers
   // instead of this computer, and nothing here is read or changed.
   handle('session:create', async ({ cwd, model, label }) => {
@@ -1021,6 +1140,7 @@ function registerIpc() {
 
   handle('run:start', async ({ sessionId, message, model, executor, files }) => {
     if (runs.has(sessionId)) throw new Error('This session already has a run going.');
+    if (recoveryStore.active(sessionId)) throw new Error('Recover the previous run in this session before starting another.');
     const local = state.sessions[sessionId] || {};
     local.model = model || 'auto';
     state.sessions[sessionId] = local;
@@ -1041,32 +1161,55 @@ function registerIpc() {
       }
     }
     if (runs.has(sessionId)) throw new Error('This session already has a run going.');
-    const run = new Run({
-      sessionId,
-      cwd: local.cwd,
-      localTools,
-      clientHandlers: handlersFor(sessionId),
-      approve: (call) => approve(sessionId, local.cwd, call, localTools),
-      onEvent: (event, data) => {
-        send('run:event', { sessionId, event, data });
-        // Stopped from here: no need to say so.
-        if (event === 'client.finished' && FINISHED_TEXT[data.reason]) notify(sessionId, FINISHED_TEXT[data.reason]);
-      },
-    });
-    runs.set(sessionId, run);
     const body = { message, model: model || 'auto' };
     if (Array.isArray(files) && files.length) body.files = files.filter((x) => typeof x === 'string');
     const servers = remoteServersForRun();
     if (Object.keys(servers).length) body.mcp_servers = servers;
     if (declared.length) body.client_tools = declared;
-    run.start(body).finally(() => {
-      rememberUndo(sessionId, run);
-      runs.delete(sessionId);
-      for (const [callId, waiting] of approvals) {
-        if (waiting.sessionId === sessionId) approvals.delete(callId);
-      }
-    });
+    recoveryStore.start(sessionId, local.cwd);
+    runInBackground(sessionId, makeRun(sessionId, localTools), body);
     return true;
+  });
+
+  handle('run:recover', async () => {
+    const resumed = [];
+    for (const saved of Object.values(recoveryStore.data.active)) {
+      const sessionId = saved.sessionId;
+      if (runs.has(sessionId)) continue;
+      try {
+        let runId = saved.runId;
+        if (!runId) {
+          const session = await api.getSession(sessionId);
+          runId = session.active_run_id;
+          if (runId) recoveryStore.setRunId(sessionId, runId);
+        }
+        if (!runId) {
+          recoveryStore.finish(sessionId, null, [], MAX_UNDO_RUNS);
+          continue;
+        }
+        const detail = await api.runDetail(runId);
+        const run = makeRun(sessionId, new Map(), recoveryStore.active(sessionId));
+        if (detail.status !== 'running') {
+          run.ended = { reason: detail.reason };
+          rememberUndo(sessionId, run);
+          send('run:event', { sessionId, event: 'client.recovered_finished', data: detail });
+          continue;
+        }
+        let localTools = new Map();
+        if (saved.cwd) {
+          try { ({ routes: localTools } = await localMcp.toolsForRun()); }
+          catch (err) { send('run:event', { sessionId, event: 'client.error', data: { message: `Local MCP servers: ${err.message}` } }); }
+        }
+        const attached = makeRun(sessionId, localTools, recoveryStore.active(sessionId));
+        send('run:event', { sessionId, event: 'client.recovering', data: { run_id: runId, started_at: detail.created_at } });
+        runInBackground(sessionId, attached);
+        resumed.push(sessionId);
+      } catch (err) {
+        // Keep the journal. A later reconnect or app launch can try again.
+        if (!err.transient) send('run:event', { sessionId, event: 'client.error', data: { message: `Could not recover this run: ${err.message}` } });
+      }
+    }
+    return resumed;
   });
 
   handle('run:cancel', async (sessionId) => {
@@ -1090,7 +1233,7 @@ function registerIpc() {
     if (runs.has(saved.sessionId)) throw new Error('Wait for this session to finish before undoing a run.');
     const result = await revertRun(saved.files, { force: Boolean(force) });
     // Everything is back: there is nothing left to undo.
-    if (!result.skipped.length) undoable.delete(runId);
+    if (!result.skipped.length) { undoable.delete(runId); recoveryStore.removeUndo(runId); }
     return {
       restored: result.restored.map((r) => ({ path: shownPath(saved, r.path), action: r.action })),
       skipped: result.skipped.map((r) => ({ path: shownPath(saved, r.path), reason: r.reason, conflict: Boolean(r.conflict) })),
@@ -1132,24 +1275,19 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
     session.defaultSession.setPermissionCheckHandler((_wc, permission, origin, details) =>
       permission === 'media' && (details || {}).mediaType === 'audio' && ownPage(details.securityOrigin || origin));
     loadState();
+    loadRecovery();
     loadCredentials();
     loadMcp();
     registerIpc();
     createWindow();
   });
   app.on('window-all-closed', () => app.quit());
-  app.on('will-quit', () => localMcp.stopAll());
-
-  // A run left going when the app closes would wait on this computer for tool
-  // results that never come, holding one of the account's run slots. Cancel
-  // them first; give up after a few seconds rather than hang the quit.
-  let cancelledOnQuit = false;
-  app.on('before-quit', (event) => {
-    if (cancelledOnQuit || !runs.size) return;
-    cancelledOnQuit = true;
-    event.preventDefault();
-    const cancels = [...runs.values()].map((run) => run.cancel().catch(() => null));
-    Promise.race([Promise.allSettled(cancels), new Promise((resolve) => setTimeout(resolve, 3000))])
-      .finally(() => app.quit());
+  app.on('will-quit', () => {
+    localMcp.stopAll();
+    git.stopWatch();
   });
+
+  // Leave the server turn available for recovery. Abort local children on exit;
+  // their persisted 'executing' state requires an explicit retry decision.
+  app.on('before-quit', () => { for (const run of runs.values()) run.suspend(); });
 }
