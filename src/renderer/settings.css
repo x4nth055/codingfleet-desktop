@@ -360,6 +360,13 @@
 .signed-in-plan { font-size: 11px; font-weight: 600; }
 .signed-in-who { color: var(--text); font-size: 13px; margin-top: 2px; }
 .signed-in-key { color: var(--muted); font-size: 12px; margin-top: 2px; font-family: var(--mono); overflow-wrap: anywhere; }
+.signed-in-warn {
+  display: grid; gap: 8px; justify-items: start; margin-top: 10px; padding: 10px 12px;
+  border-radius: 9px; font-size: 12.5px; line-height: 1.45; color: var(--muted);
+  background: color-mix(in srgb, var(--red-ink) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red-ink) 30%, transparent);
+}
+.signed-in-warn strong { color: var(--text); font-weight: 600; }
 .signed-in-actions { grid-column: 2; display: flex; gap: 8px; margin-top: 12px; }
 
 /* ── Billing ─────────────────────────────────────────────── */

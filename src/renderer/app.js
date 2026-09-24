@@ -640,6 +640,8 @@ function scheduleLiveRefresh() {
 const CREDITS_REFRESH_MS = 30_000;
 let creditsLoadedAt = 0;
 
+let keyWarned = false;
+
 async function loadCredits({ quiet = false } = {}) {
   let next;
   try {
@@ -655,6 +657,12 @@ async function loadCredits({ quiet = false } = {}) {
   const changed = JSON.stringify(next) !== JSON.stringify(S.credits);
   S.credits = next;
   S.creditsError = null;
+  if (paysWithThisKey() && !keyWarned) {
+    keyWarned = true;
+    showBanner(`This app uses a key made for code, so your ${S.credits.plan.name || ''} plan's Unlimited `
+      + 'models cost credits here. Sign in with your browser to get a desktop key.',
+    [{ label: 'Fix it', run: () => { openSettings(false); fixKeyType(); } }]);
+  }
   // Redrawing an unchanged card would drop the hover on its details.
   if (changed || !quiet) renderAccount();
 }
@@ -4486,8 +4494,24 @@ function modelColumns(vision, iq, price) {
 }
 
 // The account's plan covers this model: it costs no credits here.
+// The server prices by the KEY, not by the app: a desktop key (browser
+// sign-in) gets the plan's unlimited models for no credits, a key made for
+// code pays for every model even here. An older server that does not say
+// which kind of key this is keeps the old answer.
+function desktopPriced() {
+  const client = S.credits && S.credits.key && S.credits.key.client;
+  return !client || client === 'desktop';
+}
+
+// A key for code on a plan with unlimited models: those models cost credits
+// in this app until it signs in again through the browser.
+function paysWithThisKey() {
+  return Boolean(S.credits && S.credits.plan && S.credits.plan.unlimited_models && !desktopPriced());
+}
+
 function planIncludes(variant) {
-  return Boolean(variant && variant.unlimited && S.credits && S.credits.plan && S.credits.plan.unlimited_models);
+  return Boolean(variant && variant.unlimited && S.credits && S.credits.plan && S.credits.plan.unlimited_models
+    && desktopPriced());
 }
 
 function includedPill() {
@@ -4787,8 +4811,20 @@ function renderSignedIn(show) {
     ? `as ${account.username && account.email ? `${account.username} (${account.email})` : who}`
     : S.creditsError ? 'Could not reach your account just now.' : 'Loading your account…'));
   const keyName = key.name ? `${key.name} · ` : '';
-  text.append(el('div', 'signed-in-key', `Key: ${keyName}${key.hint || S.settings.keyHint || ''}`
+  const kind = key.client === 'desktop' ? ' · Desktop app key' : key.client === 'api' ? ' · Key for code' : '';
+  text.append(el('div', 'signed-in-key', `Key: ${keyName}${key.hint || S.settings.keyHint || ''}${kind}`
     + (S.settings.apiBase !== S.settings.defaultApiBase ? ` · ${S.settings.apiBase}` : '')));
+  if (paysWithThisKey()) {
+    const warn = el('div', 'signed-in-warn');
+    warn.append(el('strong', null, 'Unlimited models cost credits with this key. '),
+      el('span', null, `It was made for code, and the server prices a key, not the app. Sign in with `
+        + `your browser: the app gets a desktop key, and your ${plan.name} plan's Unlimited models cost `
+        + 'no credits here again.'));
+    const fix = el('button', 'btn primary small', 'Sign in with your browser');
+    fix.addEventListener('click', fixKeyType);
+    warn.append(fix);
+    text.append(warn);
+  }
   const actions = el('div', 'signed-in-actions');
   const other = el('button', 'btn', 'Use another account');
   other.addEventListener('click', () => {
@@ -4809,6 +4845,13 @@ function renderSignedIn(show) {
   actions.append(other, out);
   card.append(badge, text, actions);
   if (!credits.account && !S.creditsError) loadCredits().then(() => { if (!card.hidden) renderSignedIn(true); });
+}
+
+// A new sign-in replaces the key on this computer with a desktop key. The old
+// key stays on the account until revoked on codingfleet.com/agent-api.
+function fixKeyType() {
+  $('signInBlock').hidden = false;
+  signInWithBrowser();
 }
 
 async function removeKey() {
