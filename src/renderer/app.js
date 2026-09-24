@@ -5118,6 +5118,17 @@ function renderPreferencesPane() {
     },
   }));
   pane.append(switchRow({
+    title: 'Keep the computer awake while the agent works',
+    desc: 'Stops Windows from putting the computer to sleep on its own during a run, so you can walk '
+      + 'away. The screen still turns off. Closing the lid or choosing Sleep still sleeps it.',
+    checked: S.init.state.keepAwake !== false,
+    onChange: (on) => {
+      S.init.state.keepAwake = on;
+      cf.setState({ keepAwake: on });
+      paneStatus(pane, 'Saved.', 'ok');
+    },
+  }));
+  pane.append(switchRow({
     title: 'Memory',
     desc: 'The agent can read and update your CodingFleet memory: what it knows about you and your work, '
       + 'shared with the web chat. Applies to new sessions.',

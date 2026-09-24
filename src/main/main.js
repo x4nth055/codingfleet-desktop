@@ -1,12 +1,14 @@
 'use strict';
 const {
-  app, BrowserWindow, Menu, Notification, clipboard, dialog, ipcMain, nativeImage, safeStorage, session, shell,
+  app, BrowserWindow, Menu, Notification, clipboard, dialog, ipcMain, nativeImage, powerSaveBlocker, safeStorage,
+  session, shell,
 } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const api = require('../core/api');
+const { createAwake } = require('./awake');
 const capture = require('./capture');
 const config = require('../core/config');
 const git = require('./git');
@@ -614,11 +616,17 @@ function makeRun(sessionId, localTools, recovery) {
   });
 }
 
+// Keeps a Modern Standby laptop from freezing this app mid-run (see awake.js).
+const awake = createAwake(powerSaveBlocker);
+const stayAwake = () => awake.sync(runs.size > 0, state.keepAwake);
+
 function runInBackground(sessionId, run, body) {
   runs.set(sessionId, run);
+  stayAwake();
   run.start(body).finally(() => {
     rememberUndo(sessionId, run);
     runs.delete(sessionId);
+    stayAwake();
     for (const [callId, waiting] of approvals) {
       if (waiting.sessionId === sessionId) approvals.delete(callId);
     }
@@ -1058,9 +1066,10 @@ function registerIpc() {
   });
 
   handle('state:set', (patch) => {
-    for (const key of ['model', 'permissionMode', 'lastCwd', 'notifications']) {
+    for (const key of ['model', 'permissionMode', 'lastCwd', 'notifications', 'keepAwake']) {
       if (patch && key in patch) state[key] = patch[key];
     }
+    stayAwake();
     if (patch && patch.capabilities && typeof patch.capabilities === 'object') {
       state.capabilities = Object.fromEntries(OPTIONAL_CAPABILITIES.map((key) => [
         key, key in patch.capabilities ? Boolean(patch.capabilities[key]) : optionalCapabilities()[key]]));
