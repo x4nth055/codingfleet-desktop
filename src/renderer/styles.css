@@ -937,6 +937,14 @@ body.panel-resizing * { cursor: ew-resize !important; }
 .markdown img.ready { opacity: 1; }
 .markdown img.broken { cursor: default; background: none; }
 .markdown img[hidden] { display: none; }
+/* A remote image that waits to be asked for (01-base.js, gateRemoteImage). */
+.remote-image-gate {
+  display: inline-flex; align-items: center; gap: 7px; margin: 8px 0; padding: 7px 11px;
+  border: 1px dashed var(--line-3); border-radius: 9px; background: var(--panel-2);
+  color: var(--muted); font-size: 12.5px; cursor: pointer;
+}
+.remote-image-gate:hover { color: var(--text); border-color: var(--accent); }
+.remote-image-gate .icon { width: 15px; height: 15px; }
 
 /* What view_image looked at, inside its tool step. */
 .tool-image {

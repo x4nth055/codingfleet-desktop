@@ -172,7 +172,10 @@ function updateText(status) {
   switch (status.state) {
     case 'checking': return 'Checking for updates…';
     case 'current': return 'You have the latest version.';
-    case 'available': return `Version ${status.version} is available.`;
+    case 'available': return status.manual
+      ? `Version ${status.version} is out. This Mac app cannot update itself: download it.`
+      : `Version ${status.version} is available.`;
+    case 'off': return 'Automatic updates are off.';
     case 'downloading': return `Downloading ${status.version || 'the update'}… ${status.percent || 0}%`;
     case 'ready': return `Version ${status.version} is ready. Restart to update.`;
     case 'unavailable': return `This copy does not update itself (${status.reason}).`;
@@ -183,6 +186,13 @@ function updateText(status) {
 
 function onUpdateStatus(status) {
   updateState = status;
+  // macOS: the app cannot install an update itself, so it points to the download.
+  if (status.state === 'available' && status.manual && updateOffered !== status.version) {
+    updateOffered = status.version;
+    showBanner(`CodingFleet ${status.version} is out.`, [
+      { label: 'Download', run: () => call(cf.downloadUpdate).catch((err) => showBanner(err.message)) },
+    ], { label: 'Later' });
+  }
   if (status.state === 'ready' && updateOffered !== status.version) {
     updateOffered = status.version;
     const busy = S.running.size ? ' A run in progress picks up again after the restart.' : '';
@@ -211,6 +221,24 @@ function renderUpdateRow(row) {
     button.textContent = 'Check now';
     button.onclick = () => call(cf.checkForUpdate).then(onUpdateStatus);
   }
+}
+
+// Asked once: the app checks for updates by itself only after a yes, so it
+// never contacts the update server unless the user asked it to.
+async function askAboutUpdates() {
+  if (S.init.state.autoUpdate !== undefined || typeof cf.updateStatus !== 'function') return;
+  let status = null;
+  try { status = await call(cf.updateStatus); } catch { return; }
+  if (!status || status.state === 'unavailable') return;
+  const answer = (on) => {
+    S.init.state.autoUpdate = on;
+    cf.setState({ autoUpdate: on });
+    hideBanner();
+  };
+  showBanner('Check for new versions of CodingFleet automatically? The app would ask GitHub every few '
+    + 'hours, and download updates to install when you restart. You can change this in Preferences.', [
+    { label: 'Yes, keep it up to date', run: () => answer(true) },
+  ], { label: 'No', run: () => answer(false) });
 }
 
 // The app stopped unexpectedly since the window last loaded. Nothing is sent
@@ -251,7 +279,9 @@ async function boot() {
     openSettings(true);
     return;
   }
-  offerCrashReport(S.init.crash);
+  // A crash report outranks the update question; the question waits a start.
+  if (S.init.crash) offerCrashReport(S.init.crash);
+  else askAboutUpdates();
   await loadAll();
   if (S.init.openSession) await selectSession(S.init.openSession);
   await call(cf.recoverRuns);

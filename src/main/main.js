@@ -29,8 +29,15 @@ const { revertRun } = require('../core/undo');
 // --shot-cwd=<dir>, --shot-prompt=<text>, --shot-permission=auto, --shot-expand,
 // --shot-model=<model id> (not saved), --shot-menu=effort|folder|attach|shot|agents|quota|changes, --shot-scroll=top,
 // --shot-attach=<path>[|<path>...] (attaches files on start).
+//
+// An installed app ignores all of them but --open and --theme. Several would
+// otherwise let whoever made a shortcut to the app start a session in any
+// folder, switch it to Auto-approve and send it a prompt (--shot-cwd,
+// --shot-permission, --shot-prompt), or write a file anywhere (--screenshot).
 const argv = process.argv.slice(1);
+const SAFE_WHEN_PACKAGED = new Set(['open', 'theme']);
 const flag = (name) => {
+  if (app.isPackaged && !SAFE_WHEN_PACKAGED.has(name)) return null;
   const hit = argv.find((a) => a === `--${name}` || a.startsWith(`--${name}=`));
   if (!hit) return null;
   return hit.includes('=') ? hit.slice(name.length + 3) : true;
@@ -44,7 +51,9 @@ const log = createLog(path.join(app.getPath('userData'), 'logs'), { echo: !app.i
 const crashes = createCrashes({ log });
 crashes.watch(() => win);
 // Updates from the project's releases, for an installed build (updater.js).
-const updates = createUpdater({ log, send: (channel, payload) => send(channel, payload), enabled: () => state.autoUpdate !== false });
+// Automatic checks only once the user has said yes (state.autoUpdate === true):
+// the app contacts nothing on its own that the user did not ask for.
+const updates = createUpdater({ log, send: (channel, payload) => send(channel, payload), enabled: () => state.autoUpdate === true });
 // Applies to this process only; never written to the saved state.
 const PERMISSION_OVERRIDE = flag('shot-permission');
 
@@ -1170,6 +1179,7 @@ function registerIpc() {
     for (const key of ['model', 'permissionMode', 'lastCwd', 'notifications', 'keepAwake', 'autoUpdate']) {
       if (patch && key in patch) state[key] = patch[key];
     }
+    if (patch && 'autoUpdate' in patch) updates.schedule();
     stayAwake();
     if (patch && patch.capabilities && typeof patch.capabilities === 'object') {
       state.capabilities = Object.fromEntries(OPTIONAL_CAPABILITIES.map((key) => [
@@ -1188,9 +1198,13 @@ function registerIpc() {
     return result.canceled ? null : result.filePaths[0];
   });
 
+  // Folders only: shell.openPath on a file runs it, and an .exe, a .bat or a
+  // shortcut must never be one click away from anything the window was sent.
   handle('shell:openFolder', async (dir) => {
-    if (typeof dir === 'string' && fs.existsSync(dir)) await shell.openPath(dir);
-    return true;
+    let isDir = false;
+    try { isDir = typeof dir === 'string' && fs.statSync(dir).isDirectory(); } catch { /* gone */ }
+    if (isDir) await shell.openPath(dir);
+    return isDir;
   });
 
   // What is uncommitted in the folder this session works in. Answered from a
@@ -1241,9 +1255,13 @@ function registerIpc() {
     return true;
   });
 
-  handle('session:setFolder', ({ sessionId, cwd }) => {
-    if (!cwd || !fs.existsSync(cwd)) throw new Error('Choose a folder that exists.');
-    state.sessions[sessionId] = { ...(state.sessions[sessionId] || {}), cwd };
+  handle('session:setFolder', ({ sessionId, cwd } = {}) => {
+    const id = sessionIdOf(sessionId);
+    if (!id) throw new Error('No such session.');
+    let isDir = false;
+    try { isDir = typeof cwd === 'string' && fs.statSync(cwd).isDirectory(); } catch { /* gone */ }
+    if (!isDir) throw new Error('Choose a folder that exists.');
+    state.sessions[id] = { ...(state.sessions[id] || {}), cwd };
     saveState();
     return true;
   });

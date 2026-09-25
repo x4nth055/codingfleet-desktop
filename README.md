@@ -352,33 +352,30 @@ git push origin v0.3.0
 `.github/workflows/release.yml` runs the tests on each system, builds the
 Windows installer, the macOS dmg and zip (Intel and Apple silicon) and the
 Linux AppImage and deb, and publishes them as one GitHub release. That release
-is also the **auto-update feed**: installed copies check it at start and every
-six hours, download in the background, and install when the user restarts.
+is also the **auto-update feed**: an installed copy whose user said yes to
+automatic updates checks it at start and every six hours, downloads in the
+background, and installs when the user restarts.
 An app cannot read a private repository without carrying a token, so updates
 work once this repository — or a public one named in `package.json`
 `build.publish` — is public.
 
 ### Code signing
 
-Unsigned builds work, but Windows shows a SmartScreen warning to every new
-user and macOS refuses to open the app until it is right-clicked and opened,
-and cannot update it. Signing turns itself on in the release workflow when its
-secrets exist:
-
-- **Windows — Azure Trusted Signing** (about $10 a month; Microsoft verifies
-  the publisher first). Set the secrets `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`,
-  `AZURE_CLIENT_SECRET` and the variables `AZURE_SIGNING_ENDPOINT`,
-  `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE`, `AZURE_SIGNING_PUBLISHER`.
-  Open-source projects can instead apply to SignPath Foundation for free
-  signing. A classic OV certificate now lives on a hardware token or a cloud
-  HSM and cannot be used from a file.
-- **macOS — Apple Developer Program** ($99 a year). Export a *Developer ID
-  Application* certificate as .p12 and set `MAC_CERTIFICATE_P12` (base64) and
-  `MAC_CERTIFICATE_PASSWORD`; add `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and
-  `APPLE_TEAM_ID` to notarize.
+- **Windows** is signed through SignPath Foundation, which signs open-source
+  projects for free: the release workflow sends the unsigned app and installer
+  to SignPath and publishes what comes back (see `.signpath/README.md`). It
+  turns on when the repository has the variables `SIGNPATH_ORGANIZATION_ID`,
+  `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG` and the secret
+  `SIGNPATH_API_TOKEN`. Until then the installer is unsigned, and Windows shows
+  a SmartScreen warning ("More info" → "Run anyway") to new users.
+- **macOS** builds are not signed. The first time, macOS refuses to open the
+  app: open it once from System Settings → Privacy & Security → "Open Anyway".
+  An unsigned Mac app cannot install its own updates either, so it says when a
+  new version is out and links to the download.
 - **Linux** needs no signing.
 
-Screenshot and debugging flags:
+Screenshot and debugging flags (a development run only: an installed app
+ignores all but `--open` and `--theme`):
 
 ```
 --open=<session id>      open straight into a session
@@ -391,6 +388,37 @@ Screenshot and debugging flags:
 ```
 
 ---
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+- Committers and reviewers: [@x4nth055](https://github.com/x4nth055)
+- Approvers: [@x4nth055](https://github.com/x4nth055)
+
+Every signed file is built from this repository by its release workflow on
+GitHub's own runners, and each release is approved by an approver before it is
+signed.
+
+## Privacy
+
+This program will not transfer any information to other networked systems
+unless specifically requested by the user or the person installing or operating
+it.
+
+What that means in practice:
+
+- It talks to CodingFleet (or the API address you set) only once you sign in,
+  to do what you ask: your messages, the files and command output the agent
+  reads with your approval, and your account's settings. See the
+  [CodingFleet privacy policy](https://codingfleet.com/privacy-policy).
+- It checks GitHub for updates only if you said yes when it asked (Preferences
+  → Updates).
+- It sends a crash report only when you press **Send report** after a crash.
+- An image in an answer that is not hosted by CodingFleet loads only when you
+  click it.
+- It connects to an MCP server only if you added it.
 
 ## License
 

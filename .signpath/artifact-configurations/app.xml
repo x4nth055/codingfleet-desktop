@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "app": the unpacked Windows app (dist/win-unpacked,
+     zipped by actions/upload-artifact). Signs CodingFleet.exe, and only a file whose
+     metadata names this product and the version being released. The app exe says its
+     version with four parts (0.3.0.0). -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="CodingFleet.exe" product-name="CodingFleet" product-version="${version}.0">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

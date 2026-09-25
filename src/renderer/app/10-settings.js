@@ -472,6 +472,13 @@ function renderPreferencesPane() {
   if (!S.models.length) modelRow.append(el('div', 'set-desc', S.modelsError || 'Loading models…'));
   pane.append(modelRow);
 
+  pane.append(switchRow({
+    title: 'Show legacy models',
+    desc: 'List older models in the picker. They may have reduced support.',
+    checked: prefs.show_legacy_models,
+    onChange: (on) => save({ show_legacy_models: on }, { reloadModels: true }),
+  }));
+
   // Kept on this computer; they apply to sessions created from now on.
   const caps = S.init.state.capabilities || {};
   const setCapability = (key, on) => {
@@ -487,6 +494,15 @@ function renderPreferencesPane() {
     checked: caps.image_generation,
     onChange: (on) => setCapability('image_generation', on),
   }));
+  pane.append(switchRow({
+    title: 'Memory',
+    desc: 'The agent can read and update your CodingFleet memory: what it knows about you and your work, '
+      + 'shared with the web chat. Applies to new sessions.',
+    checked: caps.memory,
+    onChange: (on) => setCapability('memory', on),
+  }));
+
+  pane.append(el('div', 'pane-section', 'This computer'));
   pane.append(switchRow({
     title: 'Notifications',
     desc: 'Tell me when a run finishes or waits for my approval while I am in another window.',
@@ -508,6 +524,7 @@ function renderPreferencesPane() {
       paneStatus(pane, 'Saved.', 'ok');
     },
   }));
+
   pane.append(el('div', 'pane-section', 'Updates'));
   const updateRow = el('div', 'set-row');
   const updateText2 = el('div', 'set-text');
@@ -521,37 +538,26 @@ function renderPreferencesPane() {
   }
   pane.append(switchRow({
     title: 'Update automatically',
-    desc: 'Download new versions in the background. They install when you restart the app, never on their own.',
-    checked: S.init.state.autoUpdate !== false,
+    desc: 'Check for new versions and download them in the background; they install when you restart '
+      + 'the app, never on their own. Off: the app never contacts the update server unless you press Check now.',
+    checked: S.init.state.autoUpdate === true,
     onChange: (on) => {
       S.init.state.autoUpdate = on;
       cf.setState({ autoUpdate: on });
       paneStatus(pane, 'Saved.', 'ok');
     },
   }));
+
+  pane.append(el('div', 'pane-section', 'Diagnostics'));
   const logs = el('div', 'set-row');
   const logsText = el('div', 'set-text');
-  logsText.append(el('div', 'set-title', 'Diagnostics'),
+  logsText.append(el('div', 'set-title', 'Log and crash reports'),
     el('div', 'set-desc', 'The app keeps a log of what it did — runs, tools, connection trouble, crashes — '
       + 'but never your messages, files or key. After a crash it asks before sending anything.'));
   const openLogs = el('button', 'btn small', 'Open log folder');
   openLogs.addEventListener('click', () => call(cf.openLogs).catch((err) => paneStatus(pane, err.message, 'error')));
   logs.append(logsText, openLogs);
-  pane.append(switchRow({
-    title: 'Memory',
-    desc: 'The agent can read and update your CodingFleet memory: what it knows about you and your work, '
-      + 'shared with the web chat. Applies to new sessions.',
-    checked: caps.memory,
-    onChange: (on) => setCapability('memory', on),
-  }));
   pane.append(logs);
-
-  pane.append(switchRow({
-    title: 'Show legacy models',
-    desc: 'List older models in the picker. They may have reduced support.',
-    checked: prefs.show_legacy_models,
-    onChange: (on) => save({ show_legacy_models: on }, { reloadModels: true }),
-  }));
 
   pane.append(el('div', 'pane-section', 'Spending control'));
   const capRow = el('div', 'set-row');
