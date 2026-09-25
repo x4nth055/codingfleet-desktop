@@ -264,20 +264,37 @@ model per message.
 ## How it fits together
 
 ```
-src/core/      no Electron in here — the CLI will reuse it
-  config.js    default API address, environment overrides
-  api.js       HTTP + server-sent-events client for /v1
-  tools.js     the six client tools, plus the approval rules
-  runner.js    one run: reads events, asks for approval, runs tools,
-               posts results, tracks changed files
-  mcp.js       local MCP servers over stdio (JSON-RPC, tool discovery)
-  diff.js      line diffs for the edited-files card
-  undo.js      putting a run's files back, and refusing to clobber your edits
-src/main/      Electron main process: window, IPC, credentials, state, approvals
-src/renderer/  the window: sidebar, transcript, composer, settings
-               (no Node access — it never sees your API key)
-  cost.js      what a run will cost: plain arithmetic, no state, its own tests
+src/core/        no Electron in here — the CLI will reuse it
+  config.js      default API address, environment overrides
+  api.js         HTTP + server-sent-events client for /v1
+  tools.js       the six client tools, plus the approval rules
+  guard.js       secrets and destructive commands: what is always asked about
+  background.js  commands that keep running (dev servers, watchers)
+  runner.js      one run: reads events, asks for approval, runs tools,
+                 posts results, tracks changed files
+  mcp.js         local MCP servers over stdio (JSON-RPC, tool discovery)
+  diff.js        line diffs for the edited-files card
+  undo.js        putting a run's files back, and refusing to clobber your edits
+  images.js      which image links in an answer are files on this computer
+  log.js         the app's own log, with keys cut out
+src/main/        Electron main process: window, IPC, credentials, state, approvals
+  capture.js     screenshots: screens, windows, a dragged region
+  crash.js       catching crashes, and the report the user may send
+  updater.js     updates from GitHub releases
+  awake.js       keeping the computer awake while a run goes
+src/renderer/    the window (no Node access — it never sees your API key)
+  lib/           pure pieces with their own tests: formatting, tool words
+  cost.js        what a run will cost: plain arithmetic, no state, its own tests
+  app/           the window's script, split by feature and loaded in order:
+                 base, state, sidebar, transcript, tool calls, run events,
+                 attachments, composer, navigation, settings, billing, MCP, boot
 ```
+
+The files in `src/renderer/app/` are plain scripts sharing one global scope,
+loaded in the order `index.html` lists them: a later file may use what an
+earlier one declares at load time; anything else is used only from inside
+functions, which run once everything has loaded. Logic that needs no DOM goes
+in `lib/` (or `src/core/`) with a test beside it.
 
 The renderer is fully sandboxed: `preload.js` is the only bridge, and it
 exposes a fixed list of calls and nothing else. The window can use your
