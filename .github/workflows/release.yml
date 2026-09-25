@@ -1,6 +1,6 @@
 # Builds the app for Windows, macOS and Linux and publishes them as one GitHub
 # release, which is also the auto-update feed. Start it by pushing a tag that
-# matches package.json:  git tag v0.3.0 && git push origin v0.3.0
+# matches package.json:  git tag v1.0.0 && git push origin v1.0.0
 #
 # Windows is signed through SignPath Foundation once its settings exist (see
 # .signpath/README.md); until then the installer is unsigned and Windows
@@ -56,9 +56,11 @@ jobs:
       # With SignPath (see .signpath/README.md): sign the app, build the
       # installer around the signed app, sign the installer, then write the
       # update metadata for the signed file and publish it.
+      # An installer build (not --dir): only it writes resources/app-update.yml,
+      # without which an installed copy cannot find its updates.
       - name: Windows app, unpacked
         if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        run: npx electron-builder --win --dir
+        run: npx electron-builder --win nsis --publish never
       - name: Upload the app for signing
         id: unsigned-app
         if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
@@ -86,7 +88,8 @@ jobs:
         run: |
           rm -rf dist/win-unpacked
           mv dist/win-unpacked-signed dist/win-unpacked
-          npx electron-builder --win nsis --prepackaged dist/win-unpacked
+          test -f dist/win-unpacked/resources/app-update.yml
+          npx electron-builder --win nsis --prepackaged dist/win-unpacked --publish never
       - name: Upload the installer for signing
         id: unsigned-installer
         if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
@@ -141,8 +144,10 @@ jobs:
         run: |
           args=(--mac dmg zip --x64 --arm64 --publish always)
           if [ -z "$CSC_LINK" ]; then
-            export CSC_IDENTITY_AUTO_DISCOVERY=false
-            echo "::warning::No Apple certificate: the macOS app is unsigned and cannot update itself."
+            # Ad-hoc signed ("-"): no Apple certificate, but Apple silicon runs
+            # only signed code, and an unsigned app there is reported "damaged".
+            args+=(-c.mac.identity=-)
+            echo "::warning::No Apple certificate: the macOS app is ad-hoc signed and cannot update itself."
           elif [ -n "$APPLE_ID" ]; then
             args+=(-c.mac.notarize=true)
           fi

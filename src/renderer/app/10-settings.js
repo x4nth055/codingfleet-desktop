@@ -74,6 +74,8 @@ async function applyNewAccount(data) {
   renderAccount();
   renderSidebar();
   renderMain();
+  // A first sign-in is also the first start that can ask about updates.
+  askAboutUpdates();
   await loadAll();
 }
 

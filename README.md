@@ -345,8 +345,8 @@ Windows computer is enough to ship all three. Bump `version` in `package.json`,
 commit, then push a matching tag:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 `.github/workflows/release.yml` runs the tests on each system, builds the

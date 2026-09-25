@@ -4,7 +4,7 @@
 // blockmap (for downloading only the changed parts) describe a file that no
 // longer exists. This writes both again, for the file as it is now:
 //
-//   node scripts/installer-metadata.cjs dist/CodingFleet-Setup-0.3.0.exe
+//   node scripts/installer-metadata.cjs dist/CodingFleet-Setup-1.0.0.exe
 //
 // It uses electron-builder's own blockmap code, so the output is what
 // electron-builder itself would have written for a signed file.
