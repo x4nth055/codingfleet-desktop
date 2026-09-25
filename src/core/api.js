@@ -251,6 +251,7 @@ module.exports = {
   startDeviceAuth: (name) => unauthenticated('POST', '/auth/device', { name }),
   pollDeviceAuth: (deviceCode) => unauthenticated('POST', '/auth/device/token', { device_code: deviceCode }),
   credits: () => request('GET', '/credits'),
+  crashReport: (report) => request('POST', '/diagnostics/crash', report, undefined, 30000),
   // include: 'provider' adds each model's provider and the web picker's order.
   models: ({ include } = {}) => request('GET', include ? `/models?include=${id(include)}` : '/models'),
   listSessions: (limit = 100) => request('GET', `/sessions?limit=${limit}`),

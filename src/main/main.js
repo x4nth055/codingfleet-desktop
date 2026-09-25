@@ -9,9 +9,14 @@ const path = require('path');
 
 const api = require('../core/api');
 const { createAwake } = require('./awake');
+const { startNativeDumps, createCrashes } = require('./crash');
+const { createUpdater } = require('./updater');
+const { createLog } = require('../core/log');
+const { BackgroundJobs } = require('../core/background');
 const capture = require('./capture');
 const config = require('../core/config');
 const git = require('./git');
+const guard = require('../core/guard');
 const images = require('../core/images');
 const tools = require('../core/tools');
 const { LocalMcp } = require('../core/mcp');
@@ -31,6 +36,15 @@ const flag = (name) => {
   return hit.includes('=') ? hit.slice(name.length + 3) : true;
 };
 const SCREENSHOT = flag('screenshot');
+
+// The app's own log (core/log.js) and crash handling (crash.js), from the very
+// start: a crash while starting up is the one most worth knowing about.
+startNativeDumps();
+const log = createLog(path.join(app.getPath('userData'), 'logs'), { echo: !app.isPackaged });
+const crashes = createCrashes({ log });
+crashes.watch(() => win);
+// Updates from the project's releases, for an installed build (updater.js).
+const updates = createUpdater({ log, send: (channel, payload) => send(channel, payload), enabled: () => state.autoUpdate !== false });
 // Applies to this process only; never written to the saved state.
 const PERMISSION_OVERRIDE = flag('shot-permission');
 
@@ -224,9 +238,20 @@ function remoteServersForRun() {
   return servers;
 }
 
+// Whether a saved key is really protected. On Linux without a keyring (GNOME
+// Keyring, KWallet) Electron either cannot encrypt or falls back to a fixed
+// key ("basic_text"): the file is as good as plain text. The key is still
+// saved — the app would be unusable otherwise — but the window says so.
+function keyProtected() {
+  if (!safeStorage.isEncryptionAvailable()) return false;
+  if (process.platform !== 'linux' || typeof safeStorage.getSelectedStorageBackend !== 'function') return true;
+  return !['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend());
+}
+
 function settingsView() {
   const { apiBase, apiKey } = api.snapshot();
   return {
+    keyProtected: keyProtected(),
     apiBase,
     defaultApiBase: config.DEFAULT_API_BASE,
     hasKey: Boolean(apiKey),
@@ -325,6 +350,8 @@ function createWindow() {
     minHeight: 600,
     show: false,
     title: 'CodingFleet',
+    // Windows and macOS take the icon from the app itself; Linux from here.
+    ...(process.platform === 'linux' ? { icon: path.join(__dirname, '..', '..', 'build', 'icon-256.png') } : {}),
     backgroundColor: theme.background,
     titleBarStyle: 'hidden',
     // Windows and Linux draw their buttons over the top right; macOS keeps its
@@ -340,6 +367,7 @@ function createWindow() {
     },
   });
   Menu.setApplicationMenu(null);
+  crashes.watchWindow(win);
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'), { query: { theme: startTheme } });
 
   win.once('ready-to-show', () => {
@@ -565,23 +593,36 @@ async function screenshotForAgent(args, { call, sessionId } = {}) {
 
 // The tools this process runs itself, for one session: a decoder for an image
 // file, and the screen for a screenshot.
+// Commands the agent started with background: true. They outlive the run
+// that started them and stop with their session or the app (core/background.js).
+const backgroundJobs = new BackgroundJobs({ shell: tools.SHELL, env: tools.commandEnv, kill: tools.killTree });
+backgroundJobs.onChange((sessionId, jobs) => send('background:changed', { sessionId, jobs }));
+
 const handlersFor = (sessionId) => new Map([
   ['view_image', viewLocalImage],
   ['take_screenshot', (args, context) => screenshotForAgent(args, { ...context, sessionId })],
+  // run_command stays the ordinary tool unless it asks for the background.
+  ['run_command', (args, context) => (args.background
+    ? backgroundJobs.start(sessionId, String(args.command || ''), context.cwd)
+    : tools.executeTool('run_command', args, context))],
+  ['read_background', (args, context) => backgroundJobs.read(sessionId, args.id, args.wait, context.signal)],
+  ['stop_background', (args) => backgroundJobs.stop(sessionId, args.id)],
 ]);
 
 const FINISHED_TEXT = {
   completed: 'The agent finished.',
   budget: 'The agent stopped: the message reached its credit cap.',
   error: 'The run stopped with an error.',
+  interrupted: 'The run stopped while this computer was not answering. It is saved: type "continue" to pick it up.',
 };
 
 function approve(sessionId, cwd, call, localTools) {
   const reason = localTools && localTools.has(call.name)
     ? 'uses a local MCP tool'
     : tools.approvalReason(call.name, call.arguments, cwd);
-  if (!reason || (PERMISSION_OVERRIDE || state.permissionMode) === 'auto') return 'allow';
-  if (allowedReasons(sessionId).has(reason)) return 'allow';
+  const auto = (PERMISSION_OVERRIDE || state.permissionMode) === 'auto';
+  // Destructive commands ask every time; secrets ask even in auto mode.
+  if (!guard.mustAsk(reason, { auto, allowedThisSession: allowedReasons(sessionId).has(reason) })) return 'allow';
   return new Promise((resolve) => {
     approvals.set(call.id, { resolve, sessionId, reason });
     send('run:event', { sessionId, event: 'client.approval', data: { id: call.id, reason } });
@@ -598,6 +639,20 @@ function confirmInterruptedTool(sessionId, call) {
   });
 }
 
+// What a run did, for the log: its start and end, each tool's name and
+// outcome, and connection trouble. Never arguments or output.
+function logRunEvent(sessionId, event, data) {
+  data = data || {};
+  if (event === 'run.started') log.info(`run ${data.run_id} started in session ${sessionId}`);
+  else if (event === 'run.ended') log.info(`run ${data.run_id} ended: ${data.reason}${data.error ? ` (${data.error})` : ''}`);
+  else if (event === 'tool.call') log.info(`tool ${data.name} ${data.id}${data.executor === 'client' ? ' on this computer' : ''}`);
+  else if (event === 'tool.result') log.info(`tool ${data.name} ${data.id} ${data.ok ? 'ok' : 'failed'}`);
+  else if (event === 'client.tool_denied') log.info(`tool ${data.id} declined`);
+  else if (event === 'client.reconnecting') log.warn(`session ${sessionId}: stream dropped, reattaching`);
+  else if (event === 'client.error') log.error(`session ${sessionId}: ${data.message} (status ${data.status}, ${data.code})`);
+  else if (event === 'client.finished') log.info(`session ${sessionId} run finished: ${data.reason}`);
+}
+
 function makeRun(sessionId, localTools, recovery) {
   const local = state.sessions[sessionId] || {};
   return new Run({
@@ -611,6 +666,7 @@ function makeRun(sessionId, localTools, recovery) {
     confirmRetry: (call) => confirmInterruptedTool(sessionId, call),
     onEvent: (event, data) => {
       send('run:event', { sessionId, event, data });
+      logRunEvent(sessionId, event, data);
       if (event === 'client.finished' && FINISHED_TEXT[data.reason]) notify(sessionId, FINISHED_TEXT[data.reason]);
     },
   });
@@ -842,6 +898,9 @@ function pointGitWatch(target) {
 
 function registerIpc() {
   handle('app:init', () => ({
+    version: app.getVersion(),
+    // A crash since the last window load, for the window to offer to send.
+    crash: crashes.pending(),
     settings: settingsView(),
     shell: tools.SHELL.name,
     platform: process.platform,
@@ -988,6 +1047,47 @@ function registerIpc() {
     };
   });
 
+  // Updates: what the updater knows, and the user's say on when to install.
+  handle('update:status', () => ({ ...updates.status(), current: app.getVersion() }));
+  handle('update:check', () => updates.check());
+  handle('update:download', () => updates.download());
+  handle('update:install', () => updates.install());
+
+  // Crash reports: sent only when the user says so, from the window's banner.
+  handle('diagnostics:send', async () => {
+    const crash = crashes.pending();
+    if (!crash) return { sent: false };
+    const result = await api.crashReport({
+      kind: crash.kind,
+      message: crash.message,
+      stack: crash.stack,
+      platform: crash.platform,
+      happened_at: crash.at,
+      log_tail: log.tail(300),
+    });
+    crashes.clear();
+    log.info(`crash report ${result && result.id} sent`);
+    return { sent: true };
+  });
+  handle('diagnostics:dismiss', () => {
+    crashes.clear();
+    return true;
+  });
+  handle('diagnostics:openLogs', async () => {
+    const error = await shell.openPath(log.dir);
+    if (error) throw new Error(error);
+    return log.dir;
+  });
+  // What went wrong in the window: logged, never a crash prompt on its own.
+  ipcMain.on('log:renderer', (_event, entry) => {
+    const text = String((entry && entry.message) || entry || '').slice(0, 4000);
+    log.error(`window: ${text}`);
+  });
+
+  // Commands running in the background, for the pill above the prompt.
+  handle('background:list', (sessionId) => backgroundJobs.list(sessionIdOf(sessionId)));
+  handle('background:stop', ({ sessionId, id } = {}) => backgroundJobs.stop(sessionIdOf(sessionId), id));
+
   // An image the agent made in the session's folder, for the conversation.
   handle('files:localImage', (arg) => localImage(arg));
 
@@ -1035,6 +1135,7 @@ function registerIpc() {
   handle('api:deleteSession', async (sessionId) => {
     if (runs.has(sessionId)) throw new Error('Stop the run in this session first.');
     const result = await api.deleteSession(sessionId);
+    backgroundJobs.stopAll(sessionId);
     delete state.sessions[sessionId];
     saveState();
     return result;
@@ -1066,7 +1167,7 @@ function registerIpc() {
   });
 
   handle('state:set', (patch) => {
-    for (const key of ['model', 'permissionMode', 'lastCwd', 'notifications', 'keepAwake']) {
+    for (const key of ['model', 'permissionMode', 'lastCwd', 'notifications', 'keepAwake', 'autoUpdate']) {
       if (patch && key in patch) state[key] = patch[key];
     }
     stayAwake();
@@ -1254,7 +1355,10 @@ function registerIpc() {
     const waiting = approvals.get(callId);
     if (!waiting) return false;
     approvals.delete(callId);
-    if (decision === 'allow-session') rememberAllow(waiting.sessionId, waiting.reason);
+    // A destructive command is never allowed for a whole session, whatever the window sends.
+    if (decision === 'allow-session' && !guard.ALWAYS_ASK.has(waiting.reason)) {
+      rememberAllow(waiting.sessionId, waiting.reason);
+    }
     waiting.resolve(decision === 'deny' ? 'deny' : 'allow');
     return true;
   });
@@ -1283,12 +1387,15 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
     });
     session.defaultSession.setPermissionCheckHandler((_wc, permission, origin, details) =>
       permission === 'media' && (details || {}).mediaType === 'audio' && ownPage(details.securityOrigin || origin));
+    log.info(`CodingFleet ${app.getVersion()} starting on ${process.platform} ${os.release()} `
+      + `(${process.arch}), Electron ${process.versions.electron}`);
     loadState();
     loadRecovery();
     loadCredentials();
     loadMcp();
     registerIpc();
     createWindow();
+    updates.start();
   });
   app.on('window-all-closed', () => app.quit());
   app.on('will-quit', () => {
@@ -1298,5 +1405,9 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
 
   // Leave the server turn available for recovery. Abort local children on exit;
   // their persisted 'executing' state requires an explicit retry decision.
-  app.on('before-quit', () => { for (const run of runs.values()) run.suspend(); });
+  app.on('before-quit', () => {
+    for (const run of runs.values()) run.suspend();
+    // A dev server the agent started must not outlive the app that started it.
+    backgroundJobs.stopAll();
+  });
 }

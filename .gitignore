@@ -19,6 +19,8 @@ shot.png
 tmp-*
 # ...but docs images are part of the repo
 !docs/**/*.png
+# ...and so are the app icons (npm run icon renders them from build/icon.svg)
+!build/*.png
 
 # OS / editor noise
 .DS_Store

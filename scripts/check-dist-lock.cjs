@@ -14,7 +14,14 @@ const pkg = require('../package.json');
 const build = pkg.build || {};
 const output = (build.directories && build.directories.output) || 'dist';
 const product = build.productName || pkg.productName || pkg.name;
-const artifact = path.resolve(__dirname, '..', output, `${product} ${pkg.version}.exe`);
+// Every Windows file a build writes that a running copy can hold open: the
+// installer, the portable launcher (the app itself), and the unpacked app.
+const artifacts = [
+  `CodingFleet-Setup-${pkg.version}.exe`,
+  `CodingFleet-${pkg.version}-portable.exe`,
+  `${product} ${pkg.version}.exe`,
+  path.join('win-unpacked', `${product}.exe`),
+].map((name) => path.resolve(__dirname, '..', output, name));
 
 function isLocked(file) {
   // The file does not exist yet: nothing to overwrite, nothing to lock.
@@ -28,7 +35,8 @@ function isLocked(file) {
   }
 }
 
-if (isLocked(artifact)) {
+const artifact = artifacts.find(isLocked);
+if (artifact) {
   const shown = path.relative(process.cwd(), artifact).replace(/\\/g, '/');
   console.error(
     `\nCannot build: ${shown} is locked, because the app is running from it.\n`

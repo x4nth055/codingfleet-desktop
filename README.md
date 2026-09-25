@@ -152,10 +152,29 @@ This is the part worth understanding before you hand an agent your filesystem.
 | `run_command`, `execute_code` with a command | Asks — *"runs a command"* |
 | `fs_write`, `fs_edit` | Asks — *"changes files"* |
 | Any local MCP tool | Asks — *"uses a local MCP tool"* |
+| Reading `.env`, keys and other credential files, or printing the environment | Asks **even in Auto-approve** — *"reads secrets"* |
+| Deleting a tree, rewriting git history, wiping a disk or a database, shutting down | Asks **every time**, whatever the mode — *"may delete or overwrite data"* |
+| Piping a download into a shell (`curl … \| sh`, `iwr … \| iex`) | Asks **every time** — *"runs a script from the internet"* |
 
 Commands are killed as a process tree after their timeout (60s default, 600s
 max), output is clipped at 200k characters, and `fs_glob` skips `node_modules`,
-`.git`, `__pycache__`, `.venv` and `venv`.
+`.git`, `__pycache__`, `.venv` and `venv`. Commands run with your environment,
+except the key this app signs in with.
+
+The last three rows are guards, in `src/core/guard.js`: patterns for what
+agents actually write, meant to stop a mistake or a poisoned repository from
+going through unseen. They are not a sandbox, and a command built to hide from
+them can. A secrets file can still be allowed for the rest of a session; a
+destructive command cannot — there is no "allow all" for it.
+
+### Background commands
+
+A dev server or a watcher never finishes, so waiting for it would block the
+run. The agent can start one with `background: true`: the call answers at once,
+the command keeps running across later runs of the session, and the agent reads
+what it printed with `read_background` and ends it with `stop_background`. A
+pill above the prompt lists what is running, with a Stop button each. They stop
+when their session is deleted or the app quits.
 
 ### Ask before changes, or Auto-approve
 
@@ -171,8 +190,8 @@ call. Allowing one `npm test` means every later command in that session runs
 unprompted, `rm -rf` included. It is convenient once you trust what a session
 is doing, and it is not a per-command allowlist.
 
-**Auto-approve** — nothing is ever asked; every call runs the moment it
-arrives. Use it for a folder you can afford to lose, a scratch checkout, or a
+**Auto-approve** — nothing is asked except the guarded calls above; every
+other call runs the moment it arrives. Use it for a folder you can afford to lose, a scratch checkout, or a
 run you are watching. In a folder full of work you care about, leave it off.
 
 Either way, the agent stays inside the tools it was given, and **Undo** below
@@ -193,6 +212,17 @@ are reported as skipped rather than guessed at.
 Undo lives in memory, for the last 20 runs, and does not survive restarting
 the app. It is a way out of a bad run, not a version control system — for that
 there is git, and committing before a big run is still a good habit.
+
+### When the computer sleeps
+
+While a run is going the app asks the system to stay awake (Preferences, on by
+default): the screen still turns off, but a laptop does not go into standby on
+its own and freeze the app. Closing the lid or choosing Sleep still sleeps it.
+
+If the computer does stop answering for ten minutes — asleep, off, offline — a
+run in a folder is **stopped and kept**, like a cancel: the call that could not
+run is in its history, and typing **continue** picks the work up. A run in a
+cloud sandbox never depends on this computer and carries on with it off.
 
 ---
 
@@ -255,30 +285,81 @@ microphone (for voice input) and no other device.
 
 ---
 
+## Logs and crash reports
+
+The app keeps its own log — runs starting and ending, tool names and outcomes,
+connection trouble, crashes — in `logs/main.log` in its data folder
+(Preferences → Diagnostics → Open log folder). It never holds a message, a
+file's contents, a command's output or a key; keys and tokens are cut out of
+every line before it is written.
+
+After a crash the app asks, once, whether to send a report: the error, the
+version and platform, and the last lines of that log. Nothing is sent without
+that answer. Native crashes also leave a minidump in the crash dumps folder,
+which stays on your computer.
+
 ## Development
 
 ```bash
-npm test          # Tools, approvals, reconnects, result retries, MCP, diffs, undo, cost
+npm test          # Tools, guards, background jobs, approvals, reconnects, MCP, diffs, undo, cost, log
 npm run test:layout # Isolated render checks across themes and window sizes
 npm run test:transcript # Where a turn's tool calls sit in its answer
 npm run e2e       # a real run against the API (needs CODINGFLEET_API_KEY)
 ```
 
-Build installers:
+Build on this computer:
 
 ```bash
-npm run dist        # Windows portable .exe
-npm run dist:mac    # macOS dmg + zip
-npm run dist:linux  # Linux AppImage + deb
+npm run dist          # Windows installer (dist/CodingFleet-Setup-<version>.exe)
+npm run dist:portable # Windows portable .exe, which cannot update itself
+npm run dist:mac      # macOS dmg + zip (needs a Mac)
+npm run dist:linux    # Linux AppImage + deb (needs Linux)
+npm run icon          # render build/icon.svg to build/icon.png after changing it
 ```
 
-On Windows the portable .exe in `dist/` *is* the running app, so rebuilding
-over it would block forever on a file lock. `dist` now stops at once and says
-so; to build while the app is open, use:
+A running copy of the app locks the files a build writes; `dist` stops at once
+and says so. To build while the app is open, `npm run dist:next` writes to
+`dist-next/`.
+
+## Releasing
+
+Releases are built by GitHub Actions on Windows, macOS and Linux machines, so a
+Windows computer is enough to ship all three. Bump `version` in `package.json`,
+commit, then push a matching tag:
 
 ```bash
-npm run dist:next   # same build, written to dist-next/ so nothing is locked
+git tag v0.3.0
+git push origin v0.3.0
 ```
+
+`.github/workflows/release.yml` runs the tests on each system, builds the
+Windows installer, the macOS dmg and zip (Intel and Apple silicon) and the
+Linux AppImage and deb, and publishes them as one GitHub release. That release
+is also the **auto-update feed**: installed copies check it at start and every
+six hours, download in the background, and install when the user restarts.
+An app cannot read a private repository without carrying a token, so updates
+work once this repository — or a public one named in `package.json`
+`build.publish` — is public.
+
+### Code signing
+
+Unsigned builds work, but Windows shows a SmartScreen warning to every new
+user and macOS refuses to open the app until it is right-clicked and opened,
+and cannot update it. Signing turns itself on in the release workflow when its
+secrets exist:
+
+- **Windows — Azure Trusted Signing** (about $10 a month; Microsoft verifies
+  the publisher first). Set the secrets `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`,
+  `AZURE_CLIENT_SECRET` and the variables `AZURE_SIGNING_ENDPOINT`,
+  `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE`, `AZURE_SIGNING_PUBLISHER`.
+  Open-source projects can instead apply to SignPath Foundation for free
+  signing. A classic OV certificate now lives on a hardware token or a cloud
+  HSM and cannot be used from a file.
+- **macOS — Apple Developer Program** ($99 a year). Export a *Developer ID
+  Application* certificate as .p12 and set `MAC_CERTIFICATE_P12` (base64) and
+  `MAC_CERTIFICATE_PASSWORD`; add `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and
+  `APPLE_TEAM_ID` to notarize.
+- **Linux** needs no signing.
 
 Screenshot and debugging flags:
 

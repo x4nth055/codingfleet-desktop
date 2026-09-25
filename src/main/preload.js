@@ -61,6 +61,27 @@ contextBridge.exposeInMainWorld('cf', {
   copyText: call('clipboard:write'),
   screenshot: call('files:screenshot'),
   screenTargets: call('files:screenTargets'),
+  updateStatus: call('update:status'),
+  checkForUpdate: call('update:check'),
+  downloadUpdate: call('update:download'),
+  installUpdate: call('update:install'),
+  onUpdate: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on('update:status', wrapped);
+    return () => ipcRenderer.removeListener('update:status', wrapped);
+  },
+  sendCrashReport: call('diagnostics:send'),
+  dismissCrash: call('diagnostics:dismiss'),
+  openLogs: call('diagnostics:openLogs'),
+  // Errors in the window, for the app's log. Fire and forget.
+  logError: (message) => ipcRenderer.send('log:renderer', { message: String(message || '').slice(0, 4000) }),
+  backgroundJobs: call('background:list'),
+  stopBackground: call('background:stop'),
+  onBackground: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on('background:changed', wrapped);
+    return () => ipcRenderer.removeListener('background:changed', wrapped);
+  },
   // The path of a file dropped on the window (Electron no longer puts it on File).
   pathForFile: (file) => {
     try { return webUtils.getPathForFile(file) || ''; } catch { return ''; }

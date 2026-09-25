@@ -1962,7 +1962,9 @@ function onAgentEvent(sessionId, event, data) {
 
 // ── Tool calls, grouped ────────────────────────────────────────────────────
 const VERBS = {
-  run_command: (a) => ['Run', a.command],
+  run_command: (a) => [a.background ? 'Run in background' : 'Run', a.command],
+  read_background: (a) => ['Read background output', a.id],
+  stop_background: (a) => ['Stop background command', a.id],
   execute_code: (a) => [a.command ? 'Run' : 'Write', a.filename || a.command],
   fs_read: (a) => ['Read', a.path],
   fs_write: (a) => ['Write', a.path],
@@ -2002,6 +2004,7 @@ const ALLOW_LABELS = {
   'changes files': 'Allow all file changes this session',
   'reads outside the project folder': 'Allow reads outside the folder this session',
   'takes a picture of your screen': 'Allow screenshots this session',
+  'reads secrets': 'Allow reading secrets this session',
   'uses a local MCP tool': 'Allow local MCP tools this session',
 };
 
@@ -2011,8 +2014,14 @@ const REASONS = {
   'changes files': 'wants to change a file',
   'reads outside the project folder': 'wants to read outside the project folder',
   'takes a picture of your screen': 'wants to take a picture of your screen',
+  'reads secrets': 'wants to read a secrets file or your environment variables',
+  'may delete or overwrite data': 'wants to run a command that can delete or overwrite data',
+  'runs a script from the internet': 'wants to download a script and run it',
   'uses a local MCP tool': 'wants to use a tool from a local MCP server',
 };
+
+// Reasons the app asks about every time (src/core/guard.js ALWAYS_ASK).
+const ALWAYS_ASKED = new Set(['may delete or overwrite data', 'runs a script from the internet']);
 
 const ACTIVE = ['queued', 'running', 'waiting'];
 
@@ -2295,7 +2304,11 @@ function approvalBar(tool) {
   const allow = el('button', 'btn primary', retry ? 'Retry tool' : 'Allow');
   allow.addEventListener('click', decide('allow'));
   if (retry) bar.append(deny, allow);
-  else bar.append(deny, always, allow);
+  else if (ALWAYS_ASKED.has(tool.reason)) {
+    // Asked every time, even in auto mode: there is no "allow all" for these.
+    bar.classList.add('risky');
+    bar.append(el('span', 'approval-note', 'Always asked'), deny, allow);
+  } else bar.append(deny, always, allow);
   return bar;
 }
 
@@ -2632,7 +2645,15 @@ function finishRun(sessionId) {
     });
   }
   const note = ended && ended.reason === 'cancelled' ? 'Stopped'
-    : ended && ended.reason === 'budget' ? 'Stopped at the spend limit' : null;
+    : ended && ended.reason === 'interrupted' ? 'Stopped: this computer stopped answering'
+      : ended && ended.reason === 'budget' ? 'Stopped at the spend limit' : null;
+  // Asleep or offline mid-run: the turn is saved, and "continue" picks it up.
+  // Offered in the composer, never sent on the user's behalf.
+  if (ended && ended.reason === 'interrupted' && sessionId === S.current && !$('prompt').value.trim()) {
+    $('prompt').value = 'continue';
+    autosize();
+    updateSendButton();
+  }
   const usage = run && run.usage;
   if (usage || note) {
     addItem(sessionId, { type: 'footer', model: (run && run.model) || (usage && usage.model), usage, note });
@@ -3646,6 +3667,7 @@ function renderComposer() {
   updateCostHint();
   updateSendButton();
   ensureGit();
+  renderBackground();
 }
 
 function updateSendButton() {
@@ -3738,6 +3760,73 @@ function ensureGit() {
     // loop while the composer is painted.
     gitRetryAt = Date.now() + 15_000;
   });
+}
+
+// ── Background commands ────────────────────────────────────────────────────
+// A dev server or watcher the agent started keeps running after its run; the
+// pill above the prompt says so and can stop it. The main process owns the
+// processes (core/background.js) and says when the list changes.
+const backgroundBySession = new Map(); // session id -> jobs, newest first
+let backgroundOpen = false;
+
+function onBackgroundChanged({ sessionId, jobs }) {
+  backgroundBySession.set(sessionId, jobs || []);
+  if (sessionId === S.current) renderBackground();
+}
+
+function uptime(since) {
+  const seconds = Math.max(0, Math.round((Date.now() - since) / 1000));
+  return seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+function renderBackground() {
+  const box = $('bgJobs');
+  if (!box) return;
+  const jobs = (S.current && backgroundBySession.get(S.current)) || [];
+  const running = jobs.filter((j) => j.status === 'running');
+  if (!running.length) {
+    box.hidden = true;
+    backgroundOpen = false;
+    return;
+  }
+  box.hidden = false;
+  const pill = el('button', 'changes-pill bg-pill');
+  pill.type = 'button';
+  pill.title = 'Commands the agent started in the background. Click to see or stop them.';
+  pill.append(el('span', 'bg-dot'), el('span', null,
+    `${running.length} running in the background`), icon('caret', 'icon caret'));
+  pill.addEventListener('click', () => { backgroundOpen = !backgroundOpen; renderBackground(); });
+  const parts = [pill];
+  if (backgroundOpen) {
+    const list = el('div', 'bg-list');
+    for (const job of running) {
+      const row = el('div', 'bg-row');
+      const text = el('div', 'bg-text');
+      text.append(el('code', 'bg-command', job.command), el('span', 'bg-sub',
+        `${job.id} · running ${uptime(job.started)}${job.pid ? ` · pid ${job.pid}` : ''}`));
+      const last = String(job.tail || '').trim().split(/\r?\n/).pop();
+      if (last) text.append(el('span', 'bg-tail', last.slice(0, 200)));
+      const stop = el('button', 'btn small danger', 'Stop');
+      stop.addEventListener('click', async () => {
+        stop.disabled = true;
+        stop.textContent = 'Stopping…';
+        try { await call(cf.stopBackground, { sessionId: S.current, id: job.id }); } catch (err) { showBanner(err.message); }
+      });
+      row.append(text, stop);
+      list.append(row);
+    }
+    parts.push(list);
+  }
+  box.replaceChildren(...parts);
+}
+
+// A session opened after the app started: ask once which of its jobs run.
+async function loadBackground(sessionId) {
+  if (!sessionId || backgroundBySession.has(sessionId) || typeof cf.backgroundJobs !== 'function') return;
+  try {
+    backgroundBySession.set(sessionId, await call(cf.backgroundJobs, sessionId));
+    if (sessionId === S.current) renderBackground();
+  } catch { /* the pill stays hidden */ }
 }
 
 function renderChanges() {
@@ -3909,7 +3998,8 @@ function onGitChanged({ sessionId, cwd, summary }) {
   renderChanges();
 }
 
-function showBanner(text, actions = []) {
+// `dismiss` changes what the closing button says and does besides closing.
+function showBanner(text, actions = [], dismiss = {}) {
   const banner = $('banner');
   banner.replaceChildren(el('span', null, text));
   for (const action of actions) {
@@ -3917,8 +4007,11 @@ function showBanner(text, actions = []) {
     button.addEventListener('click', action.run);
     banner.append(button);
   }
-  const close = el('button', 'btn', 'Dismiss');
-  close.addEventListener('click', hideBanner);
+  const close = el('button', 'btn', dismiss.label || 'Dismiss');
+  close.addEventListener('click', () => {
+    hideBanner();
+    if (dismiss.run) dismiss.run();
+  });
   banner.append(close);
   banner.hidden = false;
 }
@@ -4301,6 +4394,7 @@ async function selectSession(id) {
   hideBanner();
   if (S.current !== id) discardAttachments();
   S.current = id;
+  loadBackground(id);
   restoreDraft();
   S.model = sessionModel(currentSession()) || newSessionModel();
   S.panel.open = false;
@@ -4814,6 +4908,14 @@ function renderSignedIn(show) {
   const kind = key.client === 'desktop' ? ' · Desktop app key' : key.client === 'api' ? ' · Key for code' : '';
   text.append(el('div', 'signed-in-key', `Key: ${keyName}${key.hint || S.settings.keyHint || ''}${kind}`
     + (S.settings.apiBase !== S.settings.defaultApiBase ? ` · ${S.settings.apiBase}` : '')));
+  if (S.settings.keyProtected === false && !S.settings.fromEnv) {
+    const warn = el('div', 'signed-in-warn');
+    warn.append(el('strong', null, 'Your key is saved without encryption. '),
+      el('span', null, 'This computer has no keyring (GNOME Keyring or KWallet) for the app to lock it '
+        + 'with, so anyone who can read your files can read the key. Install and unlock one, then sign '
+        + 'in again, or revoke this key when you stop using the app.'));
+    text.append(warn);
+  }
   if (paysWithThisKey()) {
     const warn = el('div', 'signed-in-warn');
     warn.append(el('strong', null, 'Unlimited models cost credits with this key. '),
@@ -5171,6 +5273,35 @@ function renderPreferencesPane() {
       paneStatus(pane, 'Saved.', 'ok');
     },
   }));
+  pane.append(el('div', 'pane-section', 'Updates'));
+  const updateRow = el('div', 'set-row');
+  const updateText2 = el('div', 'set-text');
+  updateText2.append(el('div', 'set-title', 'Version'), el('div', 'set-desc'));
+  updateText2.querySelector('.set-desc').id = 'updateLine';
+  updateRow.append(updateText2, el('button', 'btn small', 'Check now'));
+  pane.append(updateRow);
+  renderUpdateRow(updateRow);
+  if (!updateState && typeof cf.updateStatus === 'function') {
+    call(cf.updateStatus).then((status) => { updateState = status; renderUpdateRow(updateRow); }).catch(() => {});
+  }
+  pane.append(switchRow({
+    title: 'Update automatically',
+    desc: 'Download new versions in the background. They install when you restart the app, never on their own.',
+    checked: S.init.state.autoUpdate !== false,
+    onChange: (on) => {
+      S.init.state.autoUpdate = on;
+      cf.setState({ autoUpdate: on });
+      paneStatus(pane, 'Saved.', 'ok');
+    },
+  }));
+  const logs = el('div', 'set-row');
+  const logsText = el('div', 'set-text');
+  logsText.append(el('div', 'set-title', 'Diagnostics'),
+    el('div', 'set-desc', 'The app keeps a log of what it did — runs, tools, connection trouble, crashes — '
+      + 'but never your messages, files or key. After a crash it asks before sending anything.'));
+  const openLogs = el('button', 'btn small', 'Open log folder');
+  openLogs.addEventListener('click', () => call(cf.openLogs).catch((err) => paneStatus(pane, err.message, 'error')));
+  logs.append(logsText, openLogs);
   pane.append(switchRow({
     title: 'Memory',
     desc: 'The agent can read and update your CodingFleet memory: what it knows about you and your work, '
@@ -5178,6 +5309,7 @@ function renderPreferencesPane() {
     checked: caps.memory,
     onChange: (on) => setCapability('memory', on),
   }));
+  pane.append(logs);
 
   pane.append(switchRow({
     title: 'Show legacy models',
@@ -6058,6 +6190,8 @@ function wire() {
   });
 
   cf.onRunEvent(onRunEvent);
+  if (typeof cf.onBackground === 'function') cf.onBackground(onBackgroundChanged);
+  if (typeof cf.onUpdate === 'function') cf.onUpdate(onUpdateStatus);
   if (typeof cf.onGitChanged === 'function') cf.onGitChanged(onGitChanged);
   cf.onOpenSession((sessionId) => {
     if (S.sessions.some((s) => s.id === sessionId)) selectSession(sessionId);
@@ -6096,6 +6230,90 @@ function wire() {
   setInterval(tickLoadRetry, 1000);
 }
 
+// Errors in this window go to the app's log, where a crash report can show them.
+window.addEventListener('error', (event) => {
+  if (typeof cf.logError === 'function') {
+    cf.logError(event.error && event.error.stack ? event.error.stack : `${event.message} (${event.filename}:${event.lineno})`);
+  }
+});
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason;
+  if (typeof cf.logError === 'function') cf.logError(`unhandled rejection: ${(reason && reason.stack) || reason}`);
+});
+
+// ── Updates ────────────────────────────────────────────────────────────────
+// Downloaded in the background by the main process (updater.js); installed
+// only when the user restarts, from this banner or from Preferences.
+let updateState = null;
+let updateOffered = null;
+
+function updateText(status) {
+  if (!status) return '';
+  switch (status.state) {
+    case 'checking': return 'Checking for updates…';
+    case 'current': return 'You have the latest version.';
+    case 'available': return `Version ${status.version} is available.`;
+    case 'downloading': return `Downloading ${status.version || 'the update'}… ${status.percent || 0}%`;
+    case 'ready': return `Version ${status.version} is ready. Restart to update.`;
+    case 'unavailable': return `This copy does not update itself (${status.reason}).`;
+    case 'error': return 'Could not check for updates just now.';
+    default: return '';
+  }
+}
+
+function onUpdateStatus(status) {
+  updateState = status;
+  if (status.state === 'ready' && updateOffered !== status.version) {
+    updateOffered = status.version;
+    const busy = S.running.size ? ' A run in progress picks up again after the restart.' : '';
+    showBanner(`CodingFleet ${status.version} is ready.${busy}`, [
+      { label: 'Restart now', run: () => call(cf.installUpdate).catch((err) => showBanner(err.message)) },
+    ], { label: 'Later' });
+  }
+  const line = document.getElementById('updateLine');
+  if (line) renderUpdateRow(line.closest('.set-row'));
+}
+
+function renderUpdateRow(row) {
+  if (!row) return;
+  const status = updateState || {};
+  const text = row.querySelector('.set-desc');
+  text.textContent = `You have CodingFleet ${S.init.version || status.current || ''}. ${updateText(status)}`.trim();
+  const button = row.querySelector('button');
+  button.disabled = status.state === 'checking' || status.state === 'downloading' || status.state === 'unavailable';
+  if (status.state === 'ready') {
+    button.textContent = 'Restart to update';
+    button.onclick = () => call(cf.installUpdate).catch((err) => showBanner(err.message));
+  } else if (status.state === 'available') {
+    button.textContent = 'Download';
+    button.onclick = () => call(cf.downloadUpdate).then(onUpdateStatus);
+  } else {
+    button.textContent = 'Check now';
+    button.onclick = () => call(cf.checkForUpdate).then(onUpdateStatus);
+  }
+}
+
+// The app stopped unexpectedly since the window last loaded. Nothing is sent
+// unless the user says so; the banner says what a report holds.
+function offerCrashReport(crash) {
+  if (!crash || typeof cf.sendCrashReport !== 'function') return;
+  const when = crash.at ? ` (${fmtStamp(crash.at)})` : '';
+  const what = crash.kind === 'renderer' ? 'The window stopped unexpectedly'
+    : crash.kind === 'unresponsive' ? 'The window froze' : 'CodingFleet stopped unexpectedly';
+  showBanner(`${what}${when}. Send a crash report? It holds the error and the app's recent log — `
+    + 'never your messages, files or key.', [
+    { label: 'Send report', run: async () => {
+      try {
+        await call(cf.sendCrashReport);
+        showBanner('Thank you. The report was sent.');
+      } catch (err) {
+        showBanner(`The report could not be sent: ${err.message}`);
+      }
+    } },
+    { label: 'Open logs', run: () => call(cf.openLogs).catch((err) => showBanner(err.message)) },
+  ], { label: 'Do not send', run: () => cf.dismissCrash() });
+}
+
 async function boot() {
   S.init = await call(cf.init);
   document.body.classList.add(`platform-${S.init.platform}`);
@@ -6113,6 +6331,7 @@ async function boot() {
     openSettings(true);
     return;
   }
+  offerCrashReport(S.init.crash);
   await loadAll();
   if (S.init.openSession) await selectSession(S.init.openSession);
   await call(cf.recoverRuns);

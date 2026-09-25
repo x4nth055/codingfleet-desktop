@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="1024" height="1024">
+  <!-- The CodingFleet icon, redrawn as a vector from the site's 96px favicon
+       (assistant/static/img/favicon.png) so the app icon stays sharp at every
+       size an operating system asks for. scripts/make-icon.cjs renders it. -->
+  <defs>
+    <clipPath id="panel">
+      <rect x="23.5" y="25" width="50" height="48.5" rx="7"/>
+    </clipPath>
+  </defs>
+  <rect width="96" height="96" rx="0" fill="#072a3e"/>
+  <rect x="23.5" y="25" width="50" height="48.5" rx="7" fill="#062636"/>
+
+  <!-- The mast and its circuit. -->
+  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M48 29 V42" stroke-width="1.5"/>
+    <path d="M36 32.3 H38.4 L42.4 36.9 H47" stroke-width="1.9"/>
+    <path d="M60 32.3 H57.6 L53.6 36.9 H49" stroke-width="1.9"/>
+    <path d="M33.5 41 H43.4" stroke-width="1.6"/>
+    <path d="M52.6 41 H62.5" stroke-width="1.6"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="48" cy="26.4" r="3.6"/>
+    <circle cx="33.1" cy="32.3" r="3.7"/>
+    <circle cx="62.9" cy="32.3" r="3.7"/>
+    <circle cx="48" cy="43" r="2.1"/>
+    <circle cx="33.4" cy="41" r="1.9"/>
+    <circle cx="62.6" cy="41" r="1.9"/>
+    <!-- Cabin and hull. -->
+    <rect x="39.5" y="47.7" width="17" height="4.2" rx="1.2"/>
+    <path d="M28.4 52.2 Q48 58.2 67.6 52.2 C66.6 57.2 63.8 61.2 60.2 64 L35.8 64 C32.2 61.2 29.4 57.2 28.4 52.2 Z"/>
+  </g>
+
+  <!-- The sea: a light wave with a dark outline, the deep water below it. -->
+  <g clip-path="url(#panel)">
+    <path id="deep" fill="#085c7f"
+      d="M20 69.2 C22.8 69.2 24.6 71 28 71 S33 68.4 34.5 68.4 S38.6 71 41 71 S45.9 68.4 47.5 68.4 S51.6 71 54 71 S58.9 68.4 60.5 68.4 S64.6 71 67 71 S71.9 68.4 73.5 68.4 S77 69.8 78 69.8 V80 H20 Z"/>
+    <path fill="#7bd9f8" stroke="#001a2b" stroke-width="1.3" stroke-linejoin="round"
+      d="M20 64.6 C21 63.4 21.8 62.4 21.5 62.4 S25.6 66 28 66 S33 62.4 34.5 62.4 S38.6 66 41 66 S45.9 62.4 47.5 62.4 S51.6 66 54 66 S58.9 62.4 60.5 62.4 S64.6 66 67 66 S71.9 62.4 73.5 62.4 S77 64 78 64.6
+         V69.8 C77 69.8 75 68.4 73.5 68.4 S69.4 71 67 71 S62.1 68.4 60.5 68.4 S56.4 71 54 71 S49.1 68.4 47.5 68.4 S43.4 71 41 71 S36.1 68.4 34.5 68.4 S30.4 71 28 71 S22.8 69.2 20 69.2 Z"/>
+  </g>
+</svg>

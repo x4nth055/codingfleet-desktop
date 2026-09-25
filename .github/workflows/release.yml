@@ -1,0 +1,92 @@
+# Builds the app for Windows, macOS and Linux and publishes them as one GitHub
+# release, which is also the auto-update feed. Start it by pushing a tag that
+# matches package.json:  git tag v0.3.0 && git push origin v0.3.0
+#
+# Signing is optional and turns itself on when its secrets exist (see
+# README, "Releasing"). Without them the builds are unsigned: Windows shows a
+# SmartScreen warning, and macOS needs right-click > Open and cannot update
+# itself.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+      - name: The tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          want="v$(node -p "require('./package.json').version")"
+          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "Tag $GITHUB_REF_NAME does not match package.json ($want)"; exit 1; }
+
+      - name: Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Azure Trusted Signing: an app registration allowed to sign with the profile.
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          AZURE_PUBLISHER: ${{ vars.AZURE_SIGNING_PUBLISHER }}
+        run: |
+          args=(--win nsis --publish always)
+          if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_ACCOUNT" ]; then
+            args+=(-c.win.azureSignOptions.endpoint="$AZURE_ENDPOINT"
+                   -c.win.azureSignOptions.codeSigningAccountName="$AZURE_ACCOUNT"
+                   -c.win.azureSignOptions.certificateProfileName="$AZURE_PROFILE"
+                   -c.win.azureSignOptions.publisherName="$AZURE_PUBLISHER")
+          else
+            echo "::warning::No Windows signing secrets: the installer is unsigned."
+          fi
+          npx electron-builder "${args[@]}"
+
+      - name: macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A "Developer ID Application" certificate, exported as .p12, base64.
+          CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          args=(--mac dmg zip --x64 --arm64 --publish always)
+          if [ -z "$CSC_LINK" ]; then
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            echo "::warning::No Apple certificate: the macOS app is unsigned and cannot update itself."
+          elif [ -n "$APPLE_ID" ]; then
+            args+=(-c.mac.notarize=true)
+          fi
+          npx electron-builder "${args[@]}"
+
+      - name: Linux
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --linux AppImage deb --publish always

@@ -114,7 +114,12 @@ test('approval: reads inside the folder run; commands, writes and outside reads 
   assert.equal(tools.approvalReason('fs_read', { path: 'src/a.js' }, cwd), null);
   assert.equal(tools.approvalReason('fs_glob', { pat: '**/*.js' }, cwd), null);
   assert.equal(tools.approvalReason('fs_read', { path: '../secret.txt' }, cwd), 'reads outside the project folder');
-  assert.equal(tools.approvalReason('fs_read', { path: path.join(os.homedir(), '.ssh', 'id_rsa') }, cwd), 'reads outside the project folder');
+  // A private key is a secret before it is an outside read: asked even in auto mode.
+  assert.equal(tools.approvalReason('fs_read', { path: path.join(os.homedir(), '.ssh', 'id_rsa') }, cwd), 'reads secrets');
+  assert.equal(tools.approvalReason('fs_read', { path: '.env' }, cwd), 'reads secrets');
+  assert.equal(tools.approvalReason('run_command', { command: 'rm -rf dist' }, cwd), 'may delete or overwrite data');
+  assert.equal(tools.approvalReason('read_background', { id: 'bg_1' }, cwd), null);
+  assert.equal(tools.approvalReason('stop_background', { id: 'bg_1' }, cwd), null);
   assert.equal(tools.approvalReason('fs_glob', { pat: '/etc/*' }, cwd), 'reads outside the project folder');
   assert.equal(tools.approvalReason('view_image', { source: 'out/chart.png' }, cwd), null);
   assert.equal(tools.approvalReason('view_image', { source: '../photos/me.jpg' }, cwd), 'reads outside the project folder');

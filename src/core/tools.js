@@ -8,6 +8,8 @@ const fsp = fs.promises;
 const path = require('path');
 const { spawn } = require('child_process');
 
+const { guardReason } = require('./guard');
+
 const CLIENT_TOOLS = new Set(['execute_code', 'run_command', 'fs_read', 'fs_write', 'fs_edit', 'fs_glob']);
 const MAX_OUTPUT_CHARS = 200_000;
 const DEFAULT_TIMEOUT_S = 60;
@@ -65,6 +67,14 @@ function killTree(child) {
   }
 }
 
+// The environment a command runs in: the user's own, minus the key this app
+// signs in with. Everything else stays — the user's tools need their tokens.
+function commandEnv() {
+  const env = { ...process.env };
+  delete env.CODINGFLEET_API_KEY;
+  return env;
+}
+
 function runShell(command, { cwd, timeout, signal } = {}) {
   const seconds = Math.min(Math.max(Number(timeout) || DEFAULT_TIMEOUT_S, 1), MAX_TIMEOUT_S);
   return new Promise((resolve) => {
@@ -78,7 +88,7 @@ function runShell(command, { cwd, timeout, signal } = {}) {
         cwd,
         windowsHide: true,
         detached: process.platform !== 'win32',
-        env: process.env,
+        env: commandEnv(),
       });
     } catch (err) {
       resolve({ stdout: '', stderr: `Could not start ${SHELL.name}: ${err.message}`, exit_code: null });
@@ -250,6 +260,11 @@ async function executeTool(name, args, { cwd, signal } = {}) {
 // the folder wait for the user.
 function approvalReason(name, args, cwd) {
   args = args || {};
+  // Secrets and destructive commands first: they replace the ordinary reason.
+  const guarded = guardReason(name, args);
+  if (guarded) return guarded;
+  // Reading or stopping a command the agent itself started in the background.
+  if (name === 'read_background' || name === 'stop_background') return null;
   if (name === 'view_image') {
     return isInside(cwd, resolvePath(cwd, args.source)) ? null : 'reads outside the project folder';
   }
@@ -284,4 +299,6 @@ module.exports = {
   isInside,
   resolvePath,
   runShell,
+  killTree,
+  commandEnv,
 };

@@ -1,7 +1,7 @@
 {
   "name": "codingfleet-desktop",
   "productName": "CodingFleet",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "The CodingFleet coding agent on your desktop.",
   "license": "MIT",
   "main": "src/main/main.js",
@@ -17,30 +17,69 @@
     "test:transcript": "electron test/transcript.cjs",
     "shot": "electron . --screenshot=shot.png",
     "predist": "node scripts/check-dist-lock.cjs",
-    "dist": "electron-builder --win portable",
-    "dist:next": "electron-builder --win portable --config.directories.output=dist-next",
+    "dist": "electron-builder --win nsis",
+    "dist:next": "electron-builder --win nsis --config.directories.output=dist-next",
     "dist:mac": "electron-builder --mac dmg zip",
-    "dist:linux": "electron-builder --linux AppImage deb"
+    "dist:linux": "electron-builder --linux AppImage deb",
+    "dist:portable": "electron-builder --win portable",
+    "icon": "electron scripts/make-icon.cjs"
   },
   "build": {
     "appId": "com.codingfleet.desktop",
     "productName": "CodingFleet",
+    "copyright": "Copyright (c) CodingFleet",
     "files": [
       "src/**/*",
+      "build/icon-256.png",
       "package.json"
     ],
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "x4nth055",
+        "repo": "codingfleet-desktop",
+        "releaseType": "release"
+      }
+    ],
     "win": {
-      "target": "portable"
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "CodingFleet-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CodingFleet",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "CodingFleet-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "CodingFleet-${version}-portable.${ext}"
     },
     "mac": {
       "target": [
         "dmg",
         "zip"
       ],
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "artifactName": "CodingFleet-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "artifactName": "CodingFleet-${version}-${arch}.${ext}"
     },
     "linux": {
       "target": [
@@ -48,12 +87,16 @@
         "deb"
       ],
       "category": "Development",
-      "maintainer": "CodingFleet"
+      "icon": "build/icon.png",
+      "maintainer": "CodingFleet <support@codingfleet.com>",
+      "synopsis": "The CodingFleet coding agent on your desktop",
+      "artifactName": "CodingFleet-${version}-${arch}.${ext}"
     }
   },
   "dependencies": {
     "@highlightjs/cdn-assets": "^11.12.0",
     "dompurify": "^3.4.15",
+    "electron-updater": "^6.8.9",
     "marked": "^18.0.13"
   },
   "devDependencies": {
