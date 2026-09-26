@@ -1,391 +1,220 @@
 # CodingFleet Desktop
 
-A desktop client for the [CodingFleet](https://codingfleet.com) Agent API.
-You type a prompt; the agent thinks on CodingFleet's servers, but its coding
-tools run **on your machine**, inside a folder you pick — so it reads your real
-code, runs your real test suite, and edits your real files.
-
-Nothing runs without your say-so: reads inside the project folder happen
-freely, and anything else — a shell command, a file change, a read outside the
-folder — waits for you to approve it.
+A desktop app for the [CodingFleet](https://codingfleet.com) coding agent.
+You tell it what to do. It reads your code, runs commands and edits files in a
+folder you choose, and asks you before it changes anything.
 
 Windows, macOS and Linux. MIT licensed.
+
+## Download
+
+Get the latest version from the
+[releases page](https://github.com/x4nth055/codingfleet-desktop/releases/latest):
+
+| System | File |
+|---|---|
+| Windows | `CodingFleet-Setup-<version>.exe` |
+| macOS (Apple silicon / Intel) | `CodingFleet-<version>-arm64.dmg` / `-x64.dmg` |
+| Linux | `.AppImage` or `.deb` |
+
+Open the app and sign in with your browser. That's all.
+
+- **Windows:** until code signing is in place, Windows may show "Windows
+  protected your PC". Click **More info → Run anyway**.
+- **macOS:** the app is not signed by Apple. The first time, open it from
+  **System Settings → Privacy & Security → Open Anyway**.
 
 ---
 
 ## Features
 
-**Agent that works on your code**
-- Six client tools run locally: `run_command`, `execute_code`, `fs_read`,
-  `fs_write`, `fs_edit`, `fs_glob`
-- Every edit is shown as a line diff in an "edited files" card
-- Uncommitted changes in the session's folder are counted above the prompt
-  (`+531 −12`); a click lists the files and shows any one file's diff
-- Sub-agents: the agent can split work into parallel tasks, which run through
-  the same approval rules
-- **Steer a run mid-flight** — send a correction without stopping the agent
-- Survives a dropped connection: the run continues on the server and the app
-  re-attaches and replays the turn
+- **Works on your real code**: reads, edits and runs things in your folder.
+- **You stay in control**: every change or command waits for your OK.
+- **Undo**: puts back every file a run changed.
+- **Steer a run**: send a correction while the agent works.
+- **Cloud sandbox**: run the agent on CodingFleet's servers instead of your PC.
+- **MCP**: 13 built-in connectors (GitHub, Context7, Stripe, Sentry...) and your
+  own local MCP servers.
+- **Images and voice**: paste images, take screenshots, speak your prompt.
+- **Cost before you send**: an estimate next to the Send button.
+- **Three themes**: Dark, Light and Hacker.
 
-**Two places the tools can run** — your folder, or a cloud sandbox
-- Undo a run: put every file back the way it was before the agent started
-- Reads `AGENTS.md` from your project, so the agent follows your conventions
+## Tools
 
-**Approvals you control**
-- Allow / Deny per call, or allow a kind of action for the rest of the session
-- Auto-approve mode in the composer when you want it to just go
-- Desktop notification when a run needs you or finishes
+What the agent can use on your computer:
 
-**Know what it costs before you send**
-- A running estimate in the composer, from what your earlier runs actually cost
-- Over 100 credits it stops and offers the smartest models that cost less,
-  one click to switch
+| Tool | What it does |
+|---|---|
+| `fs_read` | Read a file |
+| `fs_glob` | Find files by name |
+| `fs_write` | Write a file |
+| `fs_edit` | Change part of a file |
+| `run_command` | Run a shell command (also in the background, for dev servers) |
+| `execute_code` | Run a piece of code |
+| `read_background` / `stop_background` | Read or stop a background command |
+| `view_image` | Look at an image in your folder |
+| `take_screenshot` | Take a picture of your screen (always asks first) |
 
-**MCP support**
-- 13 built-in remote connectors: Context7, DeepWiki, Microsoft Learn, AWS
-  Knowledge, Cloudflare Docs, GitHub, Hugging Face, Sentry, Semgrep, Supabase,
-  Neon, Stripe, Heroku
-- Local MCP servers over stdio — any program on your machine that speaks MCP;
-  its tools are declared to the model and routed back through approvals
-
-**Input that isn't just text**
-- Attach files, drag-and-drop, paste images straight into the composer
-- Screenshots from inside the app: drag out a region (Ctrl+Shift+S), pick one
-  open window, or take a whole screen — then the model looks at it
-- Images the agent makes in your folder are drawn in the conversation, and
-  what `view_image` looked at is shown in its step
-- The agent can ask for a screenshot itself when the answer is on your screen —
-  it asks first, you see the picture it got, and the tool only exists while
-  tools run on your computer, never in a cloud sandbox
-- Voice input, transcribed by the API
-
-**Sessions and cost**
-- Rename, pin, duplicate and delete sessions
-- Compact a long session to free up context
-- Live token breakdown in the footer (input, output, cache read/write) and
-  credit cost per run
-- Model picker, billing and subscription management, and BYOK — use your own
-  provider keys instead of CodingFleet credits
-
-**Three themes** — Dark, Light, and Hacker (green on black).
+It also has CodingFleet's server tools, such as web search and image
+generation, if you turn them on.
 
 ---
 
 ## Quick start
 
-Requires **Node.js 22 or newer** (`fs.promises.glob` is used by `fs_glob`).
+To run it from the source code you need **Node.js 22 or newer**.
 
 ```bash
 npm install
 npm start
 ```
 
-On first launch, sign in through your browser, or paste an API key from
+Sign in with your browser, or paste an API key from
 [codingfleet.com/agent-api](https://codingfleet.com/agent-api). The key is
-encrypted with your OS keystore — DPAPI on Windows, Keychain on macOS,
-libsecret/kwallet on Linux — and stored in your user-data folder:
+encrypted by your system (Windows DPAPI, macOS Keychain, Linux
+libsecret/kwallet).
 
-| OS | Location |
-|---|---|
-| Windows | `%APPDATA%/CodingFleet/` |
-| macOS | `~/Library/Application Support/CodingFleet/` |
-| Linux | `~/.config/CodingFleet/` |
-
-That folder holds `credentials.json` (the key), `state.json` (sessions, chosen
-folders, theme) and `mcp.json` (your MCP servers, encrypted).
-
-**On Windows, install [Git for Windows](https://git-scm.com/download/win).**
-The app runs commands in Git Bash when it's available, because models write
-Unix shell far more reliably than PowerShell. Without it, commands fall back to
-Windows PowerShell 5.1 and the agent is told to use PowerShell syntax.
+**Windows users: install [Git for Windows](https://git-scm.com/download/win).**
+The agent writes better Bash than PowerShell. Without Git, it uses PowerShell.
 
 ### Settings
 
-Open Settings with the gear in the sidebar, or `Ctrl+,`. Environment variables
-override whatever is saved there — handy for pointing at a local server:
+Open with the gear icon or `Ctrl+,`. To use a local server:
 
 ```bash
-CODINGFLEET_API_BASE=http://127.0.0.1:8010/v1 CODINGFLEET_API_KEY=cf_sk_... npm start
+CODINGFLEET_API_BASE=http://127.0.0.1:8010/v1 npm start
 ```
 
 ---
 
 ## Where the tools run
 
-Every session picks one of two places for its tools, when you start it.
-
-**Your folder** (pick a folder) — the six client tools run on this computer,
-in that folder. The agent reads your real code, runs your real tests, and
-edits your real files. Local MCP servers are available. This is the mode the
-approval rules below exist for.
-
-**A cloud sandbox** (pick no folder) — the same tools run on CodingFleet's
-servers instead, in a container that starts empty. Nothing on your machine is
-read, written, or executed, and no approval prompts appear, because there is
-nothing local to protect. Good for throwaway experiments, for code you'd
-rather not run locally, and for trying the agent before you trust it with a
-repository.
-
-You can attach files to a sandbox session, and they are uploaded into that
-sandbox. Local MCP servers are not offered there: they are programs on your
-machine, and the sandbox cannot reach them.
+Each session picks one place when you start it:
 
 | | Your folder | Cloud sandbox |
 |---|---|---|
-| Tools run on | this computer | CodingFleet's servers |
-| Sees your code | yes, in the chosen folder | only what you upload |
-| Approvals | yes, per the table below | not needed |
+| Tools run on | your computer | CodingFleet's servers |
+| Sees your code | yes, in that folder | only what you upload |
+| Asks before changes | yes | no (nothing local to protect) |
 | Local MCP servers | yes | no |
-| Undo a run | yes | not applicable |
-| `AGENTS.md` | read from the folder | not read |
+
+Pick a folder to work on real code. Pick no folder for a safe, empty sandbox.
 
 ---
 
 ## Approvals
 
-This is the part worth understanding before you hand an agent your filesystem.
-
-| Action | Behavior |
+| What the agent does | What happens |
 |---|---|
-| `fs_read` / `fs_glob` inside the project folder | Runs immediately |
-| `fs_read` / `fs_glob` outside the folder | Asks — *"reads outside the project folder"* |
-| `run_command`, `execute_code` with a command | Asks — *"runs a command"* |
-| `fs_write`, `fs_edit` | Asks — *"changes files"* |
-| Any local MCP tool | Asks — *"uses a local MCP tool"* |
-| Reading `.env`, keys and other credential files, or printing the environment | Asks **even in Auto-approve** — *"reads secrets"* |
-| Deleting a tree, rewriting git history, wiping a disk or a database, shutting down | Asks **every time**, whatever the mode — *"may delete or overwrite data"* |
-| Piping a download into a shell (`curl … \| sh`, `iwr … \| iex`) | Asks **every time** — *"runs a script from the internet"* |
+| Reads files inside the folder | Runs at once |
+| Reads outside the folder | Asks |
+| Runs a command or changes files | Asks |
+| Reads `.env`, keys or passwords | Asks, **even in Auto-approve** |
+| Deletes a lot, rewrites git history, wipes data | Asks **every time** |
+| Runs a script downloaded from the internet | Asks **every time** |
 
-Commands are killed as a process tree after their timeout (60s default, 600s
-max), output is clipped at 200k characters, and `fs_glob` skips `node_modules`,
-`.git`, `__pycache__`, `.venv` and `venv`. Commands run with your environment,
-except the key this app signs in with.
-
-The last three rows are guards, in `src/core/guard.js`: patterns for what
-agents actually write, meant to stop a mistake or a poisoned repository from
-going through unseen. They are not a sandbox, and a command built to hide from
-them can. A secrets file can still be allowed for the rest of a session; a
-destructive command cannot — there is no "allow all" for it.
+These checks catch mistakes. They are not a sandbox.
 
 ### Background commands
 
-A dev server or a watcher never finishes, so waiting for it would block the
-run. The agent can start one with `background: true`: the call answers at once,
-the command keeps running across later runs of the session, and the agent reads
-what it printed with `read_background` and ends it with `stop_background`. A
-pill above the prompt lists what is running, with a Stop button each. They stop
-when their session is deleted or the app quits.
+Dev servers and watchers keep running in the background. A bar above the
+prompt shows them, with a Stop button each.
 
 ### Ask before changes, or Auto-approve
 
-The shield button in the composer switches between the two modes.
+Switch with the shield button.
 
-**Ask before changes** (the default) — anything in the table above stops and
-waits for you. Each prompt has three answers: **Allow** runs this one call,
-**Deny** refuses it and tells the agent so, and **Allow all … this session**
-stops asking for that *kind* of action until the session ends.
-
-That third one is worth reading twice: it remembers the **reason**, not the
-call. Allowing one `npm test` means every later command in that session runs
-unprompted, `rm -rf` included. It is convenient once you trust what a session
-is doing, and it is not a per-command allowlist.
-
-**Auto-approve** — nothing is asked except the guarded calls above; every
-other call runs the moment it arrives. Use it for a folder you can afford to lose, a scratch checkout, or a
-run you are watching. In a folder full of work you care about, leave it off.
-
-Either way, the agent stays inside the tools it was given, and **Undo** below
-is the way back from a run that went wrong.
+- **Ask before changes** (default): you answer **Allow**, **Deny** or **Allow
+  all this session**. "Allow all" allows that *kind* of action, for example
+  every command.
+- **Auto-approve**: only the protected actions above still ask. Use it only in
+  a folder you can afford to lose.
 
 ### Undoing a run
 
-Every run keeps a copy of each file as it was before the agent touched it —
-the same copies that draw the diff card. The **Undo** button on that card puts
-them all back: files the run edited return to their earlier version, and files
-it created are removed again.
-
-A file you edited yourself after the run is **not** overwritten. It is listed
-as skipped, and undoing it again asks whether to discard your later edits.
-Binary and very large files were never read, so they cannot be restored and
-are reported as skipped rather than guessed at.
-
-Undo lives in memory, for the last 20 runs, and does not survive restarting
-the app. It is a way out of a bad run, not a version control system — for that
-there is git, and committing before a big run is still a good habit.
+**Undo** on the "edited files" card puts back every file the run changed.
+Files you changed yourself afterwards are not touched. Undo keeps the last 20
+runs until you close the app. Git is still your real safety net.
 
 ### When the computer sleeps
 
-While a run is going the app asks the system to stay awake (Preferences, on by
-default): the screen still turns off, but a laptop does not go into standby on
-its own and freeze the app. Closing the lid or choosing Sleep still sleeps it.
-
-If the computer does stop answering for ten minutes — asleep, off, offline — a
-run in a folder is **stopped and kept**, like a cancel: the call that could not
-run is in its history, and typing **continue** picks the work up. A run in a
-cloud sandbox never depends on this computer and carries on with it off.
+While a run goes, the app keeps the computer awake. If the computer goes to
+sleep anyway, the run stops and is kept: type **continue** to go on. Cloud
+sandbox runs do not need your computer.
 
 ---
 
 ## Project instructions (`AGENTS.md`)
 
-If the folder has an `AGENTS.md`, the app reads it when the session starts and
-appends it to the agent's system message, so the agent follows your project's
-conventions without being told each time:
+Put an `AGENTS.md` file in your folder, and the agent follows it:
 
 ```markdown
-# AGENTS.md
-- Run `npm test` before you claim a change works.
-- This codebase uses tabs. Match the file you are editing.
+- Run `npm test` before you say a change works.
 - Never edit anything under `generated/`.
 ```
-
-`agents.md` and `.agents.md` work too. It is read when the session starts, so
-editing it applies to the next session, not the one already open. Anything
-past 32k characters is cut. The transcript says when one is in use.
 
 ---
 
 ## What a run costs
 
-The composer shows a rough estimate next to the send button, worked out from
-what your earlier runs in that session actually cost, or — before there is any
-history — the model's published price over an assumed five steps.
-
-If the estimate passes **100 credits**, sending stops and asks first, showing
-the two smartest models that cost less than the one you picked, with their
-intelligence index and price. One click switches model and sends.
-
-It is an estimate, not a quote: an agentic run makes as many model calls as the
-work needs. Sessions on **Auto** are not estimated, since the server picks the
-model per message.
+The estimate next to Send comes from what earlier runs cost. Above 100
+credits, the app asks first and suggests cheaper models.
 
 ---
 
 ## How it fits together
 
 ```
-src/core/        no Electron in here — the CLI will reuse it
-  config.js      default API address, environment overrides
-  api.js         HTTP + server-sent-events client for /v1
-  tools.js       the six client tools, plus the approval rules
-  guard.js       secrets and destructive commands: what is always asked about
-  background.js  commands that keep running (dev servers, watchers)
-  runner.js      one run: reads events, asks for approval, runs tools,
-                 posts results, tracks changed files
-  mcp.js         local MCP servers over stdio (JSON-RPC, tool discovery)
-  diff.js        line diffs for the edited-files card
-  undo.js        putting a run's files back, and refusing to clobber your edits
-  images.js      which image links in an answer are files on this computer
-  log.js         the app's own log, with keys cut out
-src/main/        Electron main process: window, IPC, credentials, state, approvals
-  capture.js     screenshots: screens, windows, a dragged region
-  crash.js       catching crashes, and the report the user may send
-  updater.js     updates from GitHub releases
-  awake.js       keeping the computer awake while a run goes
-src/renderer/    the window (no Node access — it never sees your API key)
-  lib/           pure pieces with their own tests: formatting, tool words
-  cost.js        what a run will cost: plain arithmetic, no state, its own tests
-  app/           the window's script, split by feature and loaded in order:
-                 base, state, sidebar, transcript, tool calls, run events,
-                 attachments, composer, navigation, settings, billing, MCP, boot
+src/core/       the agent logic, no Electron (tools, approvals, runs, MCP, undo)
+src/main/       the Electron main process (window, keys, updates, crashes)
+src/renderer/   the window (it never sees your API key)
+test/           tests
 ```
-
-The files in `src/renderer/app/` are plain scripts sharing one global scope,
-loaded in the order `index.html` lists them: a later file may use what an
-earlier one declares at load time; anything else is used only from inside
-functions, which run once everything has loaded. Logic that needs no DOM goes
-in `lib/` (or `src/core/`) with a test beside it.
-
-The renderer is fully sandboxed: `preload.js` is the only bridge, and it
-exposes a fixed list of calls and nothing else. The window can use your
-microphone (for voice input) and no other device.
 
 ---
 
 ## Logs and crash reports
 
-The app keeps its own log — runs starting and ending, tool names and outcomes,
-connection trouble, crashes — in `logs/main.log` in its data folder
-(Preferences → Diagnostics → Open log folder). It never holds a message, a
-file's contents, a command's output or a key; keys and tokens are cut out of
-every line before it is written.
-
-After a crash the app asks, once, whether to send a report: the error, the
-version and platform, and the last lines of that log. Nothing is sent without
-that answer. Native crashes also leave a minidump in the crash dumps folder,
-which stays on your computer.
+The app writes a log in its data folder (Preferences → Diagnostics). The log
+never contains your messages, files or keys. After a crash, the app asks if
+you want to send a report. Nothing is sent without your OK.
 
 ## Development
 
 ```bash
-npm test          # Tools, guards, background jobs, approvals, reconnects, MCP, diffs, undo, cost, log
-npm run test:layout # Isolated render checks across themes and window sizes
-npm run test:transcript # Where a turn's tool calls sit in its answer
-npm run e2e       # a real run against the API (needs CODINGFLEET_API_KEY)
+npm test                 # unit tests
+npm run test:layout      # layout checks
+npm run e2e              # a real run (needs CODINGFLEET_API_KEY)
 ```
 
-Build on this computer:
+### Build it yourself
 
 ```bash
-npm run dist          # Windows installer (dist/CodingFleet-Setup-<version>.exe)
-npm run dist:portable # Windows portable .exe, which cannot update itself
-npm run dist:mac      # macOS dmg + zip (needs a Mac)
-npm run dist:linux    # Linux AppImage + deb (needs Linux)
-npm run icon          # render build/icon.svg to build/icon.png after changing it
+npm run dist          # Windows installer
+npm run dist:mac      # macOS (needs a Mac)
+npm run dist:linux    # Linux (needs Linux)
 ```
 
-A running copy of the app locks the files a build writes; `dist` stops at once
-and says so. To build while the app is open, `npm run dist:next` writes to
-`dist-next/`.
+The files go to `dist/`. Close the app before you build.
 
 ## Releasing
 
-Releases are built by GitHub Actions on Windows, macOS and Linux machines, so a
-Windows computer is enough to ship all three. Bump `version` in `package.json`,
-commit, then push a matching tag:
+Change `version` in `package.json`, commit, and push a tag:
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-`.github/workflows/release.yml` runs the tests on each system, builds the
-Windows installer, the macOS dmg and zip (Intel and Apple silicon) and the
-Linux AppImage and deb, and publishes them as one GitHub release. That release
-is also the **auto-update feed**: an installed copy whose user said yes to
-automatic updates checks it at start and every six hours, downloads in the
-background, and installs when the user restarts.
-An app cannot read a private repository without carrying a token, so updates
-work once this repository — or a public one named in `package.json`
-`build.publish` — is public.
+GitHub Actions builds Windows, macOS and Linux and publishes a release. The
+app gets its updates from these releases.
 
 ### Code signing
 
-- **Windows** is signed through SignPath Foundation, which signs open-source
-  projects for free: the release workflow sends the unsigned app and installer
-  to SignPath and publishes what comes back (see `.signpath/README.md`). It
-  turns on when the repository has the variables `SIGNPATH_ORGANIZATION_ID`,
-  `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG` and the secret
-  `SIGNPATH_API_TOKEN`. Until then the installer is unsigned, and Windows shows
-  a SmartScreen warning ("More info" → "Run anyway") to new users.
-- **macOS** builds are not signed. The first time, macOS refuses to open the
-  app: open it once from System Settings → Privacy & Security → "Open Anyway".
-  An unsigned Mac app cannot install its own updates either, so it says when a
-  new version is out and links to the download.
-- **Linux** needs no signing.
-
-Screenshot and debugging flags (a development run only: an installed app
-ignores all but `--open` and `--theme`):
-
-```
---open=<session id>      open straight into a session
---screenshot=out.png     render, capture, quit
---shot-delay=<ms>        wait before capturing (default 3500)
---shot-menu=models|permissions|settings|attach|shot
---shot-cwd=<dir>         --shot-prompt=<text>    --shot-model=<id>
---shot-permission=auto   --shot-expand           --shot-scroll=<n>
---shot-attach=<path>     --theme=dark|light|hacker
-```
+- **Windows:** signed for free by SignPath Foundation (see `.signpath/`).
+- **macOS:** not signed by Apple, so the app cannot update itself. It tells you
+  when a new version is out.
+- **Linux:** no signing needed.
 
 ---
 
@@ -397,9 +226,8 @@ Free code signing provided by [SignPath.io](https://signpath.io), certificate by
 - Committers and reviewers: [@x4nth055](https://github.com/x4nth055)
 - Approvers: [@x4nth055](https://github.com/x4nth055)
 
-Every signed file is built from this repository by its release workflow on
-GitHub's own runners, and each release is approved by an approver before it is
-signed.
+Every signed file is built from this repository by GitHub Actions, and each
+release is approved before it is signed.
 
 ## Privacy
 
@@ -407,17 +235,13 @@ This program will not transfer any information to other networked systems
 unless specifically requested by the user or the person installing or operating
 it.
 
-What that means in practice:
+In practice:
 
-- It talks to CodingFleet (or the API address you set) only once you sign in,
-  to do what you ask: your messages, the files and command output the agent
-  reads with your approval, and your account's settings. See the
+- It talks to CodingFleet only after you sign in, to do what you ask. See the
   [CodingFleet privacy policy](https://codingfleet.com/privacy-policy).
-- It checks GitHub for updates only if you said yes when it asked (Preferences
-  → Updates).
-- It sends a crash report only when you press **Send report** after a crash.
-- An image in an answer that is not hosted by CodingFleet loads only when you
-  click it.
+- It checks for updates only if you said yes.
+- It sends a crash report only if you click **Send report**.
+- Images from other websites load only when you click them.
 - It connects to an MCP server only if you added it.
 
 ## License
