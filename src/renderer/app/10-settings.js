@@ -31,8 +31,6 @@ function openSettings(required = false, tab = 'account') {
   input.type = 'password';
   $('keyShow').textContent = 'Show';
   input.placeholder = settings.hasKey ? `Saved: ${settings.keyHint}` : 'cf_sk_…';
-  $('baseInput').value = settings.apiBase;
-  $('advanced').open = settings.apiBase !== settings.defaultApiBase;
   const link = $('keyLink');
   link.href = `${originOf(settings.apiBase)}/agent-api/`;
   link.textContent = `${originOf(settings.apiBase).replace(/^https?:\/\//, '')}/agent-api`;
@@ -87,7 +85,7 @@ async function signInWithBrowser() {
   button.disabled = true;
   button.textContent = 'Waiting for your browser…';
   setSettingsStatus('Approve this app in the browser, then come back.', 'info');
-  const res = await cf.signIn({ apiBase: $('baseInput').value });
+  const res = await cf.signIn({});
   button.disabled = false;
   button.textContent = label;
   if (!res.ok) {
@@ -101,7 +99,7 @@ async function saveSettings() {
   const save = $('settingsSave');
   save.disabled = true;
   setSettingsStatus('Checking the key…', 'info');
-  const res = await cf.saveSettings({ apiKey: $('keyInput').value, apiBase: $('baseInput').value });
+  const res = await cf.saveSettings({ apiKey: $('keyInput').value });
   save.disabled = false;
   if (!res.ok) {
     setSettingsStatus(res.error.message, 'error');

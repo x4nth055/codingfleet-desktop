@@ -1,7 +1,7 @@
 // Live end-to-end test of the desktop core against a running API: a real model
 // asks this computer to write, edit and read a file, and to run a command.
 //   CODINGFLEET_API_KEY=cf_sk_... npm run e2e                  (production)
-//   CODINGFLEET_API_BASE=http://127.0.0.1:8010/v1 CODINGFLEET_API_KEY=... npm run e2e
+//   CODINGFLEET_API_KEY=... npm run e2e
 //   E2E_MODEL=... to pick the model
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

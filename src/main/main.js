@@ -99,7 +99,10 @@ function loadCredentials() {
     }
   }
   api.configure({
-    apiBase: config.ENV_API_BASE || saved.apiBase || config.DEFAULT_API_BASE,
+    // Always codingfleet.com: the address is not a setting, so nobody can be
+    // talked into sending their key to another server. Developers of the app
+    // point it elsewhere with CODINGFLEET_API_BASE.
+    apiBase: config.ENV_API_BASE || config.DEFAULT_API_BASE,
     apiKey: config.ENV_API_KEY || key,
     client: `desktop/${app.getVersion()}`,
   });
@@ -924,12 +927,11 @@ function registerIpc() {
     shotAttach: flag('shot-attach'),
   }));
 
-  handle('settings:save', async ({ apiKey, apiBase } = {}) => {
+  handle('settings:save', async ({ apiKey } = {}) => {
     const previous = api.snapshot();
     const nextKey = String(apiKey || '').trim() || previous.apiKey;
-    const nextBase = String(apiBase || '').trim().replace(/\/+$/, '') || config.DEFAULT_API_BASE;
+    const nextBase = config.ENV_API_BASE || config.DEFAULT_API_BASE;
     if (!nextKey) throw new Error('Paste your API key.');
-    if (!/^https?:\/\/\S+$/i.test(nextBase)) throw new Error('The API server must be an http:// or https:// address.');
     api.configure({ apiBase: nextBase, apiKey: nextKey });
     let credits;
     try {
@@ -946,9 +948,8 @@ function registerIpc() {
   // Browser sign-in. The app never sees the password: the browser proves who
   // the user is, they approve this computer there, and the server hands back a
   // key of its own for this app.
-  handle('auth:signIn', async ({ apiBase } = {}) => {
-    const base = String(apiBase || '').trim().replace(/\/+$/, '') || config.DEFAULT_API_BASE;
-    if (!/^https?:\/\/\S+$/i.test(base)) throw new Error('The API server must be an http:// or https:// address.');
+  handle('auth:signIn', async () => {
+    const base = config.ENV_API_BASE || config.DEFAULT_API_BASE;
     const previous = api.snapshot();
     const attempt = { cancelled: false };
     signIn = attempt;

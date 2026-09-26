@@ -1,8 +1,9 @@
 'use strict';
-// Where the API is. The key is not kept here: the desktop app stores it,
-// encrypted, from its Settings, and the CLI will read it from its own config.
-// Environment variables win over both; that is how tests reach a local server:
-//   CODINGFLEET_API_BASE=http://127.0.0.1:8010/v1 CODINGFLEET_API_KEY=cf_sk_... npm start
+// Where the API is: always codingfleet.com for users. The key is not kept
+// here: the desktop app stores it, encrypted, from its Settings, and the CLI
+// will read it from its own config. An environment key wins over both:
+//   CODINGFLEET_API_KEY=cf_sk_... npm start
+// (CODINGFLEET_API_BASE is for CodingFleet's own developers.)
 const DEFAULT_API_BASE = 'https://codingfleet.com/v1';
 
 module.exports = {
