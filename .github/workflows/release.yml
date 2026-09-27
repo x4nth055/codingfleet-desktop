@@ -144,6 +144,10 @@ jobs:
         run: |
           args=(--mac dmg zip --x64 --arm64 --publish always)
           if [ -z "$CSC_LINK" ]; then
+            # A secret that is not set arrives as an empty string, and
+            # electron-builder reads CSC_LINK="" as a certificate path (the
+            # project folder: "not a file"). Unset, it looks for none.
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
             # Ad-hoc signed ("-"): no Apple certificate, but Apple silicon runs
             # only signed code, and an unsigned app there is reported "damaged".
             args+=(-c.mac.identity=-)
