@@ -293,30 +293,40 @@ async function loadCredits({ quiet = false } = {}) {
   if (changed || !quiet) renderAccount();
 }
 
-// The model list comes once per start. A start without a connection used to
-// leave the picker empty for good, so an empty list is asked for again: when
-// the picker opens, when the network comes back, and on every live refresh.
+// The model list is asked for again every few minutes, so a model added on the
+// server shows up without a restart. A start without a connection used to
+// leave the picker empty for good, so an empty list is also asked for again:
+// when the picker opens, when the network comes back, and on every live refresh.
+const MODELS_REFRESH_MS = 5 * 60_000;
 let modelsLoading = null;
+let modelsLoadedAt = 0;
 function ensureModels() {
-  if (S.models.length || !S.settings || !S.settings.hasKey) return Promise.resolve();
-  return loadModels();
+  if (!S.settings || !S.settings.hasKey) return Promise.resolve();
+  if (S.models.length && Date.now() - modelsLoadedAt < MODELS_REFRESH_MS) return Promise.resolve();
+  return loadModels({ quiet: S.models.length > 0 });
 }
 
-async function loadModels() {
+async function loadModels({ quiet = false } = {}) {
   if (modelsLoading) return modelsLoading;
-  modelsLoading = loadModelsOnce().finally(() => { modelsLoading = null; });
+  modelsLoading = loadModelsOnce(quiet).finally(() => { modelsLoading = null; });
   return modelsLoading;
 }
 
-async function loadModelsOnce() {
+async function loadModelsOnce(quiet) {
+  const before = quiet ? JSON.stringify(S.models) : null;
   try {
     S.models = (await call(cf.models)).models || [];
     S.modelsError = null;
+    modelsLoadedAt = Date.now();
   } catch (err) {
+    // A refresh that fails keeps the list on screen.
+    if (quiet) return;
     S.modelsError = err.status === 0
       ? 'No connection. The models will load when you are back online.'
       : err.message;
   }
+  // Redrawing an unchanged picker would drop its scroll and selection.
+  if (quiet && JSON.stringify(S.models) === before) return;
   if (!$('modelMenu').hidden) renderModelList($('modelSearch').value);
   if (!$('settings').hidden && settingsTab === 'preferences' && !document.querySelector('.pref-menu:not([hidden])')) {
     renderPreferencesPane();
