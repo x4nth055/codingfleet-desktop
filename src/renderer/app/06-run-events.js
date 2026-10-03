@@ -225,6 +225,10 @@ function finishRun(sessionId) {
       type: 'files', sessionId, files: run.files, open: new Set(), runId: run.runId || run.filesRunId || null,
     });
   }
+  if (run) {
+    const steps = computerSteps(transcriptOf(sessionId).slice(run.turnStart || 0));
+    if (steps.length) addItem(sessionId, { type: 'computer', sessionId, steps, open: false });
+  }
   const note = ended && ended.reason === 'cancelled' ? 'Stopped'
     : ended && ended.reason === 'interrupted' ? 'Stopped: this computer stopped answering'
       : ended && ended.reason === 'budget' ? 'Stopped at the spend limit' : null;

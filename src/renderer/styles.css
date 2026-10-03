@@ -1116,3 +1116,21 @@ t-frame img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .att.ref .att-icon { color: var(--green); }
 .drop-card span:last-child { max-width: 360px; text-align: center; }
 .attach-menu .mi-sub { white-space: normal; }
+
+/* Computer use, under the answer: one line, the steps on a click. */
+.computer-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 12px; text-align: left; font-size: 13px; }
+.computer-head:hover { background: var(--hover); }
+.computer-head .icon { width: 15px; height: 15px; color: var(--muted); flex: none; }
+.computer-head .del { font-size: 12.5px; }
+.computer-head.open { border-bottom: 1px solid var(--line); }
+.computer-head.open .chev { transform: rotate(90deg); }
+.computer-count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.computer-thumb { height: 28px; max-width: 64px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); flex: none; }
+.computer-steps { margin: 0; padding: 8px 12px 8px 36px; display: grid; gap: 3px; font-size: 12.5px; color: var(--muted);
+  max-height: 260px; overflow: auto; }
+.computer-steps li { padding-left: 2px; }
+.computer-steps li::marker { color: var(--faint); font-variant-numeric: tabular-nums; }
+.computer-steps .cs-verb { color: var(--text); margin-right: 6px; }
+.computer-steps .cs-what { overflow-wrap: anywhere; }
+.computer-steps li.failed .cs-verb { color: var(--red); }
+.computer-end { padding: 0 12px 12px; display: grid; gap: 6px; }

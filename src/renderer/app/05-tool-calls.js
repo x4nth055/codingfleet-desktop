@@ -361,6 +361,69 @@ function renderFiles(item) {
   return node;
 }
 
+// What the agent did on the computer in one turn, under the answer like the
+// edited files: one line with a thumbnail of the screen it left behind, and
+// on a click the steps in order and that screen at full size.
+function computerSteps(items) {
+  const steps = [];
+  for (const item of items) {
+    if (item.type !== 'tools') continue;
+    for (const tool of item.tools) {
+      if (tool.name !== 'computer') continue;
+      const [verb, target] = toolSummary(tool);
+      const what = String(target || '').replace(/\s+/g, ' ');
+      steps.push({
+        verb,
+        what: what.length > 70 ? `${what.slice(0, 69)}…` : what,
+        failed: ['failed', 'denied', 'cancelled'].includes(tool.status),
+        image: tool.image || null,
+      });
+    }
+  }
+  return steps;
+}
+
+function renderComputer(item) {
+  const node = el('div', 'files-card computer-card');
+  const count = item.steps.length;
+  const failed = item.steps.filter((step) => step.failed).length;
+  const last = [...item.steps].reverse().find((step) => step.image);
+  const head = el('button', `computer-head${item.open ? ' open' : ''}`);
+  head.title = item.open ? 'Hide the steps' : 'Show the steps';
+  head.append(icon('monitor'), el('span', 'files-title', 'Used your computer'),
+    el('span', 'computer-count', `${count} action${count === 1 ? '' : 's'}`));
+  if (failed) head.append(el('span', 'del', `${failed} did not work`));
+  head.append(el('span', 'bar-spacer'));
+  if (last && !item.open) {
+    const thumb = el('img', 'computer-thumb');
+    thumb.src = last.image;
+    thumb.alt = 'The screen at the end';
+    head.append(thumb);
+  }
+  head.append(chevron());
+  head.addEventListener('click', () => {
+    item.open = !item.open;
+    refreshItem(item.sessionId, item);
+  });
+  node.append(head);
+  if (item.open) {
+    const list = el('ol', 'computer-steps');
+    for (const step of item.steps) {
+      const row = el('li', step.failed ? 'failed' : null);
+      row.append(el('span', 'cs-verb', step.verb));
+      if (step.what) row.append(el('span', 'cs-what', step.what));
+      list.append(row);
+    }
+    node.append(list);
+    if (last) {
+      const end = el('div', 'computer-end');
+      end.append(el('div', 'tool-label', 'The screen at the end'), shownImage(last.image, 'The screen at the end'));
+      node.append(end);
+    }
+  }
+  return node;
+}
+
 function renderDiff(file) {
   const box = el('div', 'diff');
   if (file.binary) {

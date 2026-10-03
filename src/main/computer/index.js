@@ -68,7 +68,9 @@ function createComputer({ getWindow, enabled, cacheDir, log, onStop, onImage, is
   const sessions = new Map();   // session id -> { displayId, targets, stopped, controller }
   const active = new Set();     // sessions whose run is using the computer now
   let indicator = null;
-  let indicatorState = { doing: '', waiting: false };
+  // What the pill says: the last action, which stays until the next one, and
+  // how many there have been since the agent took the computer.
+  let indicatorState = { doing: '', steps: 0, waiting: false };
   let shortcutHeld = false;
   let steppedAside = false;
   let queue = Promise.resolve();
@@ -192,7 +194,7 @@ function createComputer({ getWindow, enabled, cacheDir, log, onStop, onImage, is
   }
 
   function setDoing(doing) {
-    indicatorState = { ...indicatorState, doing, waiting: false };
+    indicatorState = { ...indicatorState, doing: doing || indicatorState.doing, waiting: false };
     pushIndicator();
   }
 
@@ -252,7 +254,7 @@ function createComputer({ getWindow, enabled, cacheDir, log, onStop, onImage, is
     if (!active.delete(sessionId)) return;
     if (active.size) return;
     releaseShortcut();
-    indicatorState = { doing: '', waiting: false };
+    indicatorState = { doing: '', steps: 0, waiting: false };
     if (indicator && !indicator.isDestroyed()) indicator.hide();
     const win = mainWindow();
     if (win) win.setContentProtection(false);
@@ -476,6 +478,10 @@ function createComputer({ getWindow, enabled, cacheDir, log, onStop, onImage, is
     const state = stateOf(sessionId);
     const display = await displayForSession(state, action);
     activate(sessionId, display);
+    indicatorState = { ...indicatorState, steps: indicatorState.steps + 1 };
+    // Named now, so the pill says what is under way; the actions that know
+    // their target better (an element's name) say it again when they do.
+    setDoing(core.actionWords(action, action.window ? `"${action.window}"` : ''));
     let text;
     let shotDisplay = display;
     if (action.action === 'elements') {
@@ -498,7 +504,6 @@ function createComputer({ getWindow, enabled, cacheDir, log, onStop, onImage, is
     if (action.action !== 'elements' && action.action !== 'windows') {
       text = `${text.replace(/\.$/, '')}.${await activeWindowWords()}`;
     }
-    setDoing('');
     if (!action.screenshot) return { output: { text }, is_error: false };
     const shot = await picture(shotDisplay);
     if (onImage && call && call.id) onImage(sessionId, { id: call.id, image: shot.image, title: text.split('.')[0] });
@@ -539,7 +544,6 @@ function createComputer({ getWindow, enabled, cacheDir, log, onStop, onImage, is
         if (state.stopped) throw new Error('The user stopped computer use for this run.');
         return await runAction(sessionId, action, call, controller.signal);
       } catch (err) {
-        setDoing('');
         const message = controller.signal.aborted || state.stopped
           ? 'The user stopped computer use. Do not use the computer tool again unless they ask.'
           : err.message;

@@ -378,6 +378,8 @@ function actionWords(action, target) {
     case 'key': return `Pressed ${action.keysText}`;
     case 'wait': return `Waited ${action.seconds} s`;
     case 'focus_window': return `Brought${on} to the front`;
+    case 'elements': return `Read${on || ' the window in front'}`;
+    case 'windows': return 'Listed the open windows';
     default: return action.action;
   }
 }

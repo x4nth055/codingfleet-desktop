@@ -13,6 +13,9 @@ window.indicator.onState((state) => {
   const waiting = Boolean(state.waiting);
   pill.classList.toggle('waiting', waiting);
   title.textContent = waiting ? 'CodingFleet is waiting for your approval' : 'CodingFleet is using your computer';
-  doing.textContent = waiting ? '' : (state.doing || '');
+  // The last action stays up until the next one: one shown for a moment and
+  // gone said nothing.
+  const step = state.steps ? `Step ${state.steps}` : '';
+  doing.textContent = waiting ? '' : [step, state.doing].filter(Boolean).join(' · ');
   open.hidden = !waiting;
 });

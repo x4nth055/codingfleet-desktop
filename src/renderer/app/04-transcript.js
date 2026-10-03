@@ -212,6 +212,9 @@ function renderItem(item) {
     case 'files':
       node = renderFiles(item);
       break;
+    case 'computer':
+      node = renderComputer(item);
+      break;
     case 'notice':
       node = el('div', 'notice', item.text);
       break;
