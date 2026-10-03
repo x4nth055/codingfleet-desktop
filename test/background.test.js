@@ -9,6 +9,10 @@ const tools = require('../src/core/tools');
 
 const jobs = () => new BackgroundJobs({ shell: tools.SHELL, env: tools.commandEnv, kill: tools.killTree });
 const node = (script) => `node -e "${script.replace(/"/g, '\\"')}"`;
+// "Forever" in a test means a minute at most. On Windows a stopped job's node
+// can outlive its shell, and one left running holds this file open, which
+// held a CI runner for three hours.
+const forever = (script) => node(`setTimeout(()=>process.exit(),60000);${script}`);
 
 test('a background command answers at once, and its output is read as it comes', async () => {
   const bg = jobs();
@@ -35,7 +39,7 @@ test('a background command answers at once, and its output is read as it comes',
 
 test('stop ends a command that would run forever', async () => {
   const bg = jobs();
-  const { output } = bg.start('S', node('setInterval(()=>console.log(1),200)'), os.tmpdir());
+  const { output } = bg.start('S', forever('setInterval(()=>console.log(1),200)'), os.tmpdir());
   const stopped = await bg.stop('S', output.id);
   assert.equal(stopped.output.status, 'stopped');
   assert.equal(bg.list('S')[0].status, 'exited');
