@@ -16,6 +16,7 @@ const { BackgroundJobs } = require('../core/background');
 const capture = require('./capture');
 const config = require('../core/config');
 const git = require('./git');
+const github = require('./github');
 const guard = require('../core/guard');
 const images = require('../core/images');
 const tools = require('../core/tools');
@@ -27,7 +28,7 @@ const { revertRun } = require('../core/undo');
 // Development flags: --open=<session id>, --screenshot=<file.png>,
 // --shot-delay=<ms>, --shot-menu=models|permissions|settings,
 // --shot-cwd=<dir>, --shot-prompt=<text>, --shot-permission=auto, --shot-expand,
-// --shot-model=<model id> (not saved), --shot-menu=effort|folder|attach|shot|agents|quota|changes, --shot-scroll=top,
+// --shot-model=<model id> (not saved), --shot-menu=effort|folder|attach|shot|agents|quota|changes|github, --shot-scroll=top,
 // --shot-attach=<path>[|<path>...] (attaches files on start).
 //
 // An installed app ignores all of them but --open and --theme. Several would
@@ -1225,6 +1226,34 @@ function registerIpc() {
   handle('git:diff', async ({ sessionId, cwd, path: file } = {}) => {
     const { dir } = gitFolder({ sessionId, cwd });
     return git.diffFor(dir, file);
+  });
+
+  // Pull requests through the GitHub CLI. The window never sees a GitHub
+  // token: `gh` keeps it, and only answers come back.
+  const githubRoot = async (arg) => {
+    try {
+      return await git.repoAt(gitFolder(arg || {}).dir);
+    } catch {
+      return null;
+    }
+  };
+  handle('github:status', async (arg) => github.status(await githubRoot(arg)));
+  handle('github:pulls', async (arg) => {
+    const root = await githubRoot(arg);
+    if (!root) throw new Error('This folder is not a git repository.');
+    return github.pulls(root);
+  });
+  handle('github:install', () => github.install((line) => send('github:progress', { stage: 'install', line })));
+  handle('github:signIn', () => github.signIn(({ code, url, message }) => send('github:progress', { stage: 'code', code, url, message })));
+  handle('github:cancelSignIn', () => github.cancelSignIn());
+  handle('github:signOut', () => github.signOut());
+  // The one-time code goes on the clipboard and GitHub's page opens: the
+  // window's single "Copy code and open GitHub" button.
+  handle('github:openDevice', async ({ code, url } = {}) => {
+    if (typeof code === 'string' && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(code)) await clipboard.writeText(code);
+    const target = typeof url === 'string' && url.startsWith(`https://github.com/login/device`) ? url : 'https://github.com/login/device';
+    await shell.openExternal(target);
+    return true;
   });
 
   // No folder means a cloud sandbox: the tools run on CodingFleet's servers

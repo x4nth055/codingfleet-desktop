@@ -29,8 +29,13 @@
         <button class="scroll-down" id="scrollDown" hidden title="Go to the newest message"></button>
         <div class="attachments" id="attachments" hidden></div>
         <div class="bg-jobs" id="bgJobs" hidden></div>
-        <div class="changes" id="changes" hidden>
-          <button class="changes-pill" id="changesPill"></button>
+        <div class="repo-row">
+          <div class="changes" id="changes" hidden>
+            <button class="changes-pill" id="changesPill"></button>
+          </div>
+          <div class="github" id="github" hidden>
+            <button class="changes-pill gh-pill" id="githubPill"></button>
+          </div>
         </div>
         <textarea id="prompt" rows="1" spellcheck="false"></textarea>
         <div class="composer-bar">
@@ -65,6 +70,7 @@
           <div class="menu-list" id="changesList"></div>
           <div class="changes-foot" id="changesFoot"></div>
         </div>
+        <div class="menu changes-menu github-menu" id="githubMenu" hidden></div>
       </div>
       <div class="hint" id="hint" aria-live="polite"></div>
     </footer>
@@ -177,6 +183,7 @@
 <script src="../../node_modules/@highlightjs/cdn-assets/languages/tcl.min.js"></script>
 <script src="lib/format.js"></script>
 <script src="lib/tool-words.js"></script>
+<script src="lib/pr-prompts.js"></script>
 <script src="app/01-base.js"></script>
 <script src="app/02-state.js"></script>
 <script src="app/03-sidebar.js"></script>
@@ -189,6 +196,7 @@
 <script src="app/10-settings.js"></script>
 <script src="app/11-billing.js"></script>
 <script src="app/12-mcp.js"></script>
+<script src="app/12-github.js"></script>
 <script src="app/13-boot.js"></script>
 </body>
 </html>

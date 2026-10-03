@@ -26,6 +26,7 @@ function wire() {
   $('send').addEventListener('click', () => ($('send').classList.contains('stop') ? stopRun() : sendMessage()));
   $('folderButton').addEventListener('click', () => ($('folderMenu').hidden ? openFolderMenu() : closeMenus()));
   $('changesPill').addEventListener('click', () => ($('changesMenu').hidden ? openChangesMenu() : closeMenus()));
+  $('githubPill').addEventListener('click', () => ($('githubMenu').hidden ? openGithubMenu() : closeMenus()));
   $('attachButton').addEventListener('click', () => ($('attachMenu').hidden ? openAttachMenu() : closeMenus()));
   $('dropIcon').innerHTML = ICON.upload;
   wireDrop();
@@ -66,7 +67,7 @@ function wire() {
   });
 
   document.addEventListener('mousedown', (event) => {
-    if (!event.target.closest('.menu, .session-more, .pref-toggle, #modelButton, #effortButton, #permButton, #attachButton, #folderButton, #changesPill')) closeMenus();
+    if (!event.target.closest('.menu, .session-more, .pref-toggle, #modelButton, #effortButton, #permButton, #attachButton, #folderButton, #changesPill, #githubPill')) closeMenus();
   });
   document.addEventListener('click', (event) => {
     const img = event.target.closest('.markdown img, .tool-image');
@@ -299,6 +300,7 @@ async function boot() {
     setTimeout(() => openChangesMenu(), 1500);
     setTimeout(() => { const row = document.querySelector('#changesList .file-row'); if (row) row.click(); }, 2500);
   }
+  if (S.init.shotMenu === 'github') setTimeout(() => openGithubMenu(), 2500);
   if (S.init.shotMenu === 'attach') openAttachMenu();
   if (S.init.shotMenu === 'shot') {
     openAttachMenu();

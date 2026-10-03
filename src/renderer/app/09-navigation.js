@@ -316,6 +316,7 @@ function closeMenus() {
   $('effortMenu').hidden = true;
   $('permMenu').hidden = true;
   $('changesMenu').hidden = true;
+  $('githubMenu').hidden = true;
 }
 
 // Where a new session runs: a folder on this computer, or a cloud sandbox.

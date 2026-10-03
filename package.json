@@ -13,6 +13,7 @@
     "start": "electron .",
     "test": "node --test \"test/*.test.js\"",
     "e2e": "node test/e2e-run.mjs",
+    "e2e:github": "node test/e2e-github.mjs",
     "test:layout": "electron test/layout.cjs",
     "test:transcript": "electron test/transcript.cjs",
     "shot": "electron . --screenshot=shot.png",

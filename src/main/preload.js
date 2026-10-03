@@ -44,6 +44,18 @@ contextBridge.exposeInMainWorld('cf', {
   pickFolder: call('dialog:pickFolder'),
   gitStatus: call('git:status'),
   gitDiff: call('git:diff'),
+  githubStatus: call('github:status'),
+  githubPulls: call('github:pulls'),
+  githubInstall: call('github:install'),
+  githubSignIn: call('github:signIn'),
+  githubCancelSignIn: call('github:cancelSignIn'),
+  githubSignOut: call('github:signOut'),
+  githubOpenDevice: call('github:openDevice'),
+  onGithubProgress: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on('github:progress', wrapped);
+    return () => ipcRenderer.removeListener('github:progress', wrapped);
+  },
   openFolder: call('shell:openFolder'),
   startRun: call('run:start'),
   recoverRuns: call('run:recover'),

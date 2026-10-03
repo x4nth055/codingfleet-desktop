@@ -66,6 +66,9 @@ const ENV_DUMP = [
   /\$env:[a-z_]*(token|key|secret|passw|pwd|credential)/i,
   /\$\{?[a-z_]*(token|key|secret|passw|pwd|credential)[a-z_]*\}?/i,
   /%[a-z_]*(token|key|secret|passw|pwd|credential)[a-z_]*%/i,
+  // The GitHub CLI prints the token it keeps when asked.
+  /\bgh\s+auth\s+token\b/i,
+  /\bgh\s+auth\s+status\b[^;&|]*\s(-t|--show-token)\b/i,
 ];
 
 const DESTRUCTIVE_COMMANDS = [

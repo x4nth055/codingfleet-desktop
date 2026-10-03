@@ -409,6 +409,7 @@ function renderComposer() {
   updateCostHint();
   updateSendButton();
   ensureGit();
+  if (typeof ensureGithub === 'function') ensureGithub();
   renderBackground();
 }
 
@@ -740,6 +741,7 @@ function onGitChanged({ sessionId, cwd, summary }) {
   S.gitFor = tag;
   S.git = { ...summary, stamp: ++gitStamp };
   renderChanges();
+  if (typeof githubGitChanged === 'function') githubGitChanged();
 }
 
 // `dismiss` changes what the closing button says and does besides closing.

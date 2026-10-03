@@ -20,11 +20,12 @@ test('reading a secret or printing the environment is asked about', () => {
   assert.equal(guard.guardReason('fs_read', { path: '.env' }), guard.SECRETS);
   assert.equal(guard.guardReason('fs_read', { path: 'src/app.js' }), null);
   for (const command of ['cat .env', 'type .env.local', 'Get-Content .\\.env', 'env', 'printenv',
-    'set', 'echo $OPENAI_API_KEY', 'Get-ChildItem env:', 'echo %GITHUB_TOKEN%', 'cp .env.example .env']) {
+    'set', 'echo $OPENAI_API_KEY', 'Get-ChildItem env:', 'echo %GITHUB_TOKEN%', 'cp .env.example .env',
+    'gh auth token', 'gh auth status --show-token', 'gh auth status -h github.com -t']) {
     assert.equal(guard.commandRisk(command), guard.SECRETS, command);
   }
   for (const command of ['npm test', 'ls -la', 'git status', 'set -e', 'echo $PATH', 'cat .env.example',
-    'python -m pytest', 'export NODE_ENV=production']) {
+    'python -m pytest', 'export NODE_ENV=production', 'gh auth status', 'gh pr diff 12 --repo a/b']) {
     assert.equal(guard.commandRisk(command), null, command);
   }
 });
