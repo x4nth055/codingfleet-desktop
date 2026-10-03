@@ -20,11 +20,15 @@
 const SECRETS = 'reads secrets';
 const DESTRUCTIVE = 'may delete or overwrite data';
 const REMOTE_SCRIPT = 'runs a script from the internet';
+// The computer tool: the mouse, the keyboard, and what any app shows. Auto
+// mode is about the project folder; this reaches every window on the screen,
+// so a person says yes once per session.
+const COMPUTER = 'controls your computer';
 
 // Never covered by auto mode or by "allow for this session".
 const ALWAYS_ASK = new Set([DESTRUCTIVE, REMOTE_SCRIPT]);
 // Not covered by auto mode, but "allow for this session" is fine.
-const ASK_EVEN_IN_AUTO = new Set([SECRETS]);
+const ASK_EVEN_IN_AUTO = new Set([SECRETS, COMPUTER]);
 
 // Templates are meant to be read and shared.
 const HARMLESS_ENV = /^\.env\.(example|sample|template|dist|defaults?)$/i;
@@ -118,6 +122,7 @@ function commandRisk(command) {
  */
 function guardReason(name, args) {
   args = args || {};
+  if (name === 'computer') return COMPUTER;
   if (name === 'fs_read' || name === 'view_image') {
     return isSecretPath(name === 'fs_read' ? args.path : args.source) ? SECRETS : null;
   }
@@ -142,6 +147,6 @@ function mustAsk(reason, { auto, allowedThisSession }) {
 }
 
 module.exports = {
-  SECRETS, DESTRUCTIVE, REMOTE_SCRIPT, ALWAYS_ASK, ASK_EVEN_IN_AUTO,
+  SECRETS, DESTRUCTIVE, REMOTE_SCRIPT, COMPUTER, ALWAYS_ASK, ASK_EVEN_IN_AUTO,
   isSecretPath, commandRisk, guardReason, mustAsk,
 };

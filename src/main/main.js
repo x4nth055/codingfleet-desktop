@@ -14,6 +14,8 @@ const { createUpdater } = require('./updater');
 const { createLog } = require('../core/log');
 const { BackgroundJobs } = require('../core/background');
 const capture = require('./capture');
+const { createComputer } = require('./computer');
+const { computerUseAllowed } = require('../core/computer');
 const config = require('../core/config');
 const git = require('./git');
 const github = require('./github');
@@ -61,7 +63,7 @@ const PERMISSION_OVERRIDE = flag('shot-permission');
 // ---------------------------------------------------------------------------
 // Local state: the folder each session works in, and a few preferences.
 // ---------------------------------------------------------------------------
-let state = { sessions: {}, lastCwd: null, model: 'auto', permissionMode: 'ask' };
+let state = { sessions: {}, lastCwd: null, model: 'auto', permissionMode: 'ask', computerUse: false };
 // Capabilities the user may add to new sessions, on top of the ones every
 // session has (code execution, web access, sub-agents).
 const OPTIONAL_CAPABILITIES = ['image_generation', 'memory'];
@@ -583,6 +585,14 @@ async function screenshotForAgent(args, { call, sessionId } = {}) {
     }
     image = await capture.captureWindow(hit.id);
     taken = hit.name;
+  } else if (computer.isActive(sessionId)) {
+    // The agent has the computer: the same picture its actions return, so
+    // coordinates it reads off this one land where it means.
+    const shot = await computer.screenshotFor(sessionId, Number(args.screen) || null);
+    if (call && call.id && sessionId) {
+      send('run:event', { sessionId, event: 'client.tool_image', data: { id: call.id, url: previewOf(shot.image), title: shot.label } });
+    }
+    return { output: { data: shot.data, width: shot.frame.width, height: shot.frame.height }, is_error: false };
   } else {
     const { screens } = await capture.listTargets(win);
     const index = Number(args.screen);
@@ -611,9 +621,30 @@ async function screenshotForAgent(args, { call, sessionId } = {}) {
 const backgroundJobs = new BackgroundJobs({ shell: tools.SHELL, env: tools.commandEnv, kill: tools.killTree });
 backgroundJobs.onChange((sessionId, jobs) => send('background:changed', { sessionId, jobs }));
 
+// The computer tool: the mouse, the keyboard and other apps' UI, when the user
+// turned it on in Preferences. Stop (the pill, or its key) cancels the run.
+const computer = createComputer({
+  getWindow: () => win,
+  enabled: () => state.computerUse === true,
+  cacheDir: path.join(app.getPath('userData'), 'computer'),
+  log,
+  onStop: (sessionId) => {
+    const run = runs.get(sessionId);
+    if (run) run.cancel().catch((err) => log.warn(`could not cancel the run after Stop: ${err.message}`));
+  },
+  onImage: (sessionId, { id, image, title }) => send('run:event', {
+    sessionId, event: 'client.tool_image', data: { id, url: previewOf(image), title, quiet: true },
+  }),
+});
+
 const handlersFor = (sessionId) => new Map([
   ['view_image', viewLocalImage],
   ['take_screenshot', (args, context) => screenshotForAgent(args, { ...context, sessionId })],
+  // Refused outright for a session with no folder here (a cloud sandbox), even
+  // if a call reached this computer some other way.
+  ['computer', (args, context) => ((state.sessions[sessionId] || {}).cwd
+    ? computer.forAgent(sessionId, args, context)
+    : { output: 'Computer use is only for sessions that work on this computer, not in a cloud sandbox.', is_error: true })],
   // run_command stays the ordinary tool unless it asks for the background.
   ['run_command', (args, context) => (args.background
     ? backgroundJobs.start(sessionId, String(args.command || ''), context.cwd)
@@ -640,6 +671,8 @@ function approve(sessionId, cwd, call, localTools) {
     approvals.set(call.id, { resolve, sessionId, reason });
     send('run:event', { sessionId, event: 'client.approval', data: { id: call.id, reason } });
     notify(sessionId, `Waiting for your approval: the agent ${reason}.`);
+    // The app's window stepped aside for the agent: bring it back to ask.
+    computer.awaitingApproval(sessionId);
   });
 }
 
@@ -695,6 +728,7 @@ function runInBackground(sessionId, run, body) {
   run.start(body).finally(() => {
     rememberUndo(sessionId, run);
     runs.delete(sessionId);
+    computer.endRun(sessionId);
     stayAwake();
     for (const [callId, waiting] of approvals) {
       if (waiting.sessionId === sessionId) approvals.delete(callId);
@@ -917,6 +951,7 @@ function registerIpc() {
     settings: settingsView(),
     shell: tools.SHELL.name,
     platform: process.platform,
+    computerUse: { supported: computer.supported, shortcut: computer.shortcutLabel },
     state: { ...state, permissionMode: PERMISSION_OVERRIDE || state.permissionMode },
     openSession: flag('open'),
     shotMenu: flag('shot-menu'),
@@ -1181,6 +1216,11 @@ function registerIpc() {
     for (const key of ['model', 'permissionMode', 'lastCwd', 'notifications', 'keepAwake', 'autoUpdate']) {
       if (patch && key in patch) state[key] = patch[key];
     }
+    if (patch && 'computerUse' in patch) {
+      state.computerUse = patch.computerUse === true && computer.supported;
+      // Turned off mid-run: the agent lets go now.
+      if (!state.computerUse) computer.stopAll();
+    }
     if (patch && 'autoUpdate' in patch) updates.schedule();
     stayAwake();
     if (patch && patch.capabilities && typeof patch.capabilities === 'object') {
@@ -1324,6 +1364,11 @@ function registerIpc() {
     const servers = remoteServersForRun();
     if (Object.keys(servers).length) body.mcp_servers = servers;
     if (declared.length) body.client_tools = declared;
+    // The computer tool is offered only when the user turned it on, and only to
+    // a session whose tools run on this computer: never to a cloud sandbox.
+    if (computerUseAllowed({ enabled: state.computerUse, supported: computer.supported, executor, cwd: local.cwd })) {
+      body.computer_use = true;
+    }
     recoveryStore.start(sessionId, local.cwd);
     runInBackground(sessionId, makeRun(sessionId, localTools), body);
     return true;
@@ -1407,6 +1452,7 @@ function registerIpc() {
     if (decision === 'allow-session' && !guard.ALWAYS_ASK.has(waiting.reason)) {
       rememberAllow(waiting.sessionId, waiting.reason);
     }
+    computer.approvalAnswered(waiting.sessionId);
     waiting.resolve(decision === 'deny' ? 'deny' : 'allow');
     return true;
   });
@@ -1447,6 +1493,7 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
   });
   app.on('window-all-closed', () => app.quit());
   app.on('will-quit', () => {
+    computer.dispose();
     localMcp.stopAll();
     git.stopWatch();
   });

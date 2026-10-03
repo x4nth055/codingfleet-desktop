@@ -21,6 +21,7 @@
     credit_status: () => ['Check credits', ''],
     view_image: (a) => ['View image', a.source],
     take_screenshot: (a) => ['Take a screenshot', a.window ? `window: ${a.window}` : 'the screen'],
+    computer: (a) => computerWords(a),
     generate_image: (a) => ['Generate image', a.prompt],
     read_file: (a) => ['Read attachment', a.path || a.file_id],
   };
@@ -36,7 +37,28 @@
     get_url_content: ['Fetched', 'page', 'pages'],
     web_search: ['Searched the web', 'time', 'times'],
     spawn_agent: ['Delegated', 'task', 'tasks'],
+    computer: ['Used the computer', 'time', 'times'],
   };
+
+  // One computer action: what it does, and to what.
+  function computerWords(a) {
+    const at = a.element != null ? `element ${a.element}` : a.x != null && a.y != null ? `${a.x}, ${a.y}` : '';
+    switch (a.action) {
+      case 'click': return ['Click', at];
+      case 'double_click': return ['Double-click', at];
+      case 'right_click': return ['Right-click', at];
+      case 'move': return ['Point at', at];
+      case 'drag': return ['Drag', `${at} to ${a.to_element != null ? `element ${a.to_element}` : `${a.to_x}, ${a.to_y}`}`];
+      case 'scroll': return ['Scroll', `${a.direction || 'down'}${at ? ` at ${at}` : ''}`];
+      case 'type': return ['Type', a.text || ''];
+      case 'key': return ['Press', a.keys || a.text || ''];
+      case 'wait': return ['Wait', `${a.seconds || 1} s`];
+      case 'elements': return ['Read the screen', a.window ? `window: ${a.window}` : 'the window in front'];
+      case 'windows': return ['List open windows', ''];
+      case 'focus_window': return ['Switch to', a.window || ''];
+      default: return ['Use the computer', a.action || ''];
+    }
+  }
 
   // "Allow all ... this session" covers the REASON a call was held, not the one
   // tool that asked: someone who allows file changes means fs_write, fs_edit and
@@ -49,6 +71,7 @@
     'takes a picture of your screen': 'Allow screenshots this session',
     'reads secrets': 'Allow reading secrets this session',
     'uses a local MCP tool': 'Allow local MCP tools this session',
+    'controls your computer': 'Allow computer use this session',
   };
 
   const REASONS = {
@@ -61,6 +84,7 @@
     'may delete or overwrite data': 'wants to run a command that can delete or overwrite data',
     'runs a script from the internet': 'wants to download a script and run it',
     'uses a local MCP tool': 'wants to use a tool from a local MCP server',
+    'controls your computer': 'wants to use your mouse, keyboard and screen',
   };
 
   // Reasons the app asks about every time (src/core/guard.js ALWAYS_ASK).

@@ -106,7 +106,8 @@ function onRunEvent({ sessionId, event, data }) {
       break;
     // The picture take_screenshot just took, so the step shows what the agent saw.
     case 'client.tool_image':
-      updateTool(sessionId, data.id, { image: data.url, imageTitle: data.title, open: true });
+      // A computer step keeps its card closed: there can be dozens in a row.
+      updateTool(sessionId, data.id, { image: data.url, imageTitle: data.title, ...(data.quiet ? {} : { open: true }) });
       break;
     case 'tool.result': {
       const tool = findTool(sessionId, data.id);

@@ -393,6 +393,30 @@ function themeSection() {
   return wrap;
 }
 
+// Computer use: off until the user turns it on. It is kept on this computer,
+// and applies from the next message in any folder session.
+function computerUseRow(pane) {
+  const info = S.init.computerUse || {};
+  const mac = S.init.platform === 'darwin';
+  const desc = info.supported
+    ? 'Let the agent use your mouse and keyboard and read other apps\' windows, to do things only an app can '
+      + 'do. Each session asks before its first action. While it works, a bar at the top of the screen says so; '
+      + `press ${info.shortcut || 'Ctrl+Alt+Esc'} or Stop on the bar to stop it.`
+      + (mac ? ' macOS asks you once to allow Accessibility and control of System Events.' : '')
+    : 'Not available on this operating system yet.';
+  return switchRow({
+    title: 'Computer use',
+    desc,
+    checked: info.supported && S.init.state.computerUse === true,
+    disabled: !info.supported,
+    onChange: (on) => {
+      S.init.state.computerUse = on;
+      cf.setState({ computerUse: on });
+      paneStatus(pane, on ? 'Saved. The agent can use the computer from your next message.' : 'Saved.', 'ok');
+    },
+  });
+}
+
 function renderPreferencesPane() {
   const pane = accountPane('prefsPane', 'Preferences',
     'How the app looks, your defaults for new sessions, and how much one message may spend.');
@@ -524,6 +548,7 @@ function renderPreferencesPane() {
       paneStatus(pane, 'Saved.', 'ok');
     },
   }));
+  pane.append(computerUseRow(pane));
 
   pane.append(el('div', 'pane-section', 'Updates'));
   const updateRow = el('div', 'set-row');

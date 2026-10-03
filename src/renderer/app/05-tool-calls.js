@@ -234,6 +234,11 @@ function toolBody(tool) {
       // is nothing to show for a past run.
       if (tool.image) section(tool.imageTitle || 'Screenshot', shownImage(tool.image));
       break;
+    case 'computer':
+      // What the agent saw after the action, when it asked for a picture.
+      if (tool.image) section(tool.imageTitle || 'The screen after', shownImage(tool.image));
+      if (Object.keys(args).length) section('Action', codeBlock(JSON.stringify(args, null, 2)));
+      break;
     default:
       if (Object.keys(args).length) section('Arguments', codeBlock(JSON.stringify(args, null, 2)));
   }

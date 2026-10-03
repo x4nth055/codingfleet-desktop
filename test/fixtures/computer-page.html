@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'">
+<title>Computer use target</title>
+<style>
+  body { margin: 0; font: 15px "Segoe UI", sans-serif; background: #fff; color: #111; }
+  .row { display: flex; gap: 16px; align-items: center; padding: 10px 16px; }
+  button, input, textarea { font: inherit; }
+  button { padding: 8px 18px; }
+  #scroller { height: 120px; width: 300px; overflow: auto; border: 1px solid #888; margin-left: 16px; }
+  #scroller div { height: 1200px; background: linear-gradient(#cde, #edc); }
+  .box { width: 120px; height: 60px; display: grid; place-items: center; border: 2px solid #446; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <label>Name <input id="name" aria-label="Name" value=""></label>
+    <button id="go">Go</button>
+    <label><input type="checkbox" id="agree"> I agree</label>
+  </div>
+  <div class="row">
+    <div class="box" id="dbl" role="button" aria-label="Double target">double</div>
+    <div class="box" id="ctx" role="button" aria-label="Context target">right</div>
+    <div class="box" id="hover" role="button" aria-label="Hover target">hover</div>
+  </div>
+  <div class="row">
+    <div class="box" id="from" role="button" aria-label="Drag from">from</div>
+    <div class="box" id="to" role="button" aria-label="Drag to" style="margin-left: 200px">to</div>
+  </div>
+  <div class="row"><textarea id="notes" aria-label="Notes" rows="3" cols="40"></textarea></div>
+  <div id="scroller" aria-label="Scroller"><div></div></div>
+  <script src="computer-page.js"></script>
+</body>
+</html>

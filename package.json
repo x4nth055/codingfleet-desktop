@@ -85,6 +85,9 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
+    "extendInfo": {
+      "NSAppleEventsUsageDescription": "Computer use: CodingFleet uses System Events to press keys, type and read other apps' windows for the agent, when you turn it on."
+    },
       "artifactName": "CodingFleet-${version}-${arch}.${ext}"
     },
     "dmg": {

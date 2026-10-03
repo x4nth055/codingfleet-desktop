@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'">
+<title>CodingFleet is using your computer</title>
+<link rel="stylesheet" href="computer-indicator.css">
+</head>
+<body>
+<div class="pill" id="pill">
+  <span class="dot" aria-hidden="true"></span>
+  <span class="text">
+    <strong id="title">CodingFleet is using your computer</strong>
+    <span id="doing"></span>
+  </span>
+  <button id="open" hidden>Review</button>
+  <button id="stop" class="stop" title="Stop the agent">Stop <kbd id="shortcut"></kbd></button>
+</div>
+<script src="computer-indicator.js"></script>
+</body>
+</html>

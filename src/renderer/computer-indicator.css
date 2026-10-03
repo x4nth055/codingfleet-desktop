@@ -1,0 +1,22 @@
+/* The pill shown at the top of the screen while the agent has the mouse and
+   keyboard. It is left out of every screenshot (content protection), so it
+   can be as plain as it needs to be noticed. */
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none;
+  font: 12.5px/1.3 "Segoe UI", system-ui, -apple-system, sans-serif; }
+.pill { box-sizing: border-box; height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 6px 0 14px;
+  border-radius: 999px; background: #14171c; color: #e8ebf0; border: 1px solid #f0a020;
+  box-shadow: 0 0 0 3px rgba(240, 160, 32, .25); }
+.pill.waiting { border-color: #7b8cff; box-shadow: 0 0 0 3px rgba(123, 140, 255, .3); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: #f0a020; flex: none; animation: pulse 1.4s ease-in-out infinite; }
+.pill.waiting .dot { background: #7b8cff; }
+@keyframes pulse { 50% { opacity: .35; } }
+.text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.text strong { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#doing { color: #9aa3b2; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#doing:empty { display: none; }
+button { flex: none; height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid #3a404c; background: #232831;
+  color: #e8ebf0; font: inherit; font-weight: 600; cursor: pointer; }
+button:hover { background: #2c323d; }
+button.stop { background: #c53a3a; border-color: #c53a3a; color: #fff; }
+button.stop:hover { background: #d84848; }
+kbd { margin-left: 4px; font: 10.5px "Segoe UI", system-ui, sans-serif; opacity: .8; }
