@@ -15,7 +15,8 @@ app.whenReady().then(async () => {
     await win.webContents.executeJavaScript(`
       $('settings').hidden = true;
       S.settings.hasKey = true;
-      S.credits = { plan: { name: 'Ultimate Max' }, weekly_total: 100, weekly_remaining: 0, credits: 10774 };
+      S.credits = { plan: { name: 'Ultimate Max' }, weekly_total: 100, weekly_remaining: 0, credits: 10774,
+        account: { username: 'a-rather-long-username-for-the-sidebar', email: 'someone@example.com' } };
       S.current = 'layout';
       S.sessions = [{ id: 'layout', title: 'Long agent task', executor: 'client', created_at: new Date().toISOString(), context: { tokens: 279100, limit: 800000 } }];
       S.loaded.add('layout');

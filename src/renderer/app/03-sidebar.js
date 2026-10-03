@@ -316,13 +316,39 @@ function renderAccount() {
     }
   }
   const foot = el('div', 'account-foot');
-  foot.append(el('span', 'account-server', S.settings.apiBase.replace(/^https?:\/\//, '')));
+  foot.append(accountWho());
   const gear = el('button', 'icon-button');
   gear.title = 'Settings';
   gear.innerHTML = ICON.gear;
   gear.addEventListener('click', () => openSettings(false));
   foot.append(gear);
   box.append(foot);
+}
+
+// Who the app is signed in as, next to the gear: the one thing in the footer
+// worth reading at a glance. It opens the account page; the server address is
+// only shown when it is not the default one, since then it is news.
+function accountWho() {
+  const account = (S.credits && S.credits.account) || {};
+  const name = account.username || account.email;
+  const version = S.init && S.init.version ? `CodingFleet ${S.init.version}` : 'CodingFleet';
+  const custom = S.settings.apiBase !== S.settings.defaultApiBase
+    ? S.settings.apiBase.replace(/^https?:\/\//, '') : '';
+  // Signed out, the button above already says what to do; the app's version
+  // is all that is left to say.
+  if (!S.settings.hasKey) return el('span', 'account-version', version);
+  const who = el('button', 'account-who');
+  const label = name || (S.creditsError ? 'Account unavailable' : version);
+  who.append(el('span', 'account-avatar', (name || 'C').charAt(0).toUpperCase()),
+    el('span', 'account-name', custom ? `${label} · ${custom}` : label));
+  who.title = [
+    name && `Signed in as ${account.username && account.email ? `${account.username} (${account.email})` : name}`,
+    custom && `Server: ${S.settings.apiBase}`,
+    version,
+    'Open your account on codingfleet.com',
+  ].filter(Boolean).join('\n');
+  who.addEventListener('click', () => window.open(`${originOf(S.settings.apiBase)}/account/`));
+  return who;
 }
 
 // The quota card: a bar of what is left, and the numbers behind it on hover or
