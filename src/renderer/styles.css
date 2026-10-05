@@ -415,6 +415,28 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .error-card > span, .banner > span { margin-right: auto; }
 .banner { max-width: 820px; margin: 0 auto 10px; }
 
+/* The 5-hour limit on Unlimited models: a wait, not an error, so the accent
+   colour and not the red of .banner. */
+.cap-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 820px;
+  margin: 0 auto 10px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.cap-icon { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.cap-icon svg { width: 15px; height: 15px; }
+.cap-text { flex: 1; min-width: 0; }
+.cap-strip .btn { flex: none; }
+
 /* ── Turn footer and its token breakdown ─────────────────── */
 .turn-footer { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--faint); margin-top: 2px; }
 .turn-footer > span + span::before { content: "·"; margin-right: 8px; color: var(--line-2); }

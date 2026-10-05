@@ -766,6 +766,73 @@ function hideBanner() {
   $('banner').hidden = true;
 }
 
+// ── 5-hour limit strip ─────────────────────────────────────────────────────
+// Past the 5-hour limit on Unlimited models, a run goes to another model and
+// its notice says so. The limit is the account's, not a session's, so the strip
+// is one for the window and stays until the models are back, restarts included.
+const POOL_CAP_KEY = 'cf.poolCap';
+const POOL_CAP_DISMISSED_KEY = 'cf.poolCapDismissed';
+let poolCapTimer = null;
+
+function readPoolCap(key) {
+  try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
+}
+
+function writePoolCap(key, value) {
+  try {
+    if (value == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
+  } catch { /* kept for this run only */ }
+}
+
+function notePoolCap(notice) {
+  const cap = CF_POOL_CAP.capFromNotice(notice);
+  if (!cap) return;
+  writePoolCap(POOL_CAP_KEY, cap);
+  renderPoolCap();
+}
+
+function forgetPoolCap() {
+  writePoolCap(POOL_CAP_KEY, null);
+  writePoolCap(POOL_CAP_DISMISSED_KEY, null);
+  renderPoolCap();
+}
+
+// `preview` (--shot-menu=poolcap) draws a strip without storing anything.
+function renderPoolCap(preview = null) {
+  const strip = $('capStrip');
+  clearTimeout(poolCapTimer);
+  const cap = preview || readPoolCap(POOL_CAP_KEY);
+  if (!CF_POOL_CAP.capVisible(cap, preview ? null : readPoolCap(POOL_CAP_DISMISSED_KEY))) {
+    strip.hidden = true;
+    return;
+  }
+  const urls = S.credits?.plan?.urls || {};
+  const link = (label, url, primary) => {
+    const button = el('button', `btn small${primary ? ' primary' : ''}`, label);
+    button.addEventListener('click', () => window.open(url));
+    return button;
+  };
+  strip.replaceChildren(icon('hourglass', 'cap-icon'), el('span', 'cap-text', CF_POOL_CAP.capText(cap)));
+  if (cap.upgrade) {
+    strip.append(link('Upgrade', urls.plans || `${originOf(S.settings.apiBase)}/pricing/`, true));
+  }
+  strip.append(link('Buy credits', creditsUrl(urls)));
+  const close = el('button', 'icon-button');
+  close.title = 'Hide until Unlimited models are back';
+  close.innerHTML = ICON.x;
+  close.addEventListener('click', () => {
+    if (preview) { strip.hidden = true; return; }
+    writePoolCap(POOL_CAP_DISMISSED_KEY, cap.until);
+    renderPoolCap();
+  });
+  strip.append(close);
+  strip.hidden = false;
+  // Once a minute for the countdown, and once more when the models are back.
+  poolCapTimer = setTimeout(() => renderPoolCap(preview),
+    Math.max(1000, Math.min(60000, cap.until - Date.now() + 500)));
+}
+
 async function pickFolder() {
   const dir = await call(cf.pickFolder);
   if (!dir) return null;

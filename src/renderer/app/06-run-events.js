@@ -71,6 +71,7 @@ function onRunEvent({ sessionId, event, data }) {
     case 'notice':
       assistantStamp(sessionId);
       addItem(sessionId, { type: 'notice', text: data.message });
+      notePoolCap(data);
       break;
     case 'text.delta':
       if (run && run.status === 'thinking') {

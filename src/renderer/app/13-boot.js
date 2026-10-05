@@ -274,6 +274,7 @@ async function boot() {
   restoreDraft();
   restorePanelWidth();
   renderAccount();
+  renderPoolCap();
   renderMain();
   if (!S.settings.hasKey) {
     renderSidebar();
@@ -319,6 +320,15 @@ async function boot() {
   if (S.init.shotMenu === 'quota') {
     quotaOpen = true;
     renderAccount();
+  }
+  if (S.init.shotMenu === 'poolcap') {
+    renderPoolCap(CF_POOL_CAP.capFromNotice({
+      code: 'pool_cap',
+      upgrade: S.init.shotPoolCap !== 'top',
+      resets_at: new Date(Date.now() + 150 * 60000).toISOString(),
+      message: "You reached your Unlimited plan's 5-hour limit on unlimited models, so this answer "
+        + 'came from Claude Sonnet 5.5 and used your weekly quota.',
+    }));
   }
   if (S.init.shotMenu === 'models') openModelMenu();
   if (S.init.shotMenu === 'effort') openEffortMenu();

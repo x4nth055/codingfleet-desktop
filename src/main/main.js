@@ -31,6 +31,7 @@ const { revertRun } = require('../core/undo');
 // --shot-delay=<ms>, --shot-menu=models|permissions|settings,
 // --shot-cwd=<dir>, --shot-prompt=<text>, --shot-permission=auto, --shot-expand,
 // --shot-model=<model id> (not saved), --shot-menu=effort|folder|attach|shot|agents|quota|changes|github, --shot-scroll=top,
+// --shot-menu=poolcap (the 5-hour limit strip, not stored; --shot-pool-cap=top hides Upgrade),
 // --shot-attach=<path>[|<path>...] (attaches files on start).
 //
 // An installed app ignores all of them but --open and --theme. Several would
@@ -955,6 +956,7 @@ function registerIpc() {
     state: { ...state, permissionMode: PERMISSION_OVERRIDE || state.permissionMode },
     openSession: flag('open'),
     shotMenu: flag('shot-menu'),
+    shotPoolCap: flag('shot-pool-cap'),
     shotCwd: flag('shot-cwd'),
     shotPrompt: flag('shot-prompt'),
     shotExpand: Boolean(flag('shot-expand')),

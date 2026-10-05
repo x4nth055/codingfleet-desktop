@@ -60,6 +60,8 @@ function resetAccountView() {
   S.sessions = [];
   S.credits = null;
   S.current = null;
+  // The 5-hour limit belonged to the old account.
+  forgetPoolCap();
 }
 
 // The account the app works as has changed: forget what the old one loaded.
