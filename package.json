@@ -1,7 +1,7 @@
 {
   "name": "codingfleet-desktop",
   "productName": "CodingFleet",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "The CodingFleet coding agent on your desktop.",
   "license": "MIT",
   "main": "src/main/main.js",
@@ -85,9 +85,9 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-    "extendInfo": {
-      "NSAppleEventsUsageDescription": "Computer use: CodingFleet uses System Events to press keys, type and read other apps' windows for the agent, when you turn it on."
-    },
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Computer use: CodingFleet uses System Events to press keys, type and read other apps' windows for the agent, when you turn it on."
+      },
       "artifactName": "CodingFleet-${version}-${arch}.${ext}"
     },
     "dmg": {
