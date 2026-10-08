@@ -19,6 +19,26 @@ const MAX_WAIT_S = 30;
 // A session can hold only so many running jobs; a model that starts servers
 // in a loop is stopped here instead of by the operating system.
 const MAX_RUNNING_PER_SESSION = 8;
+// What the window's log view shows of a job at most.
+const MAX_TAIL_CHARS = 20_000;
+
+// Colours and cursor moves, as dev servers print them to a terminal.
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007]*\u0007/g;
+const stripAnsi = (text) => String(text || '').replace(ANSI, '');
+
+// The address a dev server says it is listening on, as one on this computer:
+// "Local: http://localhost:5173/", "Listening on http://0.0.0.0:8000". The
+// last one printed wins: a server that moves to a free port says so last.
+const LOCAL_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::\d{2,5})?(?:\/[^\s'"<>\x60)\]]*)?/gi;
+
+/** The local address in `text`, opened from this computer, or null. */
+function localUrl(text) {
+  const found = stripAnsi(text).match(LOCAL_URL);
+  if (!found) return null;
+  const url = found[found.length - 1].replace(/[.,;:]+$/, '');
+  return url.replace(/\/\/(0\.0\.0\.0|\[::\])(?=[:/]|$)/i, '//localhost');
+}
 
 class BackgroundJobs {
   /**
@@ -67,7 +87,7 @@ class BackgroundJobs {
     const job = {
       id, sessionId, command, cwd, child, pid: child.pid || null,
       status: 'running', exitCode: null, started: Date.now(), ended: null,
-      text: '', dropped: 0, readTo: 0, waiters: new Set(),
+      text: '', dropped: 0, readTo: 0, waiters: new Set(), url: null,
     };
     job.exited = new Promise((resolve) => { job.markExited = resolve; });
     const append = (chunk) => {
@@ -78,6 +98,12 @@ class BackgroundJobs {
         job.dropped += cut;
       }
       this.wake(job);
+      // The window offers to open a dev server once it says where it is.
+      const url = localUrl(job.text.slice(-4000));
+      if (url && url !== job.url) {
+        job.url = url;
+        this.changed(job);
+      }
     };
     child.stdout.on('data', append);
     child.stderr.on('data', append);
@@ -142,6 +168,20 @@ class BackgroundJobs {
     };
   }
 
+  /**
+   * The end of what a job printed, for a person to look at. Unlike read(), it
+   * leaves alone what the agent has and has not read yet.
+   */
+  tail(sessionId, id, chars = MAX_TAIL_CHARS) {
+    const job = this.find(sessionId, id);
+    if (!job) return null;
+    const size = Math.min(Math.max(Number(chars) || MAX_TAIL_CHARS, 1), MAX_TAIL_CHARS);
+    return {
+      id: job.id, status: job.status, exitCode: job.exitCode, url: job.url,
+      text: stripAnsi(job.text.slice(-size)), cut: job.dropped + Math.max(0, job.text.length - size) > 0,
+    };
+  }
+
   /** Stop a job and every process it started. */
   async stop(sessionId, id) {
     const job = this.find(sessionId, id);
@@ -166,8 +206,8 @@ class BackgroundJobs {
       .filter((j) => !sessionId || j.sessionId === sessionId)
       .sort((a, b) => b.started - a.started)
       .map((j) => ({ id: j.id, command: j.command, status: j.status, exitCode: j.exitCode,
-        started: j.started, ended: j.ended, pid: j.pid,
-        tail: j.text.slice(-2000) }));
+        started: j.started, ended: j.ended, pid: j.pid, url: j.url,
+        tail: stripAnsi(j.text.slice(-2000)) }));
   }
 
   /** Stop every job, or every job of one session. */
@@ -178,4 +218,6 @@ class BackgroundJobs {
   }
 }
 
-module.exports = { BackgroundJobs, MAX_READ_CHARS, MAX_BUFFER_CHARS, MAX_RUNNING_PER_SESSION };
+module.exports = {
+  BackgroundJobs, MAX_READ_CHARS, MAX_BUFFER_CHARS, MAX_RUNNING_PER_SESSION, MAX_TAIL_CHARS, localUrl, stripAnsi,
+};

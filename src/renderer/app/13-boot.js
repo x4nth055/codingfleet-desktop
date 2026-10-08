@@ -8,8 +8,15 @@
 function wire() {
   $('brandLogo').innerHTML = LOGO;
   $('plusIcon').innerHTML = ICON.plus;
+  $('searchIcon').innerHTML = ICON.search;
   $('settingsClose').innerHTML = ICON.x;
   $('newSession').addEventListener('click', newSession);
+  // First: the @ list answers Enter before the composer sends.
+  wireMention();
+  wireSessionSearch();
+  wireSidebarResize();
+  wireKeys();
+  wireFind();
 
   const prompt = $('prompt');
   prompt.addEventListener('input', () => {
@@ -117,6 +124,14 @@ function wire() {
   cf.onOpenSession((sessionId) => {
     if (S.sessions.some((s) => s.id === sessionId)) selectSession(sessionId);
   });
+  // The app started again with a folder: a new session there, nothing sent.
+  if (typeof cf.onOpenFolder === 'function') {
+    cf.onOpenFolder((dir) => {
+      if (!dir || !S.settings.hasKey) return;
+      newSessionIn(dir);
+      flashHint(`New session in ${baseName(dir)}.`);
+    });
+  }
   $('micButton').addEventListener('click', toggleVoice);
   renderMic();
   document.addEventListener('keydown', (event) => {
@@ -285,7 +300,12 @@ async function boot() {
   if (S.init.crash) offerCrashReport(S.init.crash);
   else askAboutUpdates();
   await loadAll();
+  // What to open: a session asked for, a folder named on the command line,
+  // or else the session that was open when the app last closed.
+  const restore = S.init.restoreSession;
   if (S.init.openSession) await selectSession(S.init.openSession);
+  else if (S.init.openFolder) newSessionIn(S.init.openFolder);
+  else if (restore && S.sessions.some((s) => s.id === restore)) await selectSession(restore);
   await call(cf.recoverRuns);
   if (S.init.shotScroll === 'top') {
     $('transcript').scrollTop = 0;
@@ -329,6 +349,29 @@ async function boot() {
       message: "You reached your Unlimited plan's 5-hour limit on unlimited models, so this answer "
         + 'came from Claude Sonnet 5.5 and used your weekly quota.',
     }));
+  }
+  if (S.init.shotMenu === 'shortcuts') openShortcuts();
+  if (S.init.shotMenu === 'find' && S.current) {
+    setTimeout(() => {
+      openFind();
+      $('findInput').value = 'the';
+      FIND.query = 'the';
+      runFind();
+    }, 1500);
+  }
+  if (S.init.shotMenu === 'mention') {
+    // After --shot-cwd, below, has picked the folder.
+    setTimeout(() => {
+      $('prompt').value = 'Explain @rend';
+      $('prompt').focus();
+      $('prompt').setSelectionRange(13, 13);
+      updateMention();
+    }, 300);
+  }
+  if (S.init.shotMenu === 'search') {
+    $('sessionSearch').value = 'fix';
+    sessionQuery = 'fix';
+    renderSidebar();
   }
   if (S.init.shotMenu === 'models') openModelMenu();
   if (S.init.shotMenu === 'effort') openEffortMenu();

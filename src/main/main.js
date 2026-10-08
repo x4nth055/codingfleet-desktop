@@ -1,7 +1,7 @@
 'use strict';
 const {
   app, BrowserWindow, Menu, Notification, clipboard, dialog, ipcMain, nativeImage, powerSaveBlocker, safeStorage,
-  session, shell,
+  screen, session, shell,
 } = require('electron');
 const fs = require('fs');
 const os = require('os');
@@ -11,6 +11,8 @@ const api = require('../core/api');
 const { createAwake } = require('./awake');
 const { startNativeDumps, createCrashes } = require('./crash');
 const { createUpdater } = require('./updater');
+const { createTaskbar } = require('./taskbar');
+const fileIndex = require('../core/file-index');
 const { createLog } = require('../core/log');
 const { BackgroundJobs } = require('../core/background');
 const capture = require('./capture');
@@ -32,6 +34,7 @@ const { revertRun } = require('../core/undo');
 // --shot-cwd=<dir>, --shot-prompt=<text>, --shot-permission=auto, --shot-expand,
 // --shot-model=<model id> (not saved), --shot-menu=effort|folder|attach|shot|agents|quota|changes|github, --shot-scroll=top,
 // --shot-menu=poolcap (the 5-hour limit strip, not stored; --shot-pool-cap=top hides Upgrade),
+// --shot-menu=shortcuts|find|mention|search (the shortcut list, find, @ mentions, session search),
 // --shot-attach=<path>[|<path>...] (attaches files on start).
 //
 // An installed app ignores all of them but --open and --theme. Several would
@@ -47,6 +50,26 @@ const flag = (name) => {
   return hit.includes('=') ? hit.slice(name.length + 3) : true;
 };
 const SCREENSHOT = flag('screenshot');
+// Any development flag that draws a scene for a screenshot or a test: the
+// window then starts as it always does, not where the user left it.
+const STAGED = Boolean(SCREENSHOT) || (!app.isPackaged && argv.some((a) => a.startsWith('--shot')));
+
+// A folder named on the command line ("CodingFleet C:\work\app", or an
+// "Open with" entry): a new session starts there. It only picks the folder,
+// like the folder menu does; nothing is sent. Electron and Chromium put their
+// own switches in the list, and a development start names the app itself (".").
+function folderArg(args, cwd) {
+  const rest = app.isPackaged ? args.slice(1) : args.slice(2);
+  for (const arg of rest) {
+    if (typeof arg !== 'string' || !arg || arg.startsWith('-')) continue;
+    const dir = path.resolve(cwd || process.cwd(), arg);
+    try {
+      if (fs.statSync(dir).isDirectory()) return dir;
+    } catch { /* not a folder */ }
+  }
+  return null;
+}
+let startFolder = folderArg(process.argv, process.cwd());
 
 // The app's own log (core/log.js) and crash handling (crash.js), from the very
 // start: a crash while starting up is the one most worth knowing about.
@@ -355,6 +378,46 @@ function paintWindow(name) {
   }
 }
 
+// Where the window was when it last closed, if that place is still on a
+// screen: a monitor unplugged since would otherwise leave it out of sight.
+function savedBounds() {
+  const saved = state.window;
+  if (STAGED || !saved || !Number.isFinite(saved.width) || !Number.isFinite(saved.height)) return {};
+  const bounds = {
+    width: Math.max(940, Math.round(saved.width)),
+    height: Math.max(600, Math.round(saved.height)),
+  };
+  if (Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+    const area = screen.getDisplayMatching({ x: saved.x, y: saved.y, width: bounds.width, height: bounds.height }).workArea;
+    const overlapX = Math.min(saved.x + bounds.width, area.x + area.width) - Math.max(saved.x, area.x);
+    const overlapY = Math.min(saved.y + bounds.height, area.y + area.height) - Math.max(saved.y, area.y);
+    if (overlapX >= 120 && overlapY >= 80) Object.assign(bounds, { x: Math.round(saved.x), y: Math.round(saved.y) });
+  }
+  return bounds;
+}
+
+// A maximized or full-screen window keeps the size it goes back to.
+const normalBox = () => (win.isMaximized() || win.isFullScreen() ? win.getNormalBounds() : win.getBounds());
+
+// On a scaled Windows display a frameless window reads back a few pixels
+// larger than it was made, so saving what it reads would grow it on every
+// start. A window within a few pixels of where it was saved has not been
+// moved or resized by anyone: the saved place stands.
+const near = (a, b, slack) => Math.abs(a - b) <= slack;
+
+function rememberBounds() {
+  if (STAGED || !win || win.isDestroyed()) return;
+  const maximized = win.isMaximized();
+  const box = normalBox();
+  const saved = state.window;
+  if (saved && near(box.x, saved.x, 8) && near(box.y, saved.y, 8)
+    && near(box.width, saved.width, 16) && near(box.height, saved.height, 16)) {
+    state.window = { ...saved, maximized };
+    return;
+  }
+  state.window = { x: box.x, y: box.y, width: box.width, height: box.height, maximized };
+}
+
 function createWindow() {
   // --theme=light shows a theme for one start without saving it (screenshots).
   const startTheme = themeOf(flag('theme') || state.theme);
@@ -362,6 +425,7 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1320,
     height: 860,
+    ...savedBounds(),
     minWidth: 940,
     minHeight: 600,
     show: false,
@@ -387,6 +451,7 @@ function createWindow() {
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'), { query: { theme: startTheme } });
 
   win.once('ready-to-show', () => {
+    if (!STAGED && state.window && state.window.maximized) win.maximize();
     win.show();
     if (SCREENSHOT) {
       setTimeout(async () => {
@@ -401,6 +466,27 @@ function createWindow() {
     if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'i') {
       win.webContents.toggleDevTools();
     }
+  });
+  // Where the window is, kept for the next start. Written when it closes; a
+  // crash loses at most the last move.
+  let boundsTimer = null;
+  const boundsMoved = () => {
+    clearTimeout(boundsTimer);
+    boundsTimer = setTimeout(rememberBounds, 500);
+  };
+  win.on('resize', boundsMoved);
+  win.on('move', boundsMoved);
+  win.on('close', () => {
+    clearTimeout(boundsTimer);
+    rememberBounds();
+    if (!STAGED) saveState();
+  });
+  // This window is the app. Other windows (the computer-use bar, hidden once
+  // used) would otherwise keep a process with no window alive, holding the
+  // single-instance lock so that every later start of the app did nothing.
+  win.on('closed', () => {
+    win = null;
+    app.quit();
   });
   // Coming back to the window after editing elsewhere: the count above the
   // prompt is the first thing that should be true again.
@@ -670,6 +756,7 @@ function approve(sessionId, cwd, call, localTools) {
   if (!guard.mustAsk(reason, { auto, allowedThisSession: allowedReasons(sessionId).has(reason) })) return 'allow';
   return new Promise((resolve) => {
     approvals.set(call.id, { resolve, sessionId, reason });
+    syncTaskbar();
     send('run:event', { sessionId, event: 'client.approval', data: { id: call.id, reason } });
     notify(sessionId, `Waiting for your approval: the agent ${reason}.`);
     // The app's window stepped aside for the agent: bring it back to ask.
@@ -681,6 +768,7 @@ function confirmInterruptedTool(sessionId, call) {
   const reason = 'retry interrupted tool';
   return new Promise((resolve) => {
     approvals.set(call.id, { resolve, sessionId, reason });
+    syncTaskbar();
     send('run:event', { sessionId, event: 'client.approval', data: { id: call.id, reason } });
     notify(sessionId, `Check whether ${call.name} ran before retrying it.`);
   });
@@ -719,6 +807,10 @@ function makeRun(sessionId, localTools, recovery) {
   });
 }
 
+// The taskbar button: busy while a run goes, marked while an approval waits.
+const taskbar = createTaskbar({ app, nativeImage, getWindow: () => win });
+const syncTaskbar = () => taskbar.sync({ running: runs.size, waiting: approvals.size });
+
 // Keeps a Modern Standby laptop from freezing this app mid-run (see awake.js).
 const awake = createAwake(powerSaveBlocker);
 const stayAwake = () => awake.sync(runs.size > 0, state.keepAwake);
@@ -726,6 +818,7 @@ const stayAwake = () => awake.sync(runs.size > 0, state.keepAwake);
 function runInBackground(sessionId, run, body) {
   runs.set(sessionId, run);
   stayAwake();
+  syncTaskbar();
   run.start(body).finally(() => {
     rememberUndo(sessionId, run);
     runs.delete(sessionId);
@@ -734,6 +827,7 @@ function runInBackground(sessionId, run, body) {
     for (const [callId, waiting] of approvals) {
       if (waiting.sessionId === sessionId) approvals.delete(callId);
     }
+    syncTaskbar();
   });
 }
 
@@ -905,6 +999,7 @@ async function uploadBytes(data, name, type, sessionId) {
 // next. Only one folder is watched: the one on screen.
 // ---------------------------------------------------------------------------
 const gitCache = new Map();   // key -> { at, dir, summary }
+const fileIndexCache = new Map(); // folder -> { at, index }
 let gitWatch = null;          // { key, sessionId, dir }
 let gitBusy = false;
 let gitQueued = null;
@@ -955,6 +1050,10 @@ function registerIpc() {
     computerUse: { supported: computer.supported, shortcut: computer.shortcutLabel },
     state: { ...state, permissionMode: PERMISSION_OVERRIDE || state.permissionMode },
     openSession: flag('open'),
+    // The session that was open when the app closed, unless a development
+    // flag sets up a scene of its own.
+    restoreSession: STAGED ? null : (state.lastSession || null),
+    openFolder: startFolder,
     shotMenu: flag('shot-menu'),
     shotPoolCap: flag('shot-pool-cap'),
     shotCwd: flag('shot-cwd'),
@@ -1135,6 +1234,9 @@ function registerIpc() {
   // Commands running in the background, for the pill above the prompt.
   handle('background:list', (sessionId) => backgroundJobs.list(sessionIdOf(sessionId)));
   handle('background:stop', ({ sessionId, id } = {}) => backgroundJobs.stop(sessionIdOf(sessionId), id));
+  // The end of a command's output, for the log under its row. Read-only: what
+  // the agent has yet to read stays unread.
+  handle('background:tail', ({ sessionId, id } = {}) => backgroundJobs.tail(sessionIdOf(sessionId), String(id || '')));
 
   // An image the agent made in the session's folder, for the conversation.
   handle('files:localImage', (arg) => localImage(arg));
@@ -1218,6 +1320,8 @@ function registerIpc() {
     for (const key of ['model', 'permissionMode', 'lastCwd', 'notifications', 'keepAwake', 'autoUpdate']) {
       if (patch && key in patch) state[key] = patch[key];
     }
+    // A staged development start must not change what the next real start opens.
+    if (patch && 'lastSession' in patch && !STAGED) state.lastSession = sessionIdOf(patch.lastSession);
     if (patch && 'computerUse' in patch) {
       state.computerUse = patch.computerUse === true && computer.supported;
       // Turned off mid-run: the agent lets go now.
@@ -1249,6 +1353,37 @@ function registerIpc() {
     try { isDir = typeof dir === 'string' && fs.statSync(dir).isDirectory(); } catch { /* gone */ }
     if (isDir) await shell.openPath(dir);
     return isDir;
+  });
+
+  // Which of the paths dropped on the window are folders: a folder dropped
+  // there starts a session in it, a file is attached.
+  handle('files:folders', (paths) => (Array.isArray(paths) ? paths : []).slice(0, 50).filter((dir) => {
+    try { return typeof dir === 'string' && fs.statSync(dir).isDirectory(); } catch { return false; }
+  }));
+
+  // The files of the session's folder, for @ mentions in the composer. Names
+  // only, never contents; the folder is the session's own, as for git.
+  handle('files:index', async (arg) => {
+    const { dir } = gitFolder(arg || {});
+    const cached = fileIndexCache.get(dir);
+    if (cached && Date.now() - cached.at < 10_000) return cached.index;
+    const index = await fileIndex.listFiles(dir);
+    fileIndexCache.set(dir, { at: Date.now(), index });
+    if (fileIndexCache.size > 8) fileIndexCache.delete(fileIndexCache.keys().next().value);
+    return index;
+  });
+
+  // A session saved as a Markdown file, where the user chooses in the dialog.
+  handle('files:saveText', async ({ name, text } = {}) => {
+    const safe = path.basename(String(name || 'session.md')).replace(/[<>:"/\\|?*\u0000-\u001f]+/g, ' ').trim() || 'session.md';
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Export the conversation',
+      defaultPath: path.join(app.getPath('documents'), safe.endsWith('.md') ? safe : `${safe}.md`),
+      filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'All files', extensions: ['*'] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    await fs.promises.writeFile(result.filePath, String(text ?? ''), 'utf8');
+    return result.filePath;
   });
 
   // What is uncommitted in the folder this session works in. Answered from a
@@ -1450,6 +1585,7 @@ function registerIpc() {
     const waiting = approvals.get(callId);
     if (!waiting) return false;
     approvals.delete(callId);
+    syncTaskbar();
     // A destructive command is never allowed for a whole session, whatever the window sends.
     if (decision === 'allow-session' && !guard.ALWAYS_ASK.has(waiting.reason)) {
       rememberAllow(waiting.sessionId, waiting.reason);
@@ -1465,11 +1601,19 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
   app.quit();
 } else {
   app.setAppUserModelId('com.codingfleet.desktop');
-  app.on('second-instance', () => {
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
+  app.on('second-instance', (_event, args, workingDirectory) => {
+    const dir = folderArg(args || [], workingDirectory);
+    // No window to show (it closed while the app was quitting): make one, and
+    // let it pick up the folder when it starts, as a first start would.
+    if (!win || win.isDestroyed()) {
+      if (!app.isReady()) return;
+      startFolder = dir || startFolder;
+      createWindow();
+      return;
     }
+    if (win.isMinimized()) win.restore();
+    win.focus();
+    if (dir) send('app:openFolder', dir);
   });
   app.whenReady().then(() => {
     // The window needs no device or browser permission.

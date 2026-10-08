@@ -21,7 +21,17 @@ function renderSidebar() {
     return;
   }
   const when = (s) => new Date(s.last_used_at || s.last_message_at || s.created_at).getTime();
-  const sorted = [...S.sessions].sort((a, b) => when(b) - when(a));
+  // A search keeps the sessions whose name or folder holds every word typed,
+  // and opens every folder: a match hidden in a folded group is no match.
+  const searching = Boolean(sessionQuery.trim());
+  const sorted = [...S.sessions]
+    .filter((s) => !searching || CF_SESSION_TOOLS.sessionMatches(sessionQuery,
+      [sessionLabel(s), s.title, sessionGroup(s), local(s.id).cwd]))
+    .sort((a, b) => when(b) - when(a));
+  if (!sorted.length) {
+    list.append(el('div', 'sidebar-empty', `No session matches “${sessionQuery.trim()}”.`));
+    return;
+  }
 
   // Pinned sessions first, whatever their folder. The rest by folder, as in
   // Claude Code: the folder is what a person remembers, not the day they started.
@@ -46,7 +56,7 @@ function renderSidebar() {
   });
 
   for (const [name, sessions] of ordered) {
-    const collapsed = S.collapsed.has(name);
+    const collapsed = !searching && S.collapsed.has(name);
     // A div, not a button: the header carries a button of its own, and a
     // button inside a button is not something a browser will render.
     const head = el('div', `group-head${collapsed ? ' collapsed' : ''}${name === 'Pinned' ? ' pinned' : ''}`);
@@ -145,6 +155,150 @@ function sessionRow(session) {
   return row;
 }
 
+// ── The sidebar's width ────────────────────────────────────────────────────
+// Drag its right edge, or focus the edge and use the arrow keys (Shift for
+// bigger steps, Home and End for the ends). A double-click goes back to the
+// usual width. The width is kept on this computer; theme-boot.js applies it
+// before the first paint. The conversation always keeps room to be read.
+const SIDEBAR_WIDTH_KEY = 'cf.sidebar-width';
+const SIDEBAR_DEFAULT = 272;
+const SIDEBAR_MIN = 220;
+const SIDEBAR_MAX = 480;
+const MAIN_MIN = 560; // what the conversation and composer need beside it
+let sidebarWidth = null; // px once chosen; null = the usual width
+
+function sidebarMax() {
+  const panel = $('agentsPanel');
+  const panelWidth = panel && !panel.hidden ? panel.getBoundingClientRect().width : 0;
+  // A wide sidebar gives way to a small window, down to the usual width and
+  // no further: below that the conversation is better off scrolling sideways
+  // than the sidebar turning to slivers on its own.
+  return Math.max(SIDEBAR_DEFAULT, Math.min(SIDEBAR_MAX, window.innerWidth - MAIN_MIN - panelWidth));
+}
+
+function applySidebarWidth(px) {
+  const width = Math.round(Math.min(sidebarMax(), Math.max(SIDEBAR_MIN, Number(px) || SIDEBAR_DEFAULT)));
+  document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
+  const handle = $('sidebarResizer');
+  if (handle) {
+    handle.setAttribute('aria-valuenow', String(width));
+    handle.setAttribute('aria-valuemin', String(SIDEBAR_MIN));
+    handle.setAttribute('aria-valuemax', String(sidebarMax()));
+  }
+  return width;
+}
+
+function setSidebarWidth(px) {
+  sidebarWidth = applySidebarWidth(px);
+  try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth)); } catch { /* this run only */ }
+}
+
+function resetSidebarWidth() {
+  sidebarWidth = null;
+  try { localStorage.removeItem(SIDEBAR_WIDTH_KEY); } catch { /* nothing kept */ }
+  applySidebarWidth(SIDEBAR_DEFAULT);
+}
+
+const currentSidebarWidth = () => Math.round(document.querySelector('.sidebar').getBoundingClientRect().width);
+
+function wireSidebarResize() {
+  try {
+    const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    if (Number.isFinite(saved) && saved > 0) sidebarWidth = saved;
+  } catch { /* the usual width */ }
+  applySidebarWidth(sidebarWidth ?? SIDEBAR_DEFAULT);
+  const handle = $('sidebarResizer');
+  if (!handle) return;
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = currentSidebarWidth();
+    document.body.classList.add('sidebar-resizing');
+    const move = (e) => {
+      e.preventDefault();
+      applySidebarWidth(startWidth + (e.clientX - startX));
+    };
+    const up = () => {
+      document.body.classList.remove('sidebar-resizing');
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', up);
+      setSidebarWidth(currentSidebarWidth());
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', up);
+  });
+  handle.addEventListener('dblclick', resetSidebarWidth);
+  handle.addEventListener('keydown', (event) => {
+    const step = event.shiftKey ? 64 : 16;
+    const now = currentSidebarWidth();
+    const next = { ArrowLeft: now - step, ArrowRight: now + step, Home: SIDEBAR_MIN, End: SIDEBAR_MAX }[event.key];
+    if (next == null) return;
+    event.preventDefault();
+    setSidebarWidth(next);
+  });
+  // A smaller window takes the sidebar down with it, and gives it back once
+  // there is room again: the width chosen is kept, only what is shown changes.
+  window.addEventListener('resize', () => applySidebarWidth(sidebarWidth ?? SIDEBAR_DEFAULT));
+}
+
+// ── Searching the sessions ─────────────────────────────────────────────────
+// The box above the list. Enter opens the first match, the arrow keys walk the
+// list, Esc clears the search. Ctrl+K puts the cursor in it.
+let sessionQuery = '';
+
+function wireSessionSearch() {
+  const input = $('sessionSearch');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    sessionQuery = input.value;
+    renderSidebar();
+  });
+  input.addEventListener('keydown', (event) => {
+    const rows = () => [...document.querySelectorAll('#sessionList .session[data-id]')];
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      if (input.value) {
+        input.value = '';
+        sessionQuery = '';
+        renderSidebar();
+      } else {
+        $('prompt').focus();
+      }
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const first = rows()[0];
+      if (first) selectSession(first.dataset.id);
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      const first = rows()[0];
+      if (first) first.focus();
+    }
+  });
+  // From the list, the arrows move between sessions and up past the first
+  // one back into the box.
+  $('sessionList').addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const row = event.target.closest && event.target.closest('.session[data-id]');
+    if (!row || event.target !== row) return;
+    event.preventDefault();
+    const rows = [...document.querySelectorAll('#sessionList .session[data-id]')];
+    const at = rows.indexOf(row);
+    const next = rows[at + (event.key === 'ArrowDown' ? 1 : -1)];
+    if (next) next.focus();
+    else if (event.key === 'ArrowUp') input.focus();
+  });
+}
+
+function focusSessionSearch() {
+  const input = $('sessionSearch');
+  if (!input) return;
+  input.focus();
+  input.select();
+}
+
 // ── Session actions ────────────────────────────────────────────────────────
 let renaming = null; // the session being renamed in the sidebar
 
@@ -165,6 +319,7 @@ function openSessionMenu(session, anchor) {
   item('edit', 'Rename', () => startRename(session.id));
   item('copy', 'Duplicate', () => duplicateSession(session.id));
   item('pin', session.pinned ? 'Unpin' : 'Pin', () => pinSession(session.id, !session.pinned));
+  item('download', 'Export as Markdown', () => exportSession(session));
   list.append(el('div', 'menu-sep'));
   item('trash', 'Delete', () => confirmDelete(session), true);
   menu.dataset.id = session.id;
@@ -226,6 +381,49 @@ async function duplicateSession(id) {
     loadSessions({ quiet: true });
   } catch (err) {
     showBanner(`The session could not be duplicated: ${err.message}`);
+  }
+}
+
+// A short line under the composer that says something worked, then goes.
+let hintTimer = null;
+function flashHint(text, ms = 4000) {
+  const hint = $('hint');
+  if (!hint) return;
+  hint.textContent = text;
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => {
+    if (hint.textContent === text) hint.textContent = S.current && S.running.has(S.current) ? 'Enter to steer' : '';
+  }, ms);
+}
+
+// The whole conversation as a Markdown file, in a place the user picks. A
+// session not opened yet is read from the server first.
+async function exportSession(session) {
+  let items;
+  try {
+    if (S.loaded.has(session.id) && !loadFailures.has(session.id)) {
+      items = transcriptOf(session.id);
+    } else {
+      const data = await call(cf.messages, session.id);
+      items = fromHistory(session.id, data.messages || [], data.compactions || []);
+    }
+  } catch (err) {
+    showBanner(`The session could not be read to export it: ${err.message}`);
+    return;
+  }
+  const title = sessionLabel(session);
+  const folder = session.executor === 'client' ? local(session.id).cwd : 'Cloud sandbox';
+  const text = CF_SESSION_TOOLS.transcriptMarkdown({
+    title,
+    folder,
+    exportedAt: new Date().toLocaleString(),
+    items: items.map((item) => (item.type === 'footer' ? { ...item, modelName: modelLabel(item.model) } : item)),
+  });
+  try {
+    const saved = await call(cf.saveText, { name: CF_SESSION_TOOLS.exportFileName(title), text });
+    if (saved) flashHint(`Exported to ${saved}`, 6000);
+  } catch (err) {
+    showBanner(`The session could not be exported: ${err.message}`);
   }
 }
 
@@ -491,6 +689,17 @@ function renderTopbar() {
     chip.append(icon('folder'), el('span', null, baseName(cwd)));
     chip.addEventListener('click', () => cf.openFolder(cwd));
     bar.append(chip);
+  }
+  // What this session has cost so far: the runs' footers, added up.
+  if (session && S.loaded.has(session.id)) {
+    const spend = CF_SESSION_TOOLS.sessionSpend(transcriptOf(session.id));
+    if (spend.runs) {
+      const cost = el('span', 'chip cost-chip');
+      cost.append(icon('coins'), el('span', null, `${fmtNum(spend.credits)} ${spend.credits === 1 ? 'credit' : 'credits'}`));
+      cost.title = `This session has cost ${fmtNum(spend.credits)} credits over ${spend.runs} `
+        + `run${spend.runs === 1 ? '' : 's'}. Runs your plan covers count as 0.`;
+      bar.append(cost);
+    }
   }
   bar.append(el('div', 'top-spacer'));
 

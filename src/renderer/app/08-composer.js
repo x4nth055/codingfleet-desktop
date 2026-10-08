@@ -543,24 +543,86 @@ function renderBackground() {
   if (backgroundOpen) {
     const list = el('div', 'bg-list');
     for (const job of running) {
-      const row = el('div', 'bg-row');
-      const text = el('div', 'bg-text');
+      const open = bgLogOpen === job.id;
+      const row = el('div', `bg-row${open ? ' open' : ''}`);
+      // The row itself unfolds the log; its buttons do their own thing.
+      const text = el('button', 'bg-text');
+      text.type = 'button';
+      text.title = open ? 'Hide the output' : 'Show the output as it comes';
       text.append(el('code', 'bg-command', job.command), el('span', 'bg-sub',
         `${job.id} · running ${uptime(job.started)}${job.pid ? ` · pid ${job.pid}` : ''}`));
       const last = String(job.tail || '').trim().split(/\r?\n/).pop();
-      if (last) text.append(el('span', 'bg-tail', last.slice(0, 200)));
+      if (last && !open) text.append(el('span', 'bg-tail', last.slice(0, 200)));
+      text.addEventListener('click', () => toggleBackgroundLog(job.id));
+      const actions = el('div', 'bg-actions');
+      // A dev server that said where it listens: open it in the browser.
+      if (job.url) {
+        const visit = el('button', 'btn small');
+        visit.title = `Open ${job.url} in your browser`;
+        visit.append(icon('external'), el('span', null, 'Open'));
+        visit.addEventListener('click', () => window.open(job.url));
+        actions.append(visit);
+      }
       const stop = el('button', 'btn small danger', 'Stop');
       stop.addEventListener('click', async () => {
         stop.disabled = true;
         stop.textContent = 'Stopping…';
         try { await call(cf.stopBackground, { sessionId: S.current, id: job.id }); } catch (err) { showBanner(err.message); }
       });
-      row.append(text, stop);
+      actions.append(stop);
+      row.append(chevron(), text, actions);
       list.append(row);
+      if (open) {
+        const log = el('pre', 'bg-log');
+        log.id = 'bgLog';
+        log.textContent = bgLogText || 'Waiting for output…';
+        list.append(log);
+      }
     }
     parts.push(list);
   }
   box.replaceChildren(...parts);
+  const log = $('bgLog');
+  if (log) log.scrollTop = log.scrollHeight;
+}
+
+// ── The output of a background command, as it comes ────────────────────────
+// One log open at a time, read every second while it shows. Reading it here
+// does not count as the agent reading it: read_background still sees it all.
+let bgLogOpen = null;   // job id
+let bgLogText = '';
+let bgLogTimer = null;
+
+function toggleBackgroundLog(id) {
+  const opening = bgLogOpen !== id;
+  bgLogOpen = opening ? id : null;
+  bgLogText = '';
+  clearInterval(bgLogTimer);
+  bgLogTimer = null;
+  renderBackground();
+  if (!opening) return;
+  const sessionId = S.current;
+  const tick = async () => {
+    const alive = (backgroundBySession.get(sessionId) || []).some((j) => j.id === id && j.status === 'running');
+    if (bgLogOpen !== id || S.current !== sessionId || $('bgJobs').hidden || !alive) {
+      clearInterval(bgLogTimer);
+      if (bgLogOpen === id) bgLogOpen = null;
+      return;
+    }
+    let tail;
+    try { tail = await call(cf.backgroundTail, { sessionId, id }); } catch { return; }
+    if (!tail || bgLogOpen !== id) return;
+    const text = `${tail.cut ? '…\n' : ''}${tail.text}`;
+    if (text === bgLogText) return;
+    bgLogText = text;
+    const log = $('bgLog');
+    if (!log) return;
+    const atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+    log.textContent = text || 'No output yet.';
+    if (atEnd) log.scrollTop = log.scrollHeight;
+  };
+  tick();
+  bgLogTimer = setInterval(tick, 1000);
 }
 
 // A session opened after the app started: ask once which of its jobs run.

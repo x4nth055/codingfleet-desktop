@@ -15,8 +15,10 @@
   <aside class="sidebar">
     <div class="brand drag"><span class="logo" id="brandLogo"></span><span>CodingFleet</span></div>
     <button class="new-session" id="newSession"><span class="icon" id="plusIcon"></span>New session<kbd>Ctrl N</kbd></button>
+    <div class="session-search"><span class="icon" id="searchIcon"></span><input id="sessionSearch" type="search" placeholder="Search sessions" aria-label="Search sessions" autocomplete="off" spellcheck="false"><kbd>Ctrl K</kbd></div>
     <nav class="session-list" id="sessionList"></nav>
     <div class="account" id="account"></div>
+    <div class="sb-resizer" id="sidebarResizer" role="separator" aria-orientation="vertical" aria-label="Sidebar width" tabindex="0" title="Drag to resize the sidebar. Double-click to reset."></div>
   </aside>
 
   <main class="main">
@@ -186,6 +188,8 @@
 <script src="lib/tool-words.js"></script>
 <script src="lib/pr-prompts.js"></script>
 <script src="lib/pool-cap.js"></script>
+<script src="lib/mention.js"></script>
+<script src="lib/session-tools.js"></script>
 <script src="app/01-base.js"></script>
 <script src="app/02-state.js"></script>
 <script src="app/03-sidebar.js"></script>
@@ -199,6 +203,9 @@
 <script src="app/11-billing.js"></script>
 <script src="app/12-mcp.js"></script>
 <script src="app/12-github.js"></script>
+<script src="app/12-keys.js"></script>
+<script src="app/12-find.js"></script>
+<script src="app/12-mention.js"></script>
 <script src="app/13-boot.js"></script>
 </body>
 </html>

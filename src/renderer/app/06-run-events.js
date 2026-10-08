@@ -93,7 +93,12 @@ function onRunEvent({ sessionId, event, data }) {
       }
       break;
     case 'client.approval': {
-      updateTool(sessionId, data.id, { status: 'waiting', reason: data.reason });
+      // What is asked about is shown, not just named: the diff of an edit, the
+      // whole command, the file being written. A yes should be to something seen.
+      const asked = findTool(sessionId, data.id);
+      const patch = { status: 'waiting', reason: data.reason };
+      if (asked && SHOWN_WHEN_ASKED.has(asked.name)) patch.open = true;
+      updateTool(sessionId, data.id, patch);
       const tool = findTool(sessionId, data.id);
       if (tool && tool.group.agentId && sessionId === S.current) openPanel(tool.group.agentId);
       notifyApproval(sessionId);

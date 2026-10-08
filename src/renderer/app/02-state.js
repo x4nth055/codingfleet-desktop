@@ -210,6 +210,7 @@ async function reloadTranscript(id) {
     S.loading.delete(id);
   }
   if (S.current !== id) return data;
+  renderTopbar(); // the session's cost moves with new turns
   renderTranscript();
   if (!wasAtBottom) box.scrollTop = offset;
   updateScrollButton();

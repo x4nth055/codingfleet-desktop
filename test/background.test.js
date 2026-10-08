@@ -87,3 +87,31 @@ test('commands do not see the key this app signs in with', () => {
     else process.env.CODINGFLEET_API_KEY = before;
   }
 });
+
+test('the local address a dev server prints is found, colours and all', () => {
+  const { localUrl } = require('../src/core/background');
+  assert.equal(localUrl('\u001b[32m  ➜  Local:\u001b[0m   http://localhost:\u001b[1m5173\u001b[22m/'), 'http://localhost:5173/');
+  assert.equal(localUrl('Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)'), 'http://localhost:8000');
+  assert.equal(localUrl('listening at http://[::]:3000.'), 'http://localhost:3000');
+  assert.equal(localUrl('first http://127.0.0.1:5000/ then http://localhost:5001/app'), 'http://localhost:5001/app');
+  assert.equal(localUrl('docs at https://example.com/'), null);
+  assert.equal(localUrl(''), null);
+});
+
+test('a job says where it listens, and its tail leaves the agent\'s reads alone', async () => {
+  const bg = jobs();
+  const seen = [];
+  bg.onChange((_s, list) => seen.push(list[0].url));
+  const { output } = bg.start('S', node("console.log('ready on http://localhost:4321/');setTimeout(()=>{},3000)"), os.tmpdir());
+  for (let i = 0; i < 50 && !bg.list('S')[0].url; i++) await new Promise((r) => setTimeout(r, 100));
+  assert.equal(bg.list('S')[0].url, 'http://localhost:4321/');
+  assert.ok(seen.includes('http://localhost:4321/'), 'the window is told');
+  const tail = bg.tail('S', output.id);
+  assert.match(tail.text, /ready on/);
+  assert.equal(tail.url, 'http://localhost:4321/');
+  assert.equal(bg.tail('T', output.id), null, 'another session sees nothing');
+  // The agent still gets everything on its first read.
+  const read = await bg.read('S', output.id);
+  assert.match(read.output.output, /ready on/);
+  await bg.stop('S', output.id);
+});

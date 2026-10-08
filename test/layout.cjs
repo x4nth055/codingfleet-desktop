@@ -198,6 +198,62 @@ app.whenReady().then(async () => {
     assert.deepEqual(asked.here, { hidden: false, said: 'feature/a-fairly-long-branch-name 3 files +531 −12' }, 'a folder session shows its changes');
     assert.equal(asked.cloud, true, 'a cloud sandbox shows none');
     checks++;
+    // The sidebar at its narrowest, its usual width and its widest: everything
+    // in it stays inside it, the quota tooltip keeps its shape, and the
+    // conversation keeps its room.
+    win.setContentSize(1320, 850);
+    await win.webContents.executeJavaScript('new Promise(resolve => setTimeout(resolve, 150))');
+    for (const sidebar of [220, 272, 480]) {
+      for (const theme of ['dark', 'light', 'hacker']) {
+        await win.webContents.executeJavaScript(`(() => {
+          document.documentElement.dataset.theme = ${JSON.stringify(theme)};
+          document.querySelector('.app').classList.remove('with-panel'); $('agentsPanel').hidden = true;
+          setSidebarWidth(${sidebar}); // as a drag or the arrow keys leave it
+          quotaOpen = true;
+          S.sessions = [{ id: 'layout', title: 'A session with a title long enough to need cutting short', executor: 'client',
+            created_at: new Date().toISOString(), context: { tokens: 279100, limit: 800000 } }];
+          renderSidebar(); renderAccount();
+        })()`);
+        await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+        const result = await win.webContents.executeJavaScript(`(() => {
+          const rect = (n) => n.getBoundingClientRect();
+          const side = rect(document.querySelector('.sidebar'));
+          const errors = [];
+          if (Math.round(side.width) !== ${sidebar}) errors.push('sidebar is ' + side.width + ' wide');
+          // The search box's own words fit: "Search sessions" is never cut short.
+          const search = $('sessionSearch');
+          const words = document.createElement('span');
+          words.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:' + getComputedStyle(search).font;
+          words.textContent = search.placeholder;
+          document.body.append(words);
+          if (words.getBoundingClientRect().width > search.clientWidth) errors.push('the search box cuts its words: ' + search.clientWidth);
+          words.remove();
+          for (const n of document.querySelectorAll('.new-session, .session-search, .group-head, .session, .quota-card, .context-row, .account-foot, .quota-pop')) {
+            const r = rect(n);
+            if (r.right > side.right - 4 || r.x < side.x) errors.push(n.className + ' leaves the sidebar');
+            if (n.scrollWidth > n.clientWidth + 1 && !n.classList.contains('session')) errors.push(n.className + ' overflows');
+          }
+          for (const row of document.querySelectorAll('.quota-pop .qp-row')) {
+            if (row.getClientRects().length !== 1 || row.scrollWidth > row.clientWidth + 1) errors.push(row.textContent + ' does not fit');
+          }
+          for (const b of document.querySelectorAll('.quota-pop .account-actions .btn')) {
+            if (b.scrollWidth > b.clientWidth + 1) errors.push(b.textContent + ' is cut off');
+          }
+          if (rect($('composer')).width < 400) errors.push('the composer is squeezed to ' + rect($('composer')).width);
+          return errors;
+        })()`);
+        assert.deepEqual(result, [], `sidebar ${sidebar}/${theme}`);
+        checks++;
+      }
+    }
+    // A window too small for the width chosen takes the sidebar down, not the conversation.
+    win.setContentSize(940, 850);
+    await win.webContents.executeJavaScript('new Promise(resolve => setTimeout(resolve, 100))');
+    const squeezed = await win.webContents.executeJavaScript(`(() => { setSidebarWidth(480);
+      return Math.round(document.querySelector('.sidebar').getBoundingClientRect().width); })()`);
+    assert.equal(squeezed, 380, `a 940px window keeps a ${squeezed}px sidebar`);
+    await win.webContents.executeJavaScript(`resetSidebarWidth(); quotaOpen = false; renderAccount();`);
+    checks++;
     const replay = await win.webContents.executeJavaScript(`(() => {
       S.running.set('layout', { started: Date.now(), turnStart: 0 });
       S.transcripts.set('layout', []);

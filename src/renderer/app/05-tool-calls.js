@@ -10,6 +10,43 @@ const { VERBS, GROUP_WORDS, ALLOW_LABELS, REASONS, ALWAYS_ASKED, toolSummary, gr
 
 const ACTIVE = ['queued', 'running', 'waiting'];
 
+// Tools whose details open by themselves when they wait for approval: what
+// they would change or run is the thing being approved. A screenshot or a
+// computer action says what it does in its one line.
+const SHOWN_WHEN_ASKED = new Set(['run_command', 'execute_code', 'fs_write', 'fs_edit']);
+
+// The keys that answer the oldest approval waiting in the open session.
+const altLabel = () => (S.init && S.init.platform === 'darwin' ? '⌥' : 'Alt+');
+const APPROVAL_KEYS = { allow: 'KeyY', 'allow-session': 'KeyA', deny: 'KeyN' };
+const approvalKey = (decision) => `${altLabel()}${APPROVAL_KEYS[decision].slice(3)}`;
+
+// What the approval bar offers for a call: retry, always-asked, or the usual three.
+function approvalChoices(tool) {
+  if (tool.reason === 'retry interrupted tool') return ['deny', 'allow'];
+  if (ALWAYS_ASKED.has(tool.reason)) return ['deny', 'allow'];
+  return ['deny', 'allow-session', 'allow'];
+}
+
+async function decideTool(tool, decision) {
+  if (tool.status !== 'waiting' || !approvalChoices(tool).includes(decision)) return;
+  const sessionId = tool.group.sessionId;
+  tool.status = decision === 'deny' ? 'denied' : 'queued';
+  refreshItem(sessionId, tool.group);
+  if (tool.group.agentId) agentChanged(sessionId, tool.group.agentId);
+  // The next call in line now answers to the keys: its bar says so.
+  const next = waitingTools(sessionId)[0];
+  if (next && next.group !== tool.group) {
+    refreshItem(sessionId, next.group);
+    if (next.group.agentId) agentChanged(sessionId, next.group.agentId);
+  }
+  await cf.decide({ callId: tool.id, decision });
+}
+
+// The calls waiting for an answer in a session, oldest first, sub-agents' too.
+function waitingTools(sessionId) {
+  return sessionId ? allTools(sessionId).filter((t) => t.status === 'waiting' && t.id) : [];
+}
+
 // A sub-agent waiting for approval makes its spawn_agent row wait too.
 function toolWaits(tool) {
   if (tool.status === 'waiting') return true;
@@ -252,18 +289,20 @@ function approvalBar(tool) {
   const bar = el('div', 'approval');
   const retry = tool.reason === 'retry interrupted tool';
   bar.append(el('span', 'approval-text', `CodingFleet ${REASONS[tool.reason] || 'wants to use a tool'}.`));
-  const decide = (decision) => async () => {
-    tool.status = decision === 'deny' ? 'denied' : 'queued';
-    refreshItem(tool.group.sessionId, tool.group);
-    if (tool.group.agentId) agentChanged(tool.group.sessionId, tool.group.agentId);
-    await cf.decide({ callId: tool.id, decision });
+  // Only the oldest call waiting answers to the keys, so only it says so.
+  const keyed = waitingTools(tool.group.sessionId)[0] === tool;
+  const button = (className, label, decision) => {
+    const node = el('button', className, label);
+    node.addEventListener('click', () => decideTool(tool, decision));
+    if (keyed) {
+      node.title = `${label} (${approvalKey(decision)})`;
+      node.append(el('kbd', 'approval-kbd', approvalKey(decision)));
+    }
+    return node;
   };
-  const deny = el('button', 'btn danger', retry ? 'Do not retry' : 'Deny');
-  deny.addEventListener('click', decide('deny'));
-  const always = el('button', 'btn', ALLOW_LABELS[tool.reason] || 'Allow all calls this session');
-  always.addEventListener('click', decide('allow-session'));
-  const allow = el('button', 'btn primary', retry ? 'Retry tool' : 'Allow');
-  allow.addEventListener('click', decide('allow'));
+  const deny = button('btn danger', retry ? 'Do not retry' : 'Deny', 'deny');
+  const always = button('btn', ALLOW_LABELS[tool.reason] || 'Allow all calls this session', 'allow-session');
+  const allow = button('btn primary', retry ? 'Retry tool' : 'Allow', 'allow');
   if (retry) bar.append(deny, allow);
   else if (ALWAYS_ASKED.has(tool.reason)) {
     // Asked every time, even in auto mode: there is no "allow all" for these.

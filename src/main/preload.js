@@ -89,6 +89,10 @@ contextBridge.exposeInMainWorld('cf', {
   logError: (message) => ipcRenderer.send('log:renderer', { message: String(message || '').slice(0, 4000) }),
   backgroundJobs: call('background:list'),
   stopBackground: call('background:stop'),
+  backgroundTail: call('background:tail'),
+  folders: call('files:folders'),
+  fileIndex: call('files:index'),
+  saveText: call('files:saveText'),
   onBackground: (listener) => {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on('background:changed', wrapped);
@@ -102,6 +106,12 @@ contextBridge.exposeInMainWorld('cf', {
     const wrapped = (_event, sessionId) => listener(sessionId);
     ipcRenderer.on('app:openSession', wrapped);
     return () => ipcRenderer.removeListener('app:openSession', wrapped);
+  },
+  // A folder named when the app was started again: a new session there.
+  onOpenFolder: (listener) => {
+    const wrapped = (_event, dir) => listener(dir);
+    ipcRenderer.on('app:openFolder', wrapped);
+    return () => ipcRenderer.removeListener('app:openFolder', wrapped);
   },
   onRunEvent: (listener) => {
     const wrapped = (_event, payload) => listener(payload);

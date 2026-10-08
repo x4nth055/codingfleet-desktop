@@ -551,6 +551,14 @@ function renderPreferencesPane() {
     },
   }));
   pane.append(computerUseRow(pane));
+  const keysRow = el('div', 'set-row');
+  const keysText = el('div', 'set-text');
+  keysText.append(el('div', 'set-title', 'Keyboard shortcuts'),
+    el('div', 'set-desc', 'Answer approvals, move between sessions, find in a conversation. Ctrl+/ shows them anywhere.'));
+  const keysButton = el('button', 'btn small', 'Show');
+  keysButton.addEventListener('click', openShortcuts);
+  keysRow.append(keysText, keysButton);
+  pane.append(keysRow);
 
   pane.append(el('div', 'pane-section', 'Updates'));
   const updateRow = el('div', 'set-row');

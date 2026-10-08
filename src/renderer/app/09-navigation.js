@@ -5,6 +5,27 @@
 // declares, the later ones use. Opening sessions, the turns this window drew itself, and the menus.
 
 // ── Navigation ─────────────────────────────────────────────────────────────
+// The session on screen is the one the next start opens.
+function rememberOpenSession() {
+  if (!S.init || !S.init.state || S.init.state.lastSession === S.current) return;
+  S.init.state.lastSession = S.current;
+  cf.setState({ lastSession: S.current });
+}
+
+// The folders sessions worked in, newest first: the last folder picked, then
+// each session's folder by when it was last used.
+function recentFolderList({ limit = 6, exclude = [] } = {}) {
+  const when = (s) => new Date(s.last_used_at || s.last_message_at || s.created_at).getTime() || 0;
+  const uses = S.sessions
+    .filter((s) => s.executor === 'client' && local(s.id).cwd)
+    .map((s) => ({ cwd: local(s.id).cwd, at: when(s) }));
+  for (const saved of Object.values((S.init && S.init.state.sessions) || {})) {
+    if (saved && saved.cwd) uses.push({ cwd: saved.cwd, at: Number(saved.createdAt) || 0 });
+  }
+  if (S.init && S.init.state.lastCwd) uses.push({ cwd: S.init.state.lastCwd, at: Number.MAX_SAFE_INTEGER });
+  return CF_SESSION_TOOLS.recentFolders(uses, { limit, exclude });
+}
+
 // A new session in a folder the sidebar already knows. Same as New session,
 // except the folder is chosen for us instead of being asked for.
 function newSessionIn(cwd) {
@@ -20,8 +41,11 @@ function newSession() {
   hideBanner();
   if (S.current !== null) discardAttachments();
   S.current = null;
+  rememberOpenSession();
   restoreDraft();
-  S.model = S.init.state.model || 'auto';
+  // The account's default model, as on the first start: not this computer's
+  // copy of it, which the website can change behind its back.
+  S.model = newSessionModel();
   S.panel.open = false;
   renderPanel();
   renderSidebar();
@@ -229,6 +253,7 @@ async function selectSession(id) {
   hideBanner();
   if (S.current !== id) discardAttachments();
   S.current = id;
+  rememberOpenSession();
   loadBackground(id);
   restoreDraft();
   S.model = sessionModel(currentSession()) || newSessionModel();
@@ -373,12 +398,18 @@ function openFolderMenu() {
       S.draftSandbox = false;
       await pickFolder();
     }));
-  if (S.init.state.lastCwd && S.init.state.lastCwd !== S.draftCwd) {
-    list.append(option('folder', baseName(S.init.state.lastCwd), S.init.state.lastCwd, false, () => {
-      if (session) newSession();
-      S.draftSandbox = false;
-      S.draftCwd = S.init.state.lastCwd;
-      renderMain();
+  const recent = recentFolderList({ limit: 5, exclude: [!session && !S.draftSandbox ? S.draftCwd : null] });
+  if (recent.length) list.append(el('div', 'menu-group', 'Recent folders'));
+  for (const dir of recent) {
+    list.append(option('folder', baseName(dir), dir, false, () => {
+      if (session) newSessionIn(dir);
+      else {
+        S.draftSandbox = false;
+        S.draftCwd = dir;
+        S.init.state.lastCwd = dir;
+        cf.setState({ lastCwd: dir });
+        renderMain();
+      }
     }));
   }
   menu.hidden = false;

@@ -50,7 +50,10 @@ Open the app, click **Sign in with your browser**, and approve. That's all.
 | ☁️ **Cloud sandbox** | Or let the agent work on CodingFleet's servers instead of your PC. |
 | 🔌 **MCP** | 13 built-in connectors (GitHub, Context7, Stripe, Sentry…) and your own local MCP servers. |
 | 🖼️ **Images and voice** | Paste images, take screenshots, speak your prompt. |
-| 💳 **Cost before you send** | An estimate next to the Send button. |
+| 💳 **Cost before you send** | An estimate next to the Send button, and what the session has cost so far. |
+| @ **Mention files** | Type `@` to pick a file or folder of the project. |
+| ⌨️ **Keyboard first** | Answer approvals with Alt+Y / Alt+N, search sessions, find in a conversation. Ctrl+/ lists every shortcut. |
+| 📄 **Export** | Copy an answer as Markdown, or save a whole session as a `.md` file. |
 | 🎨 **Three themes** | Dark, Light and Hacker. |
 
 ## Tools
@@ -103,7 +106,8 @@ These checks catch mistakes. They are not a sandbox.
 ### Background commands
 
 Dev servers and watchers keep running in the background. A bar above the prompt shows them,
-with a Stop button each.
+with a Stop button each. Click one to watch its output as it comes. Once a dev server prints
+its local address, an Open button opens it in your browser.
 
 ### Ask before changes, or Auto-approve
 

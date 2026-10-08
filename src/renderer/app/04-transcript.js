@@ -400,7 +400,37 @@ function renderFooter(item) {
     if (usage.time_taken) node.append(el('span', null, fmtDuration(usage.time_taken)));
   }
   if (item.note) node.append(el('span', null, item.note));
+  node.append(copyAnswerButton(item));
   return node;
+}
+
+// The turn's answer as Markdown, from the button at the end of its footer:
+// every paragraph the agent wrote in that turn, without the tool steps.
+function copyAnswerButton(footer) {
+  const button = el('button', 'footer-copy');
+  button.type = 'button';
+  button.title = 'Copy this answer as Markdown';
+  button.innerHTML = ICON.copy;
+  const label = el('span', null, 'Copy');
+  button.append(label);
+  button.addEventListener('click', async () => {
+    const items = transcriptOf(S.current);
+    const index = items.indexOf(footer);
+    const text = index >= 0 ? CF_SESSION_TOOLS.turnText(items, index) : '';
+    if (!text) {
+      label.textContent = 'Nothing to copy';
+    } else {
+      const res = await cf.copyText(text);
+      label.textContent = res && res.ok ? 'Copied' : 'Could not copy';
+      button.classList.toggle('done', Boolean(res && res.ok));
+    }
+    clearTimeout(button.timer);
+    button.timer = setTimeout(() => {
+      label.textContent = 'Copy';
+      button.classList.remove('done');
+    }, 1600);
+  });
+  return button;
 }
 
 // ── Sub-agents ─────────────────────────────────────────────────────────────
@@ -606,8 +636,11 @@ function renderPanel() {
   const app = document.querySelector('.app');
   const agents = S.current ? [...agentsOf(S.current).values()] : [];
   const show = S.panel.open && agents.length > 0;
+  const was = !panel.hidden;
   panel.hidden = !show;
   app.classList.toggle('with-panel', show);
+  // The panel takes room from the middle: the sidebar gives some back if it must.
+  if (was !== show) applySidebarWidth(sidebarWidth ?? SIDEBAR_DEFAULT);
   if (!show) return;
   if (!agents.some((a) => a.id === S.panel.agentId)) S.panel.agentId = agents[agents.length - 1].id;
   const agent = agents.find((a) => a.id === S.panel.agentId);

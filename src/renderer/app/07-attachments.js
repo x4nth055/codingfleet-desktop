@@ -437,6 +437,23 @@ function clearAttachments() {
 }
 
 // ── Drag and drop, paste ───────────────────────────────────────────────────
+// A folder dropped on the window is where to work next: a new session starts
+// in it, as from the folder menu. Files dropped with it are left out, since
+// they were meant for the session being left.
+async function dropPaths(paths) {
+  let folders = [];
+  try { folders = await call(cf.folders, paths); } catch { /* treated as files */ }
+  if (!folders.length) {
+    attachPaths(paths);
+    return;
+  }
+  newSessionIn(folders[0]);
+  const skipped = paths.length - 1;
+  flashHint(skipped
+    ? `New session in ${baseName(folders[0])}. The other ${skipped} dropped item${skipped === 1 ? ' was' : 's were'} left out.`
+    : `New session in ${baseName(folders[0])}.`);
+}
+
 let dragDepth = 0;
 const draggingFiles = (event) => [...(event.dataTransfer && event.dataTransfer.types || [])].includes('Files');
 
@@ -448,8 +465,9 @@ function wireDrop() {
     const target = attachTarget();
     $('dropTitle').textContent = target.mode === 'folder' ? 'Drop to add' : 'Drop to upload to the sandbox';
     $('dropSub').textContent = target.mode === 'folder'
-      ? 'The agent reads text and code where they are — nothing is uploaded. Images and documents are.'
-      : 'Any file, up to 20 MB each';
+      ? 'The agent reads text and code where they are — nothing is uploaded. Images and documents are. '
+        + 'Drop a folder to start a session in it.'
+      : 'Any file, up to 20 MB each. Drop a folder to start a session in it.';
     $('dropOverlay').hidden = false;
   });
   window.addEventListener('dragover', (event) => {
@@ -479,8 +497,8 @@ function wireDrop() {
       if (where) paths.push(where);
       else blobs.push(file);
     }
-    if (paths.length) attachPaths(paths);
     if (blobs.length) attachBlobs(blobs, 'dropped');
+    if (paths.length) dropPaths(paths);
     $('prompt').focus();
   });
   $('prompt').addEventListener('paste', (event) => {
