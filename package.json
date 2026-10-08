@@ -11,7 +11,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node --test --test-force-exit \"test/*.test.js\"",
     "e2e": "node test/e2e-run.mjs",
     "e2e:github": "node test/e2e-github.mjs",
     "test:layout": "electron test/layout.cjs",

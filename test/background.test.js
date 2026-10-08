@@ -102,8 +102,11 @@ test('a job says where it listens, and its tail leaves the agent\'s reads alone'
   const bg = jobs();
   const seen = [];
   bg.onChange((_s, list) => seen.push(list[0].url));
-  const { output } = bg.start('S', node("console.log('ready on http://localhost:4321/');setTimeout(()=>{},3000)"), os.tmpdir());
-  for (let i = 0; i < 50 && !bg.list('S')[0].url; i++) await new Promise((r) => setTimeout(r, 100));
+  // The command ends by itself, and the test waits for it: stopping a job is
+  // what can leave its node running on Windows, holding this file open.
+  const { output } = bg.start('S', node("console.log('ready on http://localhost:4321/');setTimeout(()=>{},300)"), os.tmpdir());
+  for (let i = 0; i < 100 && bg.list('S')[0].status === 'running'; i++) await new Promise((r) => setTimeout(r, 100));
+  assert.equal(bg.list('S')[0].status, 'exited');
   assert.equal(bg.list('S')[0].url, 'http://localhost:4321/');
   assert.ok(seen.includes('http://localhost:4321/'), 'the window is told');
   const tail = bg.tail('S', output.id);
@@ -113,5 +116,4 @@ test('a job says where it listens, and its tail leaves the agent\'s reads alone'
   // The agent still gets everything on its first read.
   const read = await bg.read('S', output.id);
   assert.match(read.output.output, /ready on/);
-  await bg.stop('S', output.id);
 });
