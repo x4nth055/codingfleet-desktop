@@ -90,8 +90,18 @@ function onRunEvent({ sessionId, event, data }) {
           status: data.executor === 'client' ? 'queued' : 'running',
           // Runs on this computer: a waiting command can move to the background.
           local: data.executor === 'client',
+          // Runs in a cloud session's sandbox: it can too, through the run.
+          cloud: !data.executor && sessionExecutor(sessionId) === 'sandbox',
+          runningSince: data.executor === 'client' ? null : Date.now(),
           ...run?.replayTools?.get(data.id),
         });
+        if (!data.executor) {
+          // A sandbox command still running by then offers "Run in background".
+          setTimeout(() => {
+            const tool = findTool(sessionId, data.id);
+            if (tool && tool.status === 'running') updateTool(sessionId, data.id, {});
+          }, MOVE_AFTER_MS + 50);
+        }
       }
       break;
     case 'client.approval': {

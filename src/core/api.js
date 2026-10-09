@@ -263,6 +263,14 @@ module.exports = {
   duplicateSession: (sessionId) => request('POST', `/sessions/${id(sessionId)}/duplicate`),
   deleteSession: (sessionId) => request('DELETE', `/sessions/${id(sessionId)}`),
   stopSandbox: (sessionId) => request('DELETE', `/sessions/${id(sessionId)}/sandbox`),
+  // A cloud session's background commands, in its sandbox. refresh asks the
+  // sandbox what they do; without it the server answers from what it knows.
+  backgroundJobs: (sessionId, refresh) =>
+    request('GET', `/sessions/${id(sessionId)}/background${refresh ? '?refresh=1' : ''}`),
+  backgroundTail: (sessionId, jobId) => request('GET', `/sessions/${id(sessionId)}/background/${id(jobId)}`),
+  stopBackground: (sessionId, jobId) => request('POST', `/sessions/${id(sessionId)}/background/${id(jobId)}/stop`, {}),
+  // Stop waiting for a sandbox command the run waits for: it keeps running.
+  moveToBackground: (runId, callId) => request('POST', `/runs/${id(runId)}/tool_calls/${id(callId)}/background`, {}),
   compactSession: (sessionId) => request('POST', `/sessions/${id(sessionId)}/compact`),
   transcribe,
   getSettings: () => request('GET', '/settings'),

@@ -146,9 +146,15 @@ function toolMeta(tool) {
 // Offered once the command has run 10 seconds, when it starts to look stuck.
 const MOVE_AFTER_MS = 10000;
 
+// The executor of a session: 'client' (this computer) or 'sandbox' (the cloud).
+function sessionExecutor(sessionId) {
+  const session = (S.sessions || []).find((s) => s.id === sessionId);
+  return session ? session.executor : null;
+}
+
 function canMove(tool) {
   const args = tool.arguments || {};
-  return Boolean(tool.local && tool.status === 'running' && !args.background
+  return Boolean((tool.local || tool.cloud) && tool.status === 'running' && !args.background
     && (tool.name === 'run_command' || (tool.name === 'execute_code' && args.command))
     && tool.runningSince && Date.now() - tool.runningSince >= MOVE_AFTER_MS
     && typeof cf.moveToBackground === 'function');
@@ -166,7 +172,7 @@ function moveBar(tool) {
     tool.moving = true;
     refreshItem(sessionId, tool.group);
     let moved = false;
-    try { moved = await call(cf.moveToBackground, { callId: tool.id }); } catch { /* it finished first */ }
+    try { moved = await call(cf.moveToBackground, { callId: tool.id, sessionId }); } catch { /* it finished first */ }
     if (!moved) {
       tool.moving = false;
       refreshItem(sessionId, tool.group);

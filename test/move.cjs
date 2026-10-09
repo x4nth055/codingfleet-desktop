@@ -61,6 +61,27 @@ app.whenReady().then(async () => {
     assert.ok(result.meta.includes('In the background'), result.meta.join(','));
     assert.equal(result.cloud, 0, 'not for a call that ran elsewhere');
     assert.equal(result.code, 1, 'execute_code with a command');
+
+    // A cloud session: the command runs in its sandbox, and moves there.
+    const cloud = await win.webContents.executeJavaScript(`(async () => {
+      S.sessions.push({ id: 'cloudy', title: 'Cloud', executor: 'sandbox', created_at: new Date().toISOString() });
+      S.loaded.add('cloudy');
+      S.current = 'cloudy';
+      renderSidebar(); renderMain();
+      const send = (event, data = {}) => onRunEvent({ sessionId: 'cloudy', event, data });
+      send('tool.call', { id: 'k1', name: 'run_command', arguments: { command: 'npm run dev' } });
+      const early = document.querySelectorAll('.move-bar').length;
+      findTool('cloudy', 'k1').runningSince = Date.now() - 10000;
+      updateTool('cloudy', 'k1', {});
+      const later = document.querySelectorAll('.move-bar').length;
+      document.querySelector('.move-bar button').click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return { early, later, moved: await cf.movedCalls() };
+    })()`);
+    assert.equal(cloud.early, 0);
+    assert.equal(cloud.later, 1, 'offered for a cloud command too');
+    assert.deepEqual(cloud.moved, ['c1', 'k1']);
+    await win.webContents.executeJavaScript(`S.current = 'move'; renderMain(); true;`);
     for (const theme of ['dark', 'light']) {
       await win.webContents.executeJavaScript(`document.documentElement.dataset.theme = ${JSON.stringify(theme)};`);
       await win.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))');

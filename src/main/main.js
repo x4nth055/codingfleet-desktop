@@ -708,6 +708,72 @@ async function screenshotForAgent(args, { call, sessionId } = {}) {
 const backgroundJobs = new BackgroundJobs({ shell: tools.SHELL, env: tools.commandEnv, kill: tools.killTree });
 backgroundJobs.onChange((sessionId, jobs) => send('background:changed', { sessionId, jobs }));
 
+// A cloud session's background commands run in its sandbox. The API lists,
+// reads and stops them, and they go to the same pill as local ones, in the same
+// shape. Asked again when a tool result says one started or stopped, every
+// minute while one runs (without asking the sandbox), and when the pill is
+// opened (asking it).
+const CLOUD_POLL_MS = 60_000;
+// The window reads an open log every second; the API key allows 120 requests
+// a minute, so a cloud log is read at most this often.
+const CLOUD_TAIL_MS = 3000;
+const cloudJobs = new Map(); // session id -> jobs, pill shape
+const cloudTails = new Map(); // `${session id} ${job id}` -> { at, tail }
+let cloudPoll = null;
+const isCloudSession = (sessionId) => Boolean(sessionId) && !(state.sessions[sessionId] || {}).cwd;
+
+function pillJob(job, before) {
+  const running = job.state === 'running';
+  return {
+    id: job.id, command: job.command, status: running ? 'running' : 'exited',
+    exitCode: job.exit_code ?? null, pid: null, tail: job.last || '',
+    started: Math.round((job.started || 0) * 1000), ended: job.ended ? Math.round(job.ended * 1000) : null,
+    // Only a refresh knows the tunnel's address: keep it between them.
+    url: running ? (job.url || (before && before.url) || null) : null,
+  };
+}
+
+async function listCloudJobs(sessionId, refresh) {
+  if (!isCloudSession(sessionId)) return [];
+  try {
+    const data = await api.backgroundJobs(sessionId, refresh);
+    const before = new Map((cloudJobs.get(sessionId) || []).map((job) => [job.id, job]));
+    const jobs = (data.jobs || []).map((job) => pillJob(job, before.get(job.id)));
+    cloudJobs.set(sessionId, jobs);
+    send('background:changed', { sessionId, jobs });
+  } catch (err) {
+    log.warn(`background commands of ${sessionId}: ${err.message}`);
+  }
+  if (!cloudPoll) {
+    cloudPoll = setInterval(() => {
+      for (const [id, jobs] of cloudJobs) {
+        if (jobs.some((job) => job.status === 'running')) listCloudJobs(id, false);
+      }
+    }, CLOUD_POLL_MS);
+  }
+  return cloudJobs.get(sessionId) || [];
+}
+
+async function tailCloudJob(sessionId, jobId) {
+  const key = `${sessionId} ${jobId}`;
+  const cached = cloudTails.get(key);
+  if (cached && Date.now() - cached.at < CLOUD_TAIL_MS) return cached.tail;
+  const data = await api.backgroundTail(sessionId, jobId);
+  const text = `${data.stdout || ''}${data.stdout && data.stderr && !data.stdout.endsWith('\n') ? '\n' : ''}${data.stderr || ''}`;
+  const tail = { id: jobId, status: data.state === 'running' ? 'running' : 'exited', exitCode: data.exit_code ?? null,
+    url: data.url || null, text, cut: Boolean(data.cut) };
+  cloudTails.set(key, { at: Date.now(), tail });
+  if (tail.status !== 'running') listCloudJobs(sessionId, false);
+  return tail;
+}
+
+// Tool results that start, read or stop a cloud background command.
+function cloudToolResult(sessionId, data) {
+  if (!isCloudSession(sessionId) || !data) return;
+  const started = data.output && typeof data.output === 'object' && data.output.background;
+  if (started || data.name === 'read_background' || data.name === 'stop_background') listCloudJobs(sessionId, true);
+}
+
 // The computer tool: the mouse, the keyboard and other apps' UI, when the user
 // turned it on in Preferences. Stop (the pill, or its key) cancels the run.
 const computer = createComputer({
@@ -804,6 +870,7 @@ function makeRun(sessionId, localTools, recovery) {
     onEvent: (event, data) => {
       send('run:event', { sessionId, event, data });
       logRunEvent(sessionId, event, data);
+      if (event === 'tool.result') cloudToolResult(sessionId, data);
       if (event === 'client.finished' && FINISHED_TEXT[data.reason]) notify(sessionId, FINISHED_TEXT[data.reason]);
     },
   });
@@ -1234,12 +1301,40 @@ function registerIpc() {
   });
 
   // Commands running in the background, for the pill above the prompt.
-  handle('background:list', (sessionId) => backgroundJobs.list(sessionIdOf(sessionId)));
-  handle('background:stop', ({ sessionId, id } = {}) => backgroundJobs.stop(sessionIdOf(sessionId), id));
+  // A cloud session's are in its sandbox, through the API (listCloudJobs).
+  handle('background:list', (value) => {
+    const sessionId = sessionIdOf(value);
+    return isCloudSession(sessionId) ? listCloudJobs(sessionId, true) : backgroundJobs.list(sessionId);
+  });
+  handle('background:stop', async ({ sessionId, id } = {}) => {
+    sessionId = sessionIdOf(sessionId);
+    if (!isCloudSession(sessionId)) return backgroundJobs.stop(sessionId, id);
+    const result = await api.stopBackground(sessionId, String(id || ''));
+    await listCloudJobs(sessionId, false);
+    return result;
+  });
   // The end of a command's output, for the log under its row. Read-only: what
   // the agent has yet to read stays unread.
-  handle('background:move', ({ callId } = {}) => tools.moveToBackground(String(callId || '')));
-  handle('background:tail', ({ sessionId, id } = {}) => backgroundJobs.tail(sessionIdOf(sessionId), String(id || '')));
+  handle('background:tail', ({ sessionId, id } = {}) => {
+    sessionId = sessionIdOf(sessionId);
+    return isCloudSession(sessionId) ? tailCloudJob(sessionId, String(id || ''))
+      : backgroundJobs.tail(sessionId, String(id || ''));
+  });
+  // "Run in background" on a command the agent waits for: on this computer, or
+  // in a cloud session's sandbox through its run.
+  handle('background:move', async ({ callId, sessionId } = {}) => {
+    sessionId = sessionIdOf(sessionId);
+    if (!isCloudSession(sessionId)) return tools.moveToBackground(String(callId || ''));
+    const run = runs.get(sessionId);
+    if (!run || !run.runId) return false;
+    try {
+      await api.moveToBackground(run.runId, String(callId || ''));
+      return true;
+    } catch (err) {
+      log.warn(`could not move ${callId} to the background: ${err.message}`);
+      return false;
+    }
+  });
 
   // An image the agent made in the session's folder, for the conversation.
   handle('files:localImage', (arg) => localImage(arg));
