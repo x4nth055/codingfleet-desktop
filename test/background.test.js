@@ -175,8 +175,13 @@ test('without stop_after a job keeps running, and a job that ends first is left 
   const plain = bg.start('S', node('setTimeout(()=>{},1500)'), os.tmpdir());
   assert.equal(plain.output.stop_after, undefined);
   const quick = bg.start('S', node("console.log('done')"), os.tmpdir(), { stopAfter: 1 });
-  await new Promise((resolve) => setTimeout(resolve, 1300));
-  const read = await bg.read('S', quick.output.id);
+  // Past its 1 s limit, on a slow runner too.
+  let read;
+  for (let i = 0; i < 25; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    read = await bg.read('S', quick.output.id);
+    if (read.output.status !== 'running' && i >= 6) break;
+  }
   assert.equal(read.output.exit_code, 0);
   assert.equal(read.output.reason, undefined);
   assert.equal(bg.list('S').find((j) => j.id === plain.output.id).status, 'running');

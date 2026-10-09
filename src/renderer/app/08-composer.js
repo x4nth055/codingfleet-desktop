@@ -273,6 +273,7 @@ function costDialog({ estimate, alternatives }) {
           alt.supports_vision,
           alt.intelligence_index || 0,
           planIncludes(alt) ? includedPill() : creditRange([alt]),
+          modelStats([alt], alt.name),
         ));
         row.addEventListener('click', () => close(alt.id));
         list.append(row);

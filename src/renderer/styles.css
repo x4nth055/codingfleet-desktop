@@ -784,6 +784,26 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .menu-group .plogo { width: 18px; height: 18px; }
 .menu-group .plogo img { width: 13px; height: 13px; }
 .menu-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; text-align: left; }
+
+/* The intelligence pill's tooltip: intelligence, speed and cost bars (09-navigation.js). */
+.mc-iq .pill.iq { cursor: help; }
+.stats-tip {
+  position: fixed; z-index: 1000; width: 248px; padding: 10px 12px 9px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .35); font-size: 12px; line-height: 1.3; pointer-events: none;
+  opacity: 0; transform: translateY(2px); transition: opacity .12s ease, transform .12s ease;
+}
+.stats-tip.in { opacity: 1; transform: none; }
+.st-title { font-weight: 600; font-size: 12.5px; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-row { display: grid; grid-template-columns: 74px 1fr 62px; align-items: center; gap: 8px; margin: 6px 0; }
+.st-name { color: var(--muted); }
+.st-track { position: relative; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text) 12%, transparent); overflow: hidden; }
+.st-track.unknown { background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--text) 12%, transparent) 0 4px, transparent 4px 7px); }
+.st-fill { position: absolute; inset: 0 auto 0 0; border-radius: 3px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--st-c) 70%, var(--panel-2)), var(--st-c)); }
+.st-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.st-track.unknown + .st-value { color: var(--muted); }
+.st-note { margin-top: 8px; font-size: 10.5px; color: var(--faint); }
 .menu-item:hover, .menu-item.focus { background: var(--hover); }
 .menu-item .icon { width: 16px; height: 16px; color: var(--muted); align-self: flex-start; margin-top: 2px; }
 .mi-main { flex: 1; min-width: 0; }

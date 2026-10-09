@@ -428,9 +428,98 @@ function openModelMenu() {
   if (selected) selected.scrollIntoView({ block: 'center' });
 }
 
+// ── The intelligence pill's tooltip ───────────────────────────────────────
+// Hovering a model's intelligence score shows three bars: intelligence, speed
+// and cost, each against the other models the app knows, coloured from green
+// (best) to red (worst). Speed and cost on a log scale, where 1 to 2 credits
+// matters as much as 20 to 40. The web pickers draw the same card
+// (codingfleet static/js/model-stats-tip.js).
+let statsTip = null;
+
+// What a variant's tooltip shows: the variant with the best score stands for
+// its family, like the pill's number.
+function modelStats(variants, label) {
+  const best = variants.reduce((b, v) => ((v.intelligence_index || 0) > ((b && b.intelligence_index) || 0) ? v : b), null);
+  if (!best) return null;
+  const effort = variants.length > 1 && best.effort ? best.effort.label : '';
+  return {
+    label: effort ? `${label} · ${effort}` : label,
+    ii: best.intelligence_index,
+    tps: best.output_tokens_per_second,
+    credits: best.credits_per_20k_tokens,
+  };
+}
+
+// Where `value` sits between the lowest and highest of the app's models, 0 to 1.
+function statPosition(value, key, log) {
+  const values = S.models.map((m) => m[key]).filter((v) => typeof v === 'number' && v > 0);
+  if (!(value > 0) || !values.length) return null;
+  const f = log ? Math.log : (x) => x;
+  const lo = f(Math.min(...values));
+  const hi = f(Math.max(...values));
+  return hi > lo ? (f(value) - lo) / (hi - lo) : 1;
+}
+
+function showStatsTip(pill, stats) {
+  hideStatsTip();
+  const ii = statPosition(stats.ii, 'intelligence_index', false);
+  const tps = statPosition(stats.tps, 'output_tokens_per_second', true);
+  const cost = statPosition(stats.credits, 'credits_per_20k_tokens', true);
+  const short = (n, digits = 0) => (n >= 100 ? String(Math.round(n)) : String(+n.toFixed(digits)));
+  const rows = [
+    ['Intelligence', ii, ii, stats.ii > 0 ? `${short(stats.ii)}/100` : null],
+    ['Speed', tps, tps, stats.tps > 0 ? `${short(stats.tps)} tok/s` : null],
+    // Cost: the bar grows with the price, and a high price is the bad end. A
+    // free model is the cheapest there is, not an unknown price.
+    stats.credits === 0
+      ? ['Cost', 0, 1, 'Free']
+      : ['Cost', cost, cost == null ? null : 1 - cost, stats.credits > 0 ? `${short(stats.credits, 2)} cr` : null],
+  ];
+  const card = el('div', 'stats-tip');
+  card.setAttribute('role', 'tooltip');
+  card.append(el('div', 'st-title', stats.label));
+  for (const [name, size, good, text] of rows) {
+    const track = el('span', `st-track${size == null ? ' unknown' : ''}`);
+    if (size != null) {
+      const fill = el('span', 'st-fill');
+      fill.style.width = `${Math.round(Math.max(0.06, size) * 100)}%`;
+      // Green for the top of the range only: most models sit in its upper
+      // half, and a straight line painted nearly all of them green.
+      fill.style.setProperty('--st-c', `hsl(${Math.round(Math.pow(good, 1.6) * 125)}, 68%, 50%)`);
+      track.append(fill);
+    }
+    const row = el('div', 'st-row');
+    row.append(el('span', 'st-name', name), track, el('span', 'st-value', size == null ? 'Unknown' : text));
+    card.append(row);
+  }
+  card.append(el('div', 'st-note', 'Compared with the other models · cost in credits per 20k tokens'));
+  document.body.append(card);
+  const r = pill.getBoundingClientRect();
+  const w = card.offsetWidth;
+  const h = card.offsetHeight;
+  let left = r.left - w - 10;
+  let top = r.top + r.height / 2 - h / 2;
+  if (left < 8) {
+    left = Math.min(window.innerWidth - w - 8, Math.max(8, r.left + r.width / 2 - w / 2));
+    top = r.bottom + 8 + h > window.innerHeight ? r.top - h - 8 : r.bottom + 8;
+  }
+  card.style.left = `${Math.round(left)}px`;
+  card.style.top = `${Math.round(Math.max(8, Math.min(top, window.innerHeight - h - 8)))}px`;
+  requestAnimationFrame(() => card.classList.add('in'));
+  statsTip = card;
+}
+
+function hideStatsTip() {
+  if (statsTip) statsTip.remove();
+  statsTip = null;
+}
+document.addEventListener('scroll', hideStatsTip, true);
+document.addEventListener('click', hideStatsTip, true);
+
 // Vision, intelligence and price, each in its own fixed column so every row
-// of a picker lines up; an empty cell keeps its place.
-function modelColumns(vision, iq, price) {
+// of a picker lines up; an empty cell keeps its place. `stats` feeds the
+// intelligence pill's tooltip (modelStats).
+function modelColumns(vision, iq, price, stats) {
   const cols = el('span', 'model-cols');
   const eyeCell = el('span', 'mc-vision');
   if (vision) {
@@ -440,7 +529,13 @@ function modelColumns(vision, iq, price) {
   const iqCell = el('span', 'mc-iq');
   if (iq) {
     const pill = el('span', 'pill iq', String(iq));
-    pill.title = `Intelligence Index: ${iq}/100 (higher is smarter)`;
+    pill.setAttribute('aria-label', `Intelligence Index ${iq} out of 100`);
+    if (stats) {
+      pill.addEventListener('mouseenter', () => showStatsTip(pill, stats));
+      pill.addEventListener('mouseleave', hideStatsTip);
+    } else {
+      pill.title = `Intelligence Index: ${iq}/100 (higher is smarter)`;
+    }
     iqCell.append(pill);
   }
   const priceCell = el('span', 'mc-price');
@@ -539,6 +634,7 @@ function renderModelList(query, picker = composerPicker()) {
       entry.variants.some((v) => v.supports_vision),
       Math.max(0, ...entry.variants.map((v) => v.intelligence_index || 0)),
       priceLabel(entry.variants),
+      modelStats(entry.variants, entry.name),
     )];
     const sub = entry.variants.length > 1
       ? entry.variants.map((v) => (v.effort ? v.effort.label : v.name)).join(' · ')
@@ -573,6 +669,7 @@ function fillEffortList(list, selectedId, choose) {
       variant.intelligence_index || 0,
       planIncludes(variant) ? includedPill()
         : variant.credits_per_20k_tokens != null ? `${fmtNum(variant.credits_per_20k_tokens)} cr` : null,
+      modelStats([variant], `${entry.name} · ${variant.effort ? variant.effort.label : variant.name}`),
     ));
     button.addEventListener('click', () => choose(variant.id));
     list.append(button);
