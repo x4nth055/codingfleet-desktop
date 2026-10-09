@@ -726,7 +726,7 @@ function pillJob(job, before) {
   const running = job.state === 'running';
   return {
     id: job.id, command: job.command, status: running ? 'running' : 'exited',
-    exitCode: job.exit_code ?? null, pid: null, tail: job.last || '',
+    exitCode: job.exit_code ?? null, pid: null, tail: job.last || '', stopAfter: job.stop_after || null,
     started: Math.round((job.started || 0) * 1000), ended: job.ended ? Math.round(job.ended * 1000) : null,
     // Only a refresh knows the tunnel's address: keep it between them.
     url: running ? (job.url || (before && before.url) || null) : null,
@@ -800,7 +800,7 @@ const handlersFor = (sessionId) => new Map([
     : { output: 'Computer use is only for sessions that work on this computer, not in a cloud sandbox.', is_error: true })],
   // run_command stays the ordinary tool unless it asks for the background.
   ['run_command', (args, context) => (args.background
-    ? backgroundJobs.start(sessionId, String(args.command || ''), context.cwd)
+    ? backgroundJobs.start(sessionId, String(args.command || ''), context.cwd, { stopAfter: args.stop_after })
     : tools.executeTool('run_command', args, context))],
   ['read_background', (args, context) => backgroundJobs.read(sessionId, args.id, args.wait, context.signal)],
   ['stop_background', (args) => backgroundJobs.stop(sessionId, args.id)],

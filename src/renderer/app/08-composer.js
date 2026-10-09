@@ -522,6 +522,13 @@ function uptime(since) {
   return seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 
+// ' · stops in 4m' for a job started with stop_after.
+function stopsIn(job) {
+  if (!job.stopAfter || !job.started) return '';
+  const left = job.started + job.stopAfter * 1000 - Date.now();
+  return left > 0 ? ` · stops in ${uptime(Date.now() - left)}` : '';
+}
+
 function renderBackground() {
   const box = $('bgJobs');
   if (!box) return;
@@ -550,7 +557,7 @@ function renderBackground() {
       text.type = 'button';
       text.title = open ? 'Hide the output' : 'Show the output as it comes';
       text.append(el('code', 'bg-command', job.command), el('span', 'bg-sub',
-        `${job.id} · running ${uptime(job.started)}${job.pid ? ` · pid ${job.pid}` : ''}`));
+        `${job.id} · running ${uptime(job.started)}${stopsIn(job)}${job.pid ? ` · pid ${job.pid}` : ''}`));
       const last = String(job.tail || '').trim().split(/\r?\n/).pop();
       if (last && !open) text.append(el('span', 'bg-tail', last.slice(0, 200)));
       text.addEventListener('click', () => toggleBackgroundLog(job.id));

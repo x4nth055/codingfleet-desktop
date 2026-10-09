@@ -153,3 +153,32 @@ test('a command that finishes is waited for as before, and cannot be moved after
   assert.equal(tools.moveToBackground('call-move-2'), false);
   assert.equal(bg.list('S').length, 0);
 });
+
+test('stop_after stops a job when its time is up, and read says why', async () => {
+  const bg = jobs();
+  const res = bg.start('S', forever("setInterval(()=>console.log('up'),200)"), os.tmpdir(), { stopAfter: 1 });
+  assert.equal(res.output.stop_after, 1);
+  assert.match(res.output.note, /stops by itself after 1 s/);
+  assert.equal(bg.list('S')[0].stopAfter, 1);
+  let last;
+  for (let i = 0; i < 20; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    last = await bg.read('S', res.output.id);
+    if (last.output.status !== 'running') break;
+  }
+  assert.equal(last.output.status, 'exited');
+  assert.equal(last.output.reason, 'Stopped after its 1 s limit (stop_after).');
+});
+
+test('without stop_after a job keeps running, and a job that ends first is left alone', async () => {
+  const bg = jobs();
+  const plain = bg.start('S', node('setTimeout(()=>{},1500)'), os.tmpdir());
+  assert.equal(plain.output.stop_after, undefined);
+  const quick = bg.start('S', node("console.log('done')"), os.tmpdir(), { stopAfter: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 1300));
+  const read = await bg.read('S', quick.output.id);
+  assert.equal(read.output.exit_code, 0);
+  assert.equal(read.output.reason, undefined);
+  assert.equal(bg.list('S').find((j) => j.id === plain.output.id).status, 'running');
+  bg.stopAll();
+});

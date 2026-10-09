@@ -23,6 +23,8 @@ const MAX_WAIT_S = 30;
 const MAX_RUNNING_PER_SESSION = 8;
 // What the window's log view shows of a job at most.
 const MAX_TAIL_CHARS = 20_000;
+// stop_after: the longest a job may be asked to run before it is stopped.
+const MAX_STOP_AFTER_S = 24 * 3600;
 
 // Colours and cursor moves, as dev servers print them to a terminal.
 // eslint-disable-next-line no-control-regex
@@ -66,8 +68,11 @@ class BackgroundJobs {
     }
   }
 
-  /** Start `command` in `cwd` for `sessionId`. Returns the answer run_command gives. */
-  start(sessionId, command, cwd) {
+  /**
+   * Start `command` in `cwd` for `sessionId`. Returns the answer run_command gives.
+   * `stopAfter`: seconds after which the job is stopped (run_command's stop_after).
+   */
+  start(sessionId, command, cwd, { stopAfter } = {}) {
     const running = [...this.jobs.values()].filter((j) => j.sessionId === sessionId && j.status === 'running');
     if (running.length >= MAX_RUNNING_PER_SESSION) {
       return { output: `error: ${running.length} background commands are already running in this session. `
@@ -86,9 +91,21 @@ class BackgroundJobs {
     }
     child.stdin.end();
     const job = this.track(sessionId, command, cwd, child, '');
+    const limit = Math.min(Math.floor(Number(stopAfter) || 0), MAX_STOP_AFTER_S);
+    if (limit > 0) {
+      job.stopAfter = limit;
+      const timer = setTimeout(() => {
+        if (job.status !== 'running') return;
+        job.reason = `Stopped after its ${limit} s limit (stop_after).`;
+        this.stop(sessionId, job.id);
+      }, limit * 1000);
+      timer.unref?.();
+      job.exited.then(() => clearTimeout(timer));
+    }
     return {
-      output: { id: job.id, pid: job.pid, status: 'running',
-        note: `Started in the background. Read its output with read_background("${job.id}").` },
+      output: { id: job.id, pid: job.pid, status: 'running', ...(limit > 0 ? { stop_after: limit } : {}),
+        note: `Started in the background.${limit > 0 ? ` It stops by itself after ${limit} s.` : ''} `
+          + `Read its output with read_background("${job.id}").` },
       is_error: false,
     };
   }
@@ -191,7 +208,8 @@ class BackgroundJobs {
     output += fresh;
     job.readTo = job.dropped + job.text.length;
     return {
-      output: { id: job.id, status: job.status, exit_code: job.exitCode, output: output || '(no new output)' },
+      output: { id: job.id, status: job.status, exit_code: job.exitCode, output: output || '(no new output)',
+        ...(job.reason ? { reason: job.reason } : {}) },
       is_error: false,
     };
   }
@@ -234,7 +252,7 @@ class BackgroundJobs {
       .filter((j) => !sessionId || j.sessionId === sessionId)
       .sort((a, b) => b.started - a.started)
       .map((j) => ({ id: j.id, command: j.command, status: j.status, exitCode: j.exitCode,
-        started: j.started, ended: j.ended, pid: j.pid, url: j.url,
+        started: j.started, ended: j.ended, pid: j.pid, url: j.url, stopAfter: j.stopAfter || null,
         tail: stripAnsi(j.text.slice(-2000)) }));
   }
 
