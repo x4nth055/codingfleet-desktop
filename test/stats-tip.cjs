@@ -19,6 +19,7 @@ const MODELS = process.env.MODELS_JSON
     model('smart', 'Smart Slow', 'Acme', 55, 40, 40),
     model('fast', 'Fast Cheap', 'Acme', 30, 300, 1),
     model('mid', 'Middle', 'Bolt', 42, null, 3),
+    model('incl', 'Included', 'Bolt', 38, 120, 2, { unlimited: true }),
   ];
 const PICK = process.env.PICK || 'Middle';
 
@@ -37,8 +38,18 @@ app.whenReady().then(async () => {
       S.init.state.sessions.stats = { cwd: 'C:/workspace/app' };
       S.models = ${JSON.stringify(MODELS)};
       modelsLoadedAt = Date.now();
+      // An Unlimited plan, signed in through the browser: its unlimited models cost no credits here.
+      S.credits = { plan: { name: 'Unlimited', unlimited_models: true }, key: { client: 'desktop' } };
       renderSidebar(); renderMain();
       openModelMenu();
+      const costOf = async (name) => {
+        const pill = [...document.querySelectorAll('#modelList .menu-item')].find((r) => r.textContent.includes(name)).querySelector('.pill.iq');
+        pill.dispatchEvent(new MouseEvent('mouseenter'));
+        const text = [...document.querySelectorAll('.stats-tip .st-row')][2].children[2].textContent;
+        hideStatsTip();
+        return text;
+      };
+      const includedCost = ${process.env.MODELS_JSON ? 'null' : "await costOf('Included')"};
       const rows = [...document.querySelectorAll('#modelList .menu-item')];
       const row = rows.find((r) => r.textContent.includes(${JSON.stringify(PICK)}));
       const pill = row.querySelector('.pill.iq');
@@ -53,6 +64,7 @@ app.whenReady().then(async () => {
         rows: [...card.querySelectorAll('.st-row')].map((r) => [r.children[0].textContent, r.children[2].textContent,
           (r.querySelector('.st-fill') || {}).style ? r.querySelector('.st-fill').style.width : null]),
         nativeTitle: pill.title,
+        includedCost,
       };
     })()`);
     console.log(JSON.stringify(result));
@@ -62,6 +74,7 @@ app.whenReady().then(async () => {
       assert.deepEqual(result.rows.map((r) => r[0]), ['Intelligence', 'Speed', 'Cost']);
       assert.equal(result.rows[1][1], 'Unknown', 'an unknown speed says so');
       assert.equal(result.rows[2][1], '3 cr');
+      assert.equal(result.includedCost, 'Unlimited', 'a model the plan includes says Unlimited');
     }
     for (const theme of ['dark', 'light', 'hacker']) {
       await win.webContents.executeJavaScript(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}; true;`);

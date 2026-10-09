@@ -447,6 +447,8 @@ function modelStats(variants, label) {
     ii: best.intelligence_index,
     tps: best.output_tokens_per_second,
     credits: best.credits_per_20k_tokens,
+    // Included in the user's plan: no credits here (the price column's Unlimited).
+    included: planIncludes(best),
   };
 }
 
@@ -470,8 +472,8 @@ function showStatsTip(pill, stats) {
     ['Speed', tps, tps, stats.tps > 0 ? `${short(stats.tps)} tok/s` : null],
     // Cost: the bar grows with the price, and a high price is the bad end. A
     // free model is the cheapest there is, not an unknown price.
-    stats.credits === 0
-      ? ['Cost', 0, 1, 'Free']
+    stats.included || stats.credits === 0
+      ? ['Cost', 0, 1, stats.included ? 'Unlimited' : 'Free']
       : ['Cost', cost, cost == null ? null : 1 - cost, stats.credits > 0 ? `${short(stats.credits, 2)} cr` : null],
   ];
   const card = el('div', 'stats-tip');
