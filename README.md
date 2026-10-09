@@ -109,7 +109,7 @@ Dev servers and watchers keep running in the background. A bar above the prompt 
 with a Stop button each. Click one to watch its output as it comes. Once a dev server prints
 its local address, an Open button opens it in your browser.
 
-A command the agent waits for can move there too. After it has run a few seconds, its step
+A command the agent waits for can move there too. After it has run 10 seconds, its step
 offers **Run in background**: the agent gets what the command printed so far and its id, and
 continues while the command keeps running.
 

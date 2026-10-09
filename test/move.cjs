@@ -1,6 +1,6 @@
 'use strict';
 // "Run in background" on a command the agent waits for: offered once it has run
-// a few seconds, only for a command on this computer, and a click asks the app
+// 10 seconds, only for a command on this computer, and a click asks the app
 // to move it (core/tools.js moveToBackground).
 // Run with: npx electron test/move.cjs
 const { app, BrowserWindow } = require('electron');

@@ -143,8 +143,8 @@ function toolMeta(tool) {
 // A command the agent waits for can keep running without it, like Claude
 // Code's: the agent gets what it printed so far and the command's id, and the
 // pill above the prompt shows it from then on (core/tools.js moveToBackground).
-// Offered once the command has run a few seconds, when it starts to look stuck.
-const MOVE_AFTER_MS = 3000;
+// Offered once the command has run 10 seconds, when it starts to look stuck.
+const MOVE_AFTER_MS = 10000;
 
 function canMove(tool) {
   const args = tool.arguments || {};
