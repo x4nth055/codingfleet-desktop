@@ -430,10 +430,10 @@ function openModelMenu() {
 
 // ── The intelligence pill's tooltip ───────────────────────────────────────
 // Hovering a model's intelligence score shows three bars: intelligence, speed
-// and cost, each against the other models the app knows, coloured from green
-// (best) to red (worst). Speed and cost on a log scale, where 1 to 2 credits
-// matters as much as 20 to 40. The web pickers draw the same card
-// (codingfleet static/js/model-stats-tip.js).
+// and cost, each in a straight line from the lowest to the highest value of
+// the app's models (the cheapest is a dot, the most expensive a full bar),
+// coloured from green (best) to red (worst). The web pickers draw the same
+// card (codingfleet static/js/model-stats-tip.js).
 let statsTip = null;
 
 // What a variant's tooltip shows: the variant with the best score stands for
@@ -451,20 +451,19 @@ function modelStats(variants, label) {
 }
 
 // Where `value` sits between the lowest and highest of the app's models, 0 to 1.
-function statPosition(value, key, log) {
+function statPosition(value, key) {
   const values = S.models.map((m) => m[key]).filter((v) => typeof v === 'number' && v > 0);
   if (!(value > 0) || !values.length) return null;
-  const f = log ? Math.log : (x) => x;
-  const lo = f(Math.min(...values));
-  const hi = f(Math.max(...values));
-  return hi > lo ? (f(value) - lo) / (hi - lo) : 1;
+  const lo = Math.min(...values);
+  const hi = Math.max(...values);
+  return hi > lo ? (value - lo) / (hi - lo) : 1;
 }
 
 function showStatsTip(pill, stats) {
   hideStatsTip();
-  const ii = statPosition(stats.ii, 'intelligence_index', false);
-  const tps = statPosition(stats.tps, 'output_tokens_per_second', true);
-  const cost = statPosition(stats.credits, 'credits_per_20k_tokens', true);
+  const ii = statPosition(stats.ii, 'intelligence_index');
+  const tps = statPosition(stats.tps, 'output_tokens_per_second');
+  const cost = statPosition(stats.credits, 'credits_per_20k_tokens');
   const short = (n, digits = 0) => (n >= 100 ? String(Math.round(n)) : String(+n.toFixed(digits)));
   const rows = [
     ['Intelligence', ii, ii, stats.ii > 0 ? `${short(stats.ii)}/100` : null],
@@ -482,7 +481,8 @@ function showStatsTip(pill, stats) {
     const track = el('span', `st-track${size == null ? ' unknown' : ''}`);
     if (size != null) {
       const fill = el('span', 'st-fill');
-      fill.style.width = `${Math.round(Math.max(0.06, size) * 100)}%`;
+      // The shortest bar is a dot, as wide as the bar is high.
+      fill.style.width = `max(6px, ${(size * 100).toFixed(1)}%)`;
       // Green for the top of the range only: most models sit in its upper
       // half, and a straight line painted nearly all of them green.
       fill.style.setProperty('--st-c', `hsl(${Math.round(Math.pow(good, 1.6) * 125)}, 68%, 50%)`);
