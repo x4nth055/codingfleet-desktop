@@ -797,6 +797,8 @@ function makeRun(sessionId, localTools, recovery) {
     journal: journalFor(sessionId),
     localTools,
     clientHandlers: handlersFor(sessionId),
+    // "Run in background" on a command the agent waits for.
+    adopt: (handoff) => backgroundJobs.adopt(sessionId, handoff),
     approve: (call) => approve(sessionId, recovery?.cwd || local.cwd, call, localTools),
     confirmRetry: (call) => confirmInterruptedTool(sessionId, call),
     onEvent: (event, data) => {
@@ -1236,6 +1238,7 @@ function registerIpc() {
   handle('background:stop', ({ sessionId, id } = {}) => backgroundJobs.stop(sessionIdOf(sessionId), id));
   // The end of a command's output, for the log under its row. Read-only: what
   // the agent has yet to read stays unread.
+  handle('background:move', ({ callId } = {}) => tools.moveToBackground(String(callId || '')));
   handle('background:tail', ({ sessionId, id } = {}) => backgroundJobs.tail(sessionIdOf(sessionId), String(id || '')));
 
   // An image the agent made in the session's folder, for the conversation.

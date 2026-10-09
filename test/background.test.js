@@ -117,3 +117,39 @@ test('a job says where it listens, and its tail leaves the agent\'s reads alone'
   const read = await bg.read('S', output.id);
   assert.match(read.output.output, /ready on/);
 });
+
+test('"Run in background" hands a waiting command to the jobs, and the agent gets what it printed so far', async () => {
+  const bg = jobs();
+  const callId = 'call-move-1';
+  const waiting = tools.executeTool('run_command', {
+    command: forever("console.log('booting');setTimeout(()=>console.log('ready'),600)"),
+    timeout: 30,
+  }, { cwd: os.tmpdir(), callId, adopt: (handoff) => bg.adopt('S', handoff) });
+  // Let it print a line first, as a stuck command would have.
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(tools.moveToBackground(callId), true);
+  const { output } = await waiting;
+  assert.equal(output.exit_code, null);
+  assert.match(output.stdout, /booting/);
+  assert.match(output.background.id, /^bg_[0-9a-f]{8}$/);
+  assert.match(output.background.note, /The user moved this command to the background/);
+  // The same call cannot move twice, and an unknown call never moves.
+  assert.equal(tools.moveToBackground(callId), false);
+  assert.equal(tools.moveToBackground('nope'), false);
+  // What the agent already has is not read again; what comes next is.
+  const next = await bg.read('S', output.background.id, 5);
+  assert.doesNotMatch(next.output.output, /booting/);
+  assert.match(next.output.output, /ready/);
+  assert.equal(bg.list('S')[0].status, 'running');
+  await bg.stop('S', output.background.id);
+});
+
+test('a command that finishes is waited for as before, and cannot be moved after', async () => {
+  const bg = jobs();
+  const res = await tools.executeTool('run_command', { command: node("console.log('done')") },
+    { cwd: os.tmpdir(), callId: 'call-move-2', adopt: (handoff) => bg.adopt('S', handoff) });
+  assert.equal(res.output.exit_code, 0);
+  assert.equal(res.output.background, undefined);
+  assert.equal(tools.moveToBackground('call-move-2'), false);
+  assert.equal(bg.list('S').length, 0);
+});

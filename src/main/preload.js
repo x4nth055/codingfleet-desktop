@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld('cf', {
   backgroundJobs: call('background:list'),
   stopBackground: call('background:stop'),
   backgroundTail: call('background:tail'),
+  moveToBackground: call('background:move'),
   folders: call('files:folders'),
   fileIndex: call('files:index'),
   saveText: call('files:saveText'),

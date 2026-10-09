@@ -75,7 +75,20 @@ function commandEnv() {
   return env;
 }
 
-function runShell(command, { cwd, timeout, signal } = {}) {
+// Commands the user can move to the background while the agent waits for them:
+// call id -> move(). Filled only when the caller can keep a background job
+// (`adopt`, see core/background.js).
+const movable = new Map();
+
+/** Stop waiting for the command of call `callId` and leave it running. False when none waits. */
+function moveToBackground(callId) {
+  const move = movable.get(String(callId || ''));
+  if (!move) return false;
+  move();
+  return true;
+}
+
+function runShell(command, { cwd, timeout, signal, callId, adopt } = {}) {
   const seconds = Math.min(Math.max(Number(timeout) || DEFAULT_TIMEOUT_S, 1), MAX_TIMEOUT_S);
   return new Promise((resolve) => {
     let stdout = '';
@@ -96,16 +109,42 @@ function runShell(command, { cwd, timeout, signal } = {}) {
     }
     child.stdin.end();
     // Kept a little past the cap, so clip() can still show the tail.
-    child.stdout.on('data', (d) => { if (stdout.length < MAX_OUTPUT_CHARS * 2) stdout += d.toString('utf8'); });
-    child.stderr.on('data', (d) => { if (stderr.length < MAX_OUTPUT_CHARS * 2) stderr += d.toString('utf8'); });
+    const onOut = (d) => { if (stdout.length < MAX_OUTPUT_CHARS * 2) stdout += d.toString('utf8'); };
+    const onErr = (d) => { if (stderr.length < MAX_OUTPUT_CHARS * 2) stderr += d.toString('utf8'); };
+    child.stdout.on('data', onOut);
+    child.stderr.on('data', onErr);
 
     const timer = setTimeout(() => { timedOut = true; killTree(child); }, seconds * 1000);
     const onAbort = () => killTree(child);
     if (signal) signal.addEventListener('abort', onAbort, { once: true });
 
+    // "Run in background": the result goes back now, with what the command
+    // printed so far, and the command keeps running as a background job.
+    if (callId && typeof adopt === 'function') {
+      movable.set(String(callId), () => {
+        if (settled) return;
+        settled = true;
+        movable.delete(String(callId));
+        clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        child.stdout.off('data', onOut);
+        child.stderr.off('data', onErr);
+        let background;
+        try {
+          background = adopt({ child, command, cwd, text: stdout + stderr });
+        } catch (err) {
+          killTree(child);
+          resolve({ stdout: clip(stdout), stderr: clip(`${stderr}${stderr ? '\n' : ''}Could not move it to the background: ${err.message}`), exit_code: null });
+          return;
+        }
+        resolve({ stdout: clip(stdout), stderr: clip(stderr), exit_code: null, background });
+      });
+    }
+
     const finish = (code, err) => {
       if (settled) return;
       settled = true;
+      movable.delete(String(callId || ''));
       clearTimeout(timer);
       if (signal) signal.removeEventListener('abort', onAbort);
       if (err) stderr += `${stderr ? '\n' : ''}Could not start ${SHELL.name}: ${err.message}`;
@@ -216,7 +255,7 @@ async function fsGlob(args, cwd) {
   return lines.join('\n');
 }
 
-async function executeCode(args, cwd, signal) {
+async function executeCode(args, cwd, signal, moving) {
   const filename = String(args.filename || '');
   if (args.code) {
     if (!filename) return { output: { stdout: '', stderr: 'filename is required with code', exit_code: null }, is_error: true };
@@ -229,19 +268,22 @@ async function executeCode(args, cwd, signal) {
     }
   }
   if (!args.command) return { output: { stdout: `File saved to ${filename}.`, stderr: '', exit_code: 0 }, is_error: false };
-  return { output: await runShell(String(args.command), { cwd, timeout: args.timeout, signal }), is_error: false };
+  return { output: await runShell(String(args.command), { cwd, timeout: args.timeout, signal, ...moving }), is_error: false };
 }
 
 const asText = (output) => ({ output, is_error: typeof output === 'string' && output.startsWith('error:') });
 
-async function executeTool(name, args, { cwd, signal } = {}) {
+// `callId` and `adopt` let the user move a waiting command to the background
+// (moveToBackground); without them a command is only ever waited for.
+async function executeTool(name, args, { cwd, signal, callId, adopt } = {}) {
   args = args && typeof args === 'object' ? args : {};
+  const moving = { callId, adopt };
   switch (name) {
     case 'run_command':
       if (!args.command) return { output: { stdout: '', stderr: 'command is required', exit_code: null }, is_error: true };
-      return { output: await runShell(String(args.command), { cwd, timeout: args.timeout, signal }), is_error: false };
+      return { output: await runShell(String(args.command), { cwd, timeout: args.timeout, signal, ...moving }), is_error: false };
     case 'execute_code':
-      return executeCode(args, cwd, signal);
+      return executeCode(args, cwd, signal, moving);
     case 'fs_read':
       return asText(await fsRead(args, cwd));
     case 'fs_write':
@@ -299,6 +341,7 @@ module.exports = {
   isInside,
   resolvePath,
   runShell,
+  moveToBackground,
   killTree,
   commandEnv,
 };

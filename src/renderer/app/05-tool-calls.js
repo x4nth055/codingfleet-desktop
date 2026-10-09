@@ -131,10 +131,49 @@ function toolMeta(tool) {
     meta.append(el('span', 'add', `+${lineCount(args.new)}`), ' ', el('span', 'del', `−${lineCount(args.old)}`));
   } else if (tool.name === 'fs_write' && typeof args.content === 'string') {
     meta.textContent = `${lineCount(args.content)} lines`;
+  } else if (tool.output && typeof tool.output === 'object' && tool.output.background) {
+    meta.textContent = 'In the background';
   } else if (tool.output && typeof tool.output === 'object' && tool.output.exit_code != null && tool.output.exit_code !== 0) {
     meta.append(el('span', 'bad', `exit ${tool.output.exit_code}`));
   }
   return meta;
+}
+
+// ── Run in background ──────────────────────────────────────────────────────
+// A command the agent waits for can keep running without it, like Claude
+// Code's: the agent gets what it printed so far and the command's id, and the
+// pill above the prompt shows it from then on (core/tools.js moveToBackground).
+// Offered once the command has run a few seconds, when it starts to look stuck.
+const MOVE_AFTER_MS = 3000;
+
+function canMove(tool) {
+  const args = tool.arguments || {};
+  return Boolean(tool.local && tool.status === 'running' && !args.background
+    && (tool.name === 'run_command' || (tool.name === 'execute_code' && args.command))
+    && tool.runningSince && Date.now() - tool.runningSince >= MOVE_AFTER_MS
+    && typeof cf.moveToBackground === 'function');
+}
+
+function moveBar(tool) {
+  const bar = el('div', 'move-bar');
+  bar.append(el('span', 'move-text', 'Still running.'));
+  const button = el('button', 'btn small', tool.moving ? 'Moving…' : 'Run in background');
+  button.disabled = Boolean(tool.moving);
+  button.title = 'Stop waiting: the command keeps running in the background and the agent continues';
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const sessionId = tool.group.sessionId;
+    tool.moving = true;
+    refreshItem(sessionId, tool.group);
+    let moved = false;
+    try { moved = await call(cf.moveToBackground, { callId: tool.id }); } catch { /* it finished first */ }
+    if (!moved) {
+      tool.moving = false;
+      refreshItem(sessionId, tool.group);
+    }
+  });
+  bar.append(button);
+  return bar;
 }
 
 function renderTool(tool) {
@@ -148,6 +187,7 @@ function renderTool(tool) {
     refreshItem(tool.group.sessionId, tool.group);
   });
   node.append(head);
+  if (canMove(tool)) node.append(moveBar(tool));
   if (tool.open) node.append(toolBody(tool));
   if (tool.status === 'waiting') node.append(approvalBar(tool));
   return node;
@@ -178,6 +218,9 @@ function renderGroup(group) {
     refreshItem(group.sessionId, group);
   });
   node.append(head);
+  // A closed group still offers it for the command it waits for.
+  const stuck = !open && group.tools.find(canMove);
+  if (stuck) node.append(moveBar(stuck));
   if (open) {
     const body = el('div', 'group-body');
     for (const tool of group.tools) body.append(renderTool(tool));

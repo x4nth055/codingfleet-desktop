@@ -4,9 +4,11 @@
 // Like Claude Code's background shells. run_command with background: true
 // starts one and answers at once with its id; read_background returns what it
 // printed since the agent last looked; stop_background ends it and everything
-// it started. A job outlives the run that started it — a dev server should
-// still be up when the next message is sent — and is stopped when its session
-// is deleted or the app quits. No Electron here: the CLI can use it too.
+// it started. A command the agent waits for can move here too, when the user
+// clicks "Run in background" on its step (adopt). A job outlives the run that
+// started it — a dev server should still be up when the next message is sent —
+// and is stopped when its session is deleted or the app quits. No Electron
+// here: the CLI can use it too.
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 
@@ -71,7 +73,6 @@ class BackgroundJobs {
       return { output: `error: ${running.length} background commands are already running in this session. `
         + 'Stop one with stop_background first.', is_error: true };
     }
-    const id = `bg_${crypto.randomBytes(4).toString('hex')}`;
     let child;
     try {
       child = spawn(this.shell.file, this.shell.args(command), {
@@ -84,6 +85,34 @@ class BackgroundJobs {
       return { output: `error: could not start ${this.shell.name}: ${err.message}`, is_error: true };
     }
     child.stdin.end();
+    const job = this.track(sessionId, command, cwd, child, '');
+    return {
+      output: { id: job.id, pid: job.pid, status: 'running',
+        note: `Started in the background. Read its output with read_background("${job.id}").` },
+      is_error: false,
+    };
+  }
+
+  /**
+   * Take over a command the agent was waiting for: the user clicked "Run in
+   * background" on its step. `text` is what it printed so far, which the agent
+   * gets with the call's result, so it counts as read. Returns what that
+   * result says about the job.
+   */
+  adopt(sessionId, { child, command, cwd, text }) {
+    const job = this.track(sessionId, command, cwd, child, text || '');
+    job.readTo = job.dropped + job.text.length;
+    return {
+      id: job.id, pid: job.pid, status: job.status,
+      note: 'The user moved this command to the background before it finished. It keeps running. '
+        + `Read its new output with read_background("${job.id}"); stop it with stop_background("${job.id}") `
+        + 'when it is no longer needed.',
+    };
+  }
+
+  /** Keep `child` as a job of `sessionId`. */
+  track(sessionId, command, cwd, child, text) {
+    const id = `bg_${crypto.randomBytes(4).toString('hex')}`;
     const job = {
       id, sessionId, command, cwd, child, pid: child.pid || null,
       status: 'running', exitCode: null, started: Date.now(), ended: null,
@@ -120,12 +149,11 @@ class BackgroundJobs {
     child.on('error', (err) => finish(null, err));
     child.on('exit', (code) => setTimeout(() => finish(code), 200));
     this.jobs.set(id, job);
+    if (text) append(text);
+    // An adopted command can have ended a moment before it was handed over.
+    if (child.exitCode !== null || child.signalCode !== null) setTimeout(() => finish(child.exitCode), 200);
     this.changed(job);
-    return {
-      output: { id, pid: job.pid, status: 'running',
-        note: `Started in the background. Read its output with read_background("${id}").` },
-      is_error: false,
-    };
+    return job;
   }
 
   wake(job) {

@@ -16,7 +16,12 @@ const SUMMARY = {
   truncated: false,
 };
 
+// Calls the window asked to move to the background (test/move.cjs).
+const moved = [];
+
 contextBridge.exposeInMainWorld('cf', {
+  moveToBackground: async ({ callId }) => { moved.push(callId); return { ok: true, data: true }; },
+  movedCalls: async () => [...moved],
   init: async () => ({ ok: true, data: {
     platform: 'win32', version: 'test',
     settings: { hasKey: false, apiBase: 'https://codingfleet.com/v1' },

@@ -88,6 +88,8 @@ function onRunEvent({ sessionId, event, data }) {
           name: data.name,
           arguments: data.arguments || {},
           status: data.executor === 'client' ? 'queued' : 'running',
+          // Runs on this computer: a waiting command can move to the background.
+          local: data.executor === 'client',
           ...run?.replayTools?.get(data.id),
         });
       }
@@ -105,7 +107,12 @@ function onRunEvent({ sessionId, event, data }) {
       break;
     }
     case 'client.tool_running':
-      updateTool(sessionId, data.id, { status: 'running' });
+      updateTool(sessionId, data.id, { status: 'running', runningSince: Date.now() });
+      // A command still running by then offers "Run in background".
+      setTimeout(() => {
+        const tool = findTool(sessionId, data.id);
+        if (tool && tool.status === 'running') updateTool(sessionId, data.id, {});
+      }, MOVE_AFTER_MS + 50);
       break;
     case 'client.tool_denied':
       updateTool(sessionId, data.id, { status: 'denied' });

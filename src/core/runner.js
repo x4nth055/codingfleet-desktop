@@ -37,8 +37,11 @@ class Run {
    *   tools the host app runs itself (view_image needs an image decoder, a
    *   screenshot needs the screen). `call` is the tool call, so a handler can
    *   report progress of its own against the call's id.
+   * @param {(handoff: { child, command, cwd, text }) => object} [o.adopt] Keeps a command
+   *   the user moved to the background (BackgroundJobs.adopt); without it a
+   *   command cannot move there.
    */
-  constructor({ sessionId, cwd, approve, onEvent, localTools, clientHandlers, recovery, journal, confirmRetry }) {
+  constructor({ sessionId, cwd, approve, onEvent, localTools, clientHandlers, recovery, journal, confirmRetry, adopt }) {
     this.sessionId = sessionId;
     this.cwd = cwd;
     this.localTools = localTools || new Map();
@@ -47,6 +50,7 @@ class Run {
     this.onEvent = onEvent;
     this.journal = journal || null;
     this.confirmRetry = confirmRetry || (() => 'deny');
+    this.adopt = adopt || null;
     this.runId = recovery?.runId || null;
     this.ended = null;
     this.handled = new Set();
@@ -190,7 +194,9 @@ class Run {
                 this.journal?.setChange(target, this.changes.get(target));
               }
               try {
-                result = await executeTool(call.name, call.arguments, { cwd: this.cwd, signal: this.controller.signal });
+                result = await executeTool(call.name, call.arguments, {
+                  cwd: this.cwd, signal: this.controller.signal, callId: call.id, adopt: this.adopt,
+                });
               } finally {
                 if (target) {
                   this.changes.get(target).after = await readForDiff(target);
