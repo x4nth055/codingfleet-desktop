@@ -422,6 +422,7 @@
 .sbx-note { margin: -2px 0 8px; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .sbx-note.warn { padding: 8px 12px; border-radius: 8px; color: var(--text);
   background: color-mix(in srgb, var(--amber) 8%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent); }
+.set-desc.sbx-warn-line { color: var(--amber); }
 .sbx-empty { padding: 12px 14px; margin-bottom: 8px; border: 1px dashed var(--line-2); border-radius: 10px;
   font-size: 12.5px; line-height: 1.5; color: var(--faint); }
 .sbx-row { padding: 11px 12px 11px 14px; }

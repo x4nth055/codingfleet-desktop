@@ -520,6 +520,13 @@ function sandboxRow(pane, sandbox) {
   if (what.length) text.append(el('div', 'set-desc', what.join(' · ')));
   const line = SBX.sandboxLine(sandbox);
   if (line) text.append(el('div', 'set-desc', line));
+  // What Stop does to its files, said on the row and not only once Stop is
+  // clicked: Save snapshot is for a sandbox that keeps running.
+  if (forSession && sandbox.status !== 'stopped') {
+    text.append(el('div', `set-desc${sandbox.snapshot_on_stop ? '' : ' sbx-warn-line'}`, sandbox.snapshot_on_stop
+      ? 'Stopping saves its files first: its session gets them back on its next run.'
+      : 'This session keeps no snapshot: stopping loses its files.'));
+  }
 
   const actions = el('div', 'sbx-actions');
   if (forSession && S.sessions.some((s) => s.id === sandbox.session_id)) {
@@ -539,7 +546,9 @@ function sandboxRow(pane, sandbox) {
   if (forSession) {
     const stop = el('button', 'btn small danger', 'Stop');
     stop.disabled = sandbox.status === 'stopped' || Boolean(sandbox.busy);
-    stop.title = sandbox.busy ? 'A run is using it: stop the run first' : 'Stop it now. Its session starts it again when needed.';
+    stop.title = sandbox.busy ? 'A run is using it: stop the run first'
+      : sandbox.snapshot_on_stop ? 'Save its files, then stop it. Its session starts it again, with them, when needed.'
+        : 'Stop it now. Its files are lost: this session keeps no snapshot.';
     stop.addEventListener('click', () => stopSandbox(pane, sandbox));
     actions.append(stop);
   }
