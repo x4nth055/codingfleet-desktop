@@ -37,9 +37,9 @@ test('an edit sends what changed, and nothing when nothing did', () => {
   form.env[0].value = '-mod=mod';
   form.env[1].removed = true;
   form.env.push({ ...sbx.envRow('NEW'), value: 'x' });
-  form.description = 'For the course';
+  form.description = 'Go toolchain';
   assert.deepEqual(sbx.specBody(form, SPEC), {
-    description: 'For the course', registry_image: 'golang:1.24',
+    description: 'Go toolchain', registry_image: 'golang:1.24',
     env_vars: { GOFLAGS: '-mod=mod', TOKEN: null, NEW: 'x' },
   });
 

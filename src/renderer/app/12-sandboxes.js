@@ -922,7 +922,7 @@ function openSpecEditor({ spec = null, preset = null } = {}) {
     const name = el('input', 'sbx-input');
     name.value = form.name;
     name.maxLength = SBX.LIMITS.name;
-    name.placeholder = 'Go 1.23 for the course';
+    name.placeholder = 'Go 1.23 toolchain';
     name.addEventListener('input', () => { form.name = name.value; });
     body.append(field('Name', name, 'Shown when you choose the spec for a session. Empty: its image.'));
 
