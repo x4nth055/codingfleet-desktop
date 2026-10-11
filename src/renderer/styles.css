@@ -513,6 +513,8 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 .fc-text { min-width: 0; flex: 1; }
 .fc-title { font-size: 13.5px; }
 .fc-path { font: 12px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A sentence, not a path: it wraps instead of being cut. */
+.fc-sub { font-size: 12.5px; line-height: 1.4; color: var(--faint); }
 .fc-change { font-size: 12px; color: var(--muted); }
 .suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 .suggestion { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; color: var(--muted); }

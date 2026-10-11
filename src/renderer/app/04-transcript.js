@@ -48,13 +48,13 @@ function renderEmpty() {
   if (S.draftSandbox) {
     text.append(
       el('div', 'fc-title', 'Cloud sandbox'),
-      el('div', 'fc-path', "Runs on CodingFleet's servers, not on this computer"),
+      el('div', 'fc-sub', "Runs on CodingFleet's servers, not on this computer"),
     );
     card.append(icon('sparkle'), text, el('span', 'fc-change', 'Change'));
   } else {
     text.append(
       el('div', 'fc-title', S.draftCwd ? baseName(S.draftCwd) : 'Choose a project folder'),
-      el('div', 'fc-path', S.draftCwd || 'The agent works inside this folder'),
+      S.draftCwd ? el('div', 'fc-path', S.draftCwd) : el('div', 'fc-sub', 'The agent works inside this folder'),
     );
     card.append(icon('folder'), text, el('span', 'fc-change', S.draftCwd ? 'Change' : 'Browse'));
   }
