@@ -341,7 +341,7 @@ function keyRow(pane, key) {
   const text = el('div', 'set-text');
   text.append(el('div', 'set-title', key.name));
   let desc = key.configured ? `Saved: ${key.masked}` : 'Not set';
-  if (key.configured && key.last_used_at) desc += ` · last used ${relTime(key.last_used_at)} ago`;
+  if (key.configured && key.last_used_at) desc += ` · last used ${relAgo(key.last_used_at)}`;
   text.append(el('div', 'set-desc', desc));
   if (key.last_error) text.append(el('div', 'set-desc bad', `The provider refused it: ${key.last_error}`));
   const link = el('a', 'byok-link', 'Get a key');

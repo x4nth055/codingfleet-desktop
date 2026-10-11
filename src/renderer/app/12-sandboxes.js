@@ -94,8 +94,10 @@ async function loadSandboxConfig() {
 }
 
 // What shows sandbox data draws it again: the Settings tab, the composer's
-// button, and the folder menu when it is open.
+// button, the folder menu when it is open, and the sidebar (a spec's folder
+// is named after the spec).
 function sandboxDataChanged() {
+  renderSidebar();
   if (!$('settings').hidden && settingsTab === 'sandboxes') renderSandboxesPane();
   if (!$('folderMenu').hidden) openFolderMenu();
   renderComposer();
@@ -630,7 +632,7 @@ function snapshotRow(pane, snapshot) {
   title.append(sbxPill(snapshot.manual ? 'Saved' : 'Automatic', snapshot.manual ? 'accent' : ''));
   if (snapshot.broken) title.append(sbxPill('Broken', 'failed'));
   text.append(title);
-  const parts = [`${relTime(snapshot.created_at)} ago`.replace('now ago', 'just now')];
+  const parts = [relAgo(snapshot.created_at)];
   parts.push(snapshot.pool === 'api' ? (snapshot.session_id ? sessionName(snapshot.session_id) : 'A deleted session') : 'Web chat');
   if (snapshot.sandbox_specs && snapshot.sandbox_specs.length) {
     parts.push(`image of ${snapshot.sandbox_specs.length} ${snapshot.sandbox_specs.length === 1 ? 'spec' : 'specs'}`);

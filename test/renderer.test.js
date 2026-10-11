@@ -42,6 +42,13 @@ test('dates fall into the sidebar groups', () => {
   assert.match(fmt.fmtStamp(daysAgo(0)), /^Today /);
   assert.equal(fmt.fmtStamp('not a date'), '');
   assert.equal(fmt.relTime(new Date().toISOString()), 'now');
+  // Recent: how long ago. Older: the date, never "Sep 16 ago".
+  const ago = (ms) => new Date(Date.now() - ms).toISOString();
+  assert.equal(fmt.relAgo(ago(0)), 'just now');
+  assert.equal(fmt.relAgo(ago(5 * 60000 + 1000)), '5m ago');
+  assert.equal(fmt.relAgo(ago(3 * 86400000 + 3600000)), '3d ago');
+  assert.doesNotMatch(fmt.relAgo(ago(20 * 86400000)), /ago/);
+  assert.match(fmt.relAgo('2024-06-29T10:00:00Z'), /2024/);
 });
 
 test('each tool call has a verb and its subject', () => {

@@ -51,6 +51,17 @@
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }
 
+  // "just now", "5m ago", "3d ago"; past a week the date itself ("Sep 16", "Jun 29, 2025"),
+  // never "Sep 16 ago".
+  function relAgo(iso) {
+    const rel = relTime(iso);
+    if (rel === 'now') return 'just now';
+    if (/^\d+[mhd]$/.test(rel)) return `${rel} ago`;
+    const date = new Date(iso);
+    if (date.getFullYear() === new Date().getFullYear()) return rel;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
   function startOfDay(date) {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
@@ -85,7 +96,7 @@
 
   const api = {
     fmtNum, baseName, firstLine, lineCount, fmtCompact, fmtTokens, fmtDuration,
-    relTime, startOfDay, groupOf, fmtStamp, clipText,
+    relTime, relAgo, startOfDay, groupOf, fmtStamp, clipText,
   };
   root.CF_FORMAT = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
