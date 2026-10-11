@@ -222,6 +222,7 @@ function showSettingsTab(tab) {
   if (tab === 'mcp') renderMcpPane();
   if (tab === 'keys') renderKeysPane();
   if (tab === 'billing') renderBillingPane();
+  if (tab === 'sandboxes') renderSandboxesPane(true);
 }
 
 // A pane's last message is kept on the pane, so it survives the pane's redraw.

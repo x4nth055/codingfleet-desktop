@@ -102,6 +102,7 @@
         <button data-tab="account" data-icon="user" class="active">Account</button>
         <button data-tab="privacy" data-icon="lock">Data privacy</button>
         <button data-tab="preferences" data-icon="sliders">Preferences</button>
+        <button data-tab="sandboxes" data-icon="box">Cloud sandboxes</button>
         <button data-tab="mcp" data-icon="plug">MCP integrations</button>
         <button data-tab="keys" data-icon="key">Your API keys</button>
         <button data-tab="billing" data-icon="card">Billing</button>
@@ -135,6 +136,7 @@
       </div>
       <div class="settings-pane" data-pane="privacy" id="privacyPane" hidden></div>
       <div class="settings-pane" data-pane="preferences" id="prefsPane" hidden></div>
+      <div class="settings-pane" data-pane="sandboxes" id="sandboxesPane" hidden></div>
       <div class="settings-pane" data-pane="mcp" id="mcpPane" hidden></div>
       <div class="settings-pane" data-pane="keys" id="keysPane" hidden></div>
       <div class="settings-pane" data-pane="billing" id="billingPane" hidden></div>
@@ -190,6 +192,7 @@
 <script src="lib/pool-cap.js"></script>
 <script src="lib/mention.js"></script>
 <script src="lib/session-tools.js"></script>
+<script src="lib/sandbox-specs.js"></script>
 <script src="app/01-base.js"></script>
 <script src="app/02-state.js"></script>
 <script src="app/03-sidebar.js"></script>
@@ -204,6 +207,7 @@
 <script src="app/12-mcp.js"></script>
 <script src="app/12-github.js"></script>
 <script src="app/12-keys.js"></script>
+<script src="app/12-sandboxes.js"></script>
 <script src="app/12-find.js"></script>
 <script src="app/12-mention.js"></script>
 <script src="app/13-boot.js"></script>

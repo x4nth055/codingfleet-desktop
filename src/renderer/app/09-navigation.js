@@ -372,24 +372,18 @@ function openFolderMenu() {
     list.append(el('div', 'menu-group', 'This session'));
     list.append(option(
       session.executor === 'client' ? 'folder' : 'sparkle',
-      session.executor === 'client' ? (cwd ? baseName(cwd) : 'Another computer') : 'Cloud sandbox',
+      session.executor === 'client' ? (cwd ? baseName(cwd) : 'Another computer') : cloudButtonLabel(session),
       session.executor === 'client'
         ? (cwd || 'This session was started on another computer')
-        : "Tools run on CodingFleet's servers",
+        : cloudButtonTitle(session),
       true,
       () => { if (cwd) cf.openFolder(cwd); },
     ));
     list.append(el('div', 'menu-group', 'New session'));
   }
 
-  const sandbox = !session && S.draftSandbox;
-  list.append(option('sparkle', 'Cloud sandbox', "Runs on CodingFleet's servers. Nothing here is read or changed.",
-    sandbox, () => {
-      S.draftSandbox = true;
-      S.draftCwd = null;
-      if (session) newSession();
-      else renderMain();
-    }));
+  // The cloud sandbox, and the specs it can be built from (12-sandboxes.js).
+  for (const item of cloudMenuItems(session, option)) list.append(item);
   const folder = !session && !S.draftSandbox && S.draftCwd;
   list.append(option('folder', S.draftCwd && !session ? baseName(S.draftCwd) : 'A folder on this computer',
     S.draftCwd && !session ? S.draftCwd : 'CodingFleet reads, edits and runs code inside it',

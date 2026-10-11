@@ -381,10 +381,10 @@ function renderComposer() {
   const folder = $('folderButton');
   folder.replaceChildren(
     icon(sandbox ? 'sparkle' : 'folder'),
-    el('span', null, sandbox ? 'Cloud sandbox' : cwd ? baseName(cwd) : 'Choose folder'),
+    el('span', null, sandbox ? cloudButtonLabel(session) : cwd ? baseName(cwd) : 'Choose folder'),
     icon('caret', 'icon caret'),
   );
-  folder.title = sandbox ? "Tools run on CodingFleet's servers" : (cwd || 'Choose where this session runs');
+  folder.title = sandbox ? cloudButtonTitle(session) : (cwd || 'Choose where this session runs');
 
   const modelButton = $('modelButton');
   modelButton.replaceChildren(...modelButtonParts(S.model));
@@ -969,7 +969,20 @@ async function sendMessage() {
       // No folder means a cloud sandbox: the tools run on CodingFleet instead.
       const cwd = S.draftSandbox ? null : (S.draftCwd || (await pickFolder()));
       if (!cwd && !S.draftSandbox) return;
-      const session = await call(cf.createSession, { cwd, model: S.model, label: text });
+      // The spec its sandbox is built from, when one is chosen (12-sandboxes.js).
+      const sandboxSpec = cwd ? null : chosenSpecId();
+      if (sandboxSpec && !(await specReadyToSend(sandboxSpec))) return;
+      let session;
+      try {
+        session = await call(cf.createSession, { cwd, model: S.model, label: text, sandboxSpec });
+      } catch (err) {
+        if (err.code === 'spec_not_found') {
+          specVanished();
+          err.message = 'The sandbox spec you chose no longer exists. Choose another from the folder button, '
+            + 'or send again to use the standard image.';
+        }
+        throw err;
+      }
       S.init.state.sessions[session.id] = { cwd: cwd || null, label: text.slice(0, 80) };
       S.sessions.unshift(session);
       S.transcripts.set(session.id, []);

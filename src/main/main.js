@@ -968,6 +968,11 @@ function describePath(file, cwd) {
 }
 
 const sessionIdOf = (value) => (typeof value === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(value) ? value : null);
+// A spec, sandbox or snapshot id from the window, or an error: it goes into a URL path.
+const idOf = (value) => {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(value)) throw new Error('Unknown id.');
+  return value;
+};
 
 // Images read back from the server, newest last, so a preview and then the
 // full view of the same image download it once.
@@ -1360,6 +1365,30 @@ function registerIpc() {
   handle('byok:list', () => api.byokKeys());
   handle('byok:save', ({ provider, apiKey } = {}) => api.saveByokKey(String(provider || ''), String(apiKey || '')));
   handle('byok:delete', (provider) => api.deleteByokKey(String(provider || '')));
+
+  // Cloud sandboxes. Only the fields the server takes go on: the window's
+  // object is passed through a list, not as it came.
+  const SPEC_FIELDS = ['name', 'description', 'image_source', 'snapshot', 'registry_image', 'dockerfile',
+    'install_essentials', 'env_vars'];
+  const CONFIG_FIELDS = ['env_vars', 'always_fresh', 'snapshot_window_hours', 'block_network', 'default_spec'];
+  const pick = (body, keys) => Object.fromEntries(
+    keys.filter((key) => body && typeof body === 'object' && key in body).map((key) => [key, body[key]]));
+  handle('sandbox:specs', () => api.sandboxSpecs());
+  handle('sandbox:specOptions', () => api.sandboxSpecOptions());
+  handle('sandbox:spec', (specId) => api.sandboxSpec(idOf(specId)));
+  handle('sandbox:createSpec', (body) => api.createSandboxSpec(pick(body, SPEC_FIELDS)));
+  handle('sandbox:updateSpec', ({ id, body } = {}) => api.updateSandboxSpec(idOf(id), pick(body, SPEC_FIELDS)));
+  handle('sandbox:deleteSpec', (specId) => api.deleteSandboxSpec(idOf(specId)));
+  handle('sandbox:validateSpec', (body) => api.validateSandboxSpec(pick(body, SPEC_FIELDS)));
+  handle('sandbox:buildSpec', (specId) => api.buildSandboxSpec(idOf(specId)));
+  handle('sandbox:config', () => api.sandboxConfig());
+  handle('sandbox:updateConfig', (body) => api.updateSandboxConfig(pick(body, CONFIG_FIELDS)));
+  handle('sandbox:list', (refresh) => api.sandboxes(refresh === true));
+  handle('sandbox:stop', (sandboxId) => api.stopSandboxById(idOf(sandboxId)));
+  handle('sandbox:snapshot', ({ id, body } = {}) => api.snapshotSandbox(idOf(id), pick(body, ['name', 'description'])));
+  handle('sandbox:snapshots', () => api.snapshots());
+  handle('sandbox:updateSnapshot', ({ id, body } = {}) => api.updateSnapshot(idOf(id), pick(body, ['name', 'description'])));
+  handle('sandbox:deleteSnapshot', (snapshotId) => api.deleteSnapshot(idOf(snapshotId)));
   // A voice recording from the window's microphone, to text.
   handle('audio:transcribe', ({ data, type } = {}) => {
     if (!(data instanceof Uint8Array) || !data.length) throw new Error('Nothing was recorded.');
@@ -1418,6 +1447,8 @@ function registerIpc() {
     for (const key of ['model', 'permissionMode', 'lastCwd', 'notifications', 'keepAwake', 'autoUpdate']) {
       if (patch && key in patch) state[key] = patch[key];
     }
+    // The sandbox spec new cloud sessions use: an id, or null for the account's default.
+    if (patch && 'sandboxSpec' in patch) state.sandboxSpec = sessionIdOf(patch.sandboxSpec);
     // A staged development start must not change what the next real start opens.
     if (patch && 'lastSession' in patch && !STAGED) state.lastSession = sessionIdOf(patch.lastSession);
     if (patch && 'computerUse' in patch) {
@@ -1533,7 +1564,7 @@ function registerIpc() {
 
   // No folder means a cloud sandbox: the tools run on CodingFleet's servers
   // instead of this computer, and nothing here is read or changed.
-  handle('session:create', async ({ cwd, model, label }) => {
+  handle('session:create', async ({ cwd, model, label, sandboxSpec }) => {
     if (cwd && !fs.existsSync(cwd)) throw new Error('Choose a folder that exists.');
     const session = await api.createSession({
       executor: cwd ? 'client' : 'sandbox',
@@ -1542,6 +1573,9 @@ function registerIpc() {
       // parallel_agents: the agent may hand tasks to sub-agents. In a folder
       // session their coding tools run here too, through the same approvals.
       capabilities: { code_execution: true, web_access: true, parallel_agents: true, ...optionalCapabilities() },
+      // How a cloud session's sandbox is built. Sent only when chosen: a
+      // server without sandbox specs refuses the field.
+      sandbox_spec: !cwd && sandboxSpec ? idOf(sandboxSpec) : undefined,
     });
     state.sessions[session.id] = {
       cwd: cwd || null, label: String(label || '').slice(0, 80), createdAt: Date.now(),

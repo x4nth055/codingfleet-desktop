@@ -415,3 +415,68 @@
 .bill-subs { display: grid; gap: 8px; padding-right: 4px; }
 .bill-subs .set-row { margin: 0; }
 .bill-table.bill-scroll { max-height: 260px; }
+
+/* ── Cloud sandboxes (12-sandboxes.js) ───────────────────── */
+.pane-section.sbx-section { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 26px; }
+.sbx-section-actions { display: inline-flex; gap: 6px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.sbx-note { margin: -2px 0 8px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.sbx-note.warn { padding: 8px 12px; border-radius: 8px; color: var(--text);
+  background: color-mix(in srgb, var(--amber) 8%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent); }
+.sbx-empty { padding: 12px 14px; margin-bottom: 8px; border: 1px dashed var(--line-2); border-radius: 10px;
+  font-size: 12.5px; line-height: 1.5; color: var(--faint); }
+.sbx-row { padding: 11px 12px 11px 14px; }
+.sbx-head { display: flex; align-items: flex-start; gap: 12px; width: 100%; min-width: 0; }
+.set-row.stack .sbx-head .set-text { flex: 1 1 auto; min-width: 0; }
+.sbx-title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sbx-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.sbx-mono-line { overflow-wrap: anywhere; }
+.sbx-pill { flex: none; padding: 1px 7px; border-radius: 99px; font-size: 10.5px; font-weight: 600;
+  color: var(--muted); background: var(--well-2); border: 1px solid var(--line); }
+.sbx-pill.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.sbx-pill.built { color: var(--green-ink); border-color: color-mix(in srgb, var(--green) 35%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, transparent); }
+.sbx-pill.building { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent);
+  background: color-mix(in srgb, var(--amber) 10%, transparent); }
+.sbx-pill.failed { color: var(--red-ink); border-color: color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent); }
+.sbx-building { color: var(--amber); }
+.sbx-actions { display: flex; align-items: center; flex: none; gap: 6px; }
+.sbx-actions .icon-button { width: 28px; height: 28px; }
+.sbx-link { padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; }
+.sbx-link:hover { text-decoration: underline; }
+.sbx-error { width: 100%; max-height: 260px; overflow: auto; margin: 0; padding: 10px 12px; border-radius: 8px;
+  background: var(--well); border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
+  font: 11.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+.sbx-select { min-width: 200px; max-width: 280px; }
+.sbx-env-list { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.sbx-env-saved { display: flex; align-items: center; gap: 10px; padding: 4px 4px 4px 10px; border-radius: 8px;
+  background: var(--well); border: 1px solid var(--line); }
+.sbx-env-saved code { font: 12px var(--mono); }
+.sbx-env-hidden { flex: 1; font-size: 11.5px; color: var(--faint); }
+.sbx-env-add, .sbx-env-edit { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; gap: 6px; align-items: center; }
+.sbx-env-edit.removed input { text-decoration: line-through; opacity: .55; }
+.sbx-input { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2);
+  background: var(--well); color: var(--text); font: 13px var(--font); outline: 0; }
+textarea.sbx-input { height: auto; padding: 8px 10px; resize: vertical; line-height: 1.45; }
+.sbx-input.mono { font: 12.5px var(--mono); }
+.sbx-input:focus { border-color: var(--accent); }
+.sbx-input:disabled { opacity: .7; }
+
+.sbx-editor { max-width: 640px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; padding-bottom: 14px; }
+.sbx-editor-body { flex: 1; min-height: 0; overflow-y: auto; margin: 12px -6px 0 0; padding-right: 6px; }
+.sbx-editor .modal-actions .modal-status { margin-top: 0; flex: 1 1 auto; min-width: 0; }
+.sbx-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.sbx-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.sbx-hint { font-size: 11.5px; line-height: 1.45; color: var(--faint); }
+.sbx-seg { align-self: flex-start; }
+.sbx-dockerfile { min-height: 180px; }
+.sbx-check { margin: -6px 0 12px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.sbx-check.good { color: var(--green-ink); }
+.sbx-check.bad { color: var(--red-ink); white-space: pre-wrap; }
+.sbx-env-title { display: block; margin-top: 4px; }
+.sbx-editor .sbx-env-list { margin-top: 8px; }
+.sbx-editor .set-row { margin-bottom: 12px; }
+.sbx-fields .sbx-label { display: block; margin: 0 0 4px; }
+.sbx-fields .sbx-input { margin-bottom: 12px; }
+.menu-item.sbx-menu-failed .mi-sub { color: var(--red-ink); }

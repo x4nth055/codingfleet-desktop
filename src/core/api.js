@@ -290,6 +290,25 @@ module.exports = {
   cancelRun: (runId) => request('POST', `/runs/${id(runId)}/cancel`, {}),
   steerRun: (runId, message, files) =>
     request('POST', `/runs/${id(runId)}/steer`, files && files.length ? { message, files } : { message }),
+  // Cloud sandboxes: specs (how a session's sandbox is built), the account's
+  // sandbox settings, the sandboxes running now, and snapshots.
+  sandboxSpecs: () => request('GET', '/sandbox_specs'),
+  sandboxSpecOptions: () => request('GET', '/sandbox_specs/options'),
+  sandboxSpec: (specId) => request('GET', `/sandbox_specs/${id(specId)}`),
+  createSandboxSpec: (body) => request('POST', '/sandbox_specs', body),
+  updateSandboxSpec: (specId, body) => request('PATCH', `/sandbox_specs/${id(specId)}`, body),
+  deleteSandboxSpec: (specId) => request('DELETE', `/sandbox_specs/${id(specId)}`),
+  validateSandboxSpec: (body) => request('POST', '/sandbox_specs/validate', body),
+  buildSandboxSpec: (specId) => request('POST', `/sandbox_specs/${id(specId)}/build`),
+  sandboxConfig: () => request('GET', '/sandbox_config'),
+  updateSandboxConfig: (body) => request('PATCH', '/sandbox_config', body),
+  sandboxes: (refresh) => request('GET', `/sandboxes${refresh ? '?refresh=1' : ''}`),
+  stopSandboxById: (sandboxId) => request('DELETE', `/sandboxes/${id(sandboxId)}`),
+  // Snapshotting takes a while on a large disk.
+  snapshotSandbox: (sandboxId, body) => request('POST', `/sandboxes/${id(sandboxId)}/snapshot`, body || {}, undefined, 600000),
+  snapshots: () => request('GET', '/snapshots?limit=200'),
+  updateSnapshot: (snapshotId, body) => request('PATCH', `/snapshots/${id(snapshotId)}`, body),
+  deleteSnapshot: (snapshotId) => request('DELETE', `/snapshots/${id(snapshotId)}`),
   uploadFile: upload,
   deleteFile: (fileId) => request('DELETE', `/files/${id(fileId)}`),
   fileContent: (fileId) => download(`/files/${id(fileId)}/content`),
