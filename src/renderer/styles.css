@@ -947,6 +947,9 @@ body.panel-resizing * { cursor: ew-resize !important; }
 .agent-dot.done { background: var(--green); }
 .agent-dot.failed, .agent-dot.cancelled { background: var(--red); }
 .ap-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 14px 30px; display: flex; flex-direction: column; gap: 10px; }
+/* The body scrolls; its items keep their height. A tool group (overflow hidden)
+   would otherwise shrink to fit and clip what is below, an approval bar too. */
+.ap-body > * { flex-shrink: 0; }
 .ap-card { border: 1px solid var(--line); background: var(--panel); border-radius: 11px; padding: 11px 12px; display: grid; gap: 6px; }
 .ap-role { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; }
 .ap-role .icon { width: 16px; height: 16px; color: var(--accent); }

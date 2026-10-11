@@ -18,10 +18,14 @@ const SUMMARY = {
 
 // Calls the window asked to move to the background (test/move.cjs).
 const moved = [];
+// Answers the window gave to approvals (test/subagent-approval.cjs).
+const decided = [];
 
 contextBridge.exposeInMainWorld('cf', {
   moveToBackground: async ({ callId }) => { moved.push(callId); return { ok: true, data: true }; },
   movedCalls: async () => [...moved],
+  decide: async ({ callId, decision }) => { decided.push({ callId, decision }); return { ok: true, data: true }; },
+  decisions: async () => [...decided],
   init: async () => ({ ok: true, data: {
     platform: 'win32', version: 'test',
     settings: { hasKey: false, apiBase: 'https://codingfleet.com/v1' },

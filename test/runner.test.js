@@ -291,3 +291,53 @@ test('aborting a reconnect backoff releases the run promptly', async () => {
     assert.equal(run.controller.signal.aborted, true);
   } finally { stub.restore(); }
 });
+
+// A sub-agent's call to this computer is asked about like the main agent's:
+// the person's answer decides whether it runs, and either way its result goes
+// back under the sub-agent's call id.
+test('a sub-agent call on this computer waits for the person and follows the answer', async () => {
+  let bothPosted;
+  const posted = new Promise((resolve) => { bothPosted = resolve; });
+  const stub = stubbedApi((async function* () {
+    yield { event: 'run.started', data: { run_id: 'R' } };
+    yield { event: 'subagent.started', data: { agent_id: 'A', role: 'Worker', call_id: 'SPAWN' } };
+    yield { event: 'tool.call', data: { id: 'OK', agent_id: 'A', name: 'local', executor: 'client', arguments: { n: 1 } } };
+    yield { event: 'tool.call', data: { id: 'NO', agent_id: 'A', name: 'local', executor: 'client', arguments: { n: 2 } } };
+    // The server holds the run open until the sub-agent's results come back.
+    await posted;
+    yield { event: 'run.ended', data: { reason: 'completed' } };
+  })());
+  const asked = [];
+  const ran = [];
+  const seen = [];
+  const answers = { OK: 'allow', NO: 'deny' };
+  try {
+    const realPost = api.toolResult;
+    api.toolResult = async (...args) => {
+      await realPost(...args);
+      if (stub.posted.length === 2) bothPosted();
+    };
+    const run = new Run({
+      sessionId: 'S',
+      // The person answers a moment later, as from the approval bar.
+      approve: (call) => {
+        asked.push({ id: call.id, agent: call.agent_id });
+        return new Promise((resolve) => setTimeout(() => resolve(answers[call.id]), 10));
+      },
+      onEvent: (event, data) => seen.push([event, data.id]),
+      clientHandlers: new Map([['local', async (args) => { ran.push(args.n); return { output: `ran ${args.n}`, is_error: false }; }]]),
+    });
+    await run.start({ message: 'delegate it' });
+  } finally { stub.restore(); }
+  assert.deepEqual(asked, [{ id: 'OK', agent: 'A' }, { id: 'NO', agent: 'A' }]);
+  assert.deepEqual(ran, [1], 'only the allowed call ran');
+  const byCall = Object.fromEntries(stub.posted.map((p) => [p.callId, p]));
+  assert.deepEqual(byCall.OK, { runId: 'R', callId: 'OK', output: 'ran 1', isError: false });
+  assert.equal(byCall.NO.isError, true);
+  assert.match(byCall.NO.output, /declined/);
+  // The window hears of the call before it is asked about it, so the bar has a row to sit on.
+  const at = (event, id) => seen.findIndex(([e, i]) => e === event && i === id);
+  assert.ok(at('tool.call', 'NO') >= 0 && at('tool.call', 'NO') < at('client.tool_denied', 'NO'));
+  assert.ok(at('client.tool_running', 'OK') > at('tool.call', 'OK'));
+  assert.equal(at('client.tool_running', 'NO'), -1);
+});

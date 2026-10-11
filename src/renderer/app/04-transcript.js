@@ -160,10 +160,13 @@ function addItem(sessionId, item) {
 
 function refreshItem(sessionId, item) {
   if (sessionId !== S.current || !item || !item.node || !item.node.isConnected) return;
-  const stick = nearBottom();
+  // A sub-agent's step is drawn in the panel, which scrolls on its own.
+  const panelBody = item.agentId ? item.node.closest('.ap-body') : null;
+  const stick = panelBody ? panelAtBottom(panelBody) : nearBottom();
   const old = item.node;
   old.replaceWith(renderItem(item));
-  if (stick) scrollToBottom();
+  if (stick && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+  else if (stick) scrollToBottom();
 }
 
 function stamp(at, side) {
@@ -580,6 +583,9 @@ function openPanel(agentId) {
   if (agent && !agent.loaded) loadAgent(agent);
 }
 
+// Following the end of the panel: a redraw keeps it there.
+const panelAtBottom = (body) => body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+
 function closePanel() {
   S.panel = { open: false, agentId: S.panel.agentId };
   renderPanel();
@@ -646,7 +652,7 @@ function renderPanel() {
   const agent = agents.find((a) => a.id === S.panel.agentId);
 
   const keepScroll = panel.querySelector('.ap-body');
-  const wasAtBottom = keepScroll ? keepScroll.scrollHeight - keepScroll.scrollTop - keepScroll.clientHeight < 80 : true;
+  const wasAtBottom = keepScroll ? panelAtBottom(keepScroll) : true;
   const oldTop = keepScroll ? keepScroll.scrollTop : 0;
   const sameAgent = panel.dataset.agent === agent.id;
 
