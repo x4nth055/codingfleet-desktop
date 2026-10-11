@@ -33,16 +33,26 @@ function renderSidebar() {
     return;
   }
 
+  // A spec's folder needs the spec's name: the specs are loaded once, and the
+  // sidebar is drawn again when they come.
+  if (!sbx.specs && !sbx.specsLoading && !sbx.unsupported && !sbx.specsError
+      && S.sessions.some((s) => s.executor !== 'client' && s.sandbox_spec)) loadSpecs();
+
   // Pinned sessions first, whatever their folder. The rest by folder, as in
   // Claude Code: the folder is what a person remembers, not the day they started.
+  // Keyed apart from the name, so a spec and a local folder of the same name
+  // stay two folders.
   const groups = new Map();
+  const names = new Map();
   const pinned = sorted.filter((s) => s.pinned);
   if (pinned.length) groups.set('Pinned', pinned);
   for (const session of sorted) {
     if (session.pinned) continue;
-    const name = sessionGroup(session);
-    if (!groups.has(name)) groups.set(name, []);
-    groups.get(name).push(session);
+    const spec = sessionSpec(session);
+    const key = spec ? `spec:${spec.id}` : sessionGroup(session);
+    names.set(key, sessionGroup(session));
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(session);
   }
 
   // A folder sits where its most recently used session sits, so the one you
@@ -55,34 +65,38 @@ function renderSidebar() {
     return newest(sb) - newest(sa);
   });
 
-  for (const [name, sessions] of ordered) {
-    const collapsed = !searching && S.collapsed.has(name);
+  for (const [key, sessions] of ordered) {
+    const name = names.get(key) || key;
+    const collapsed = !searching && S.collapsed.has(key);
     // A div, not a button: the header carries a button of its own, and a
     // button inside a button is not something a browser will render.
-    const head = el('div', `group-head${collapsed ? ' collapsed' : ''}${name === 'Pinned' ? ' pinned' : ''}`);
-    const cwd = name === 'Pinned' ? null : local(sessions[0].id).cwd;
-    head.title = cwd || name;
+    const head = el('div', `group-head${collapsed ? ' collapsed' : ''}${key === 'Pinned' ? ' pinned' : ''}`);
+    const spec = key === 'Pinned' ? null : sessionSpec(sessions[0]);
+    const cwd = key === 'Pinned' || spec ? null : local(sessions[0].id).cwd;
+    head.title = cwd || (spec ? `Cloud sandbox built from "${spec.name}" (${spec.summary})` : name);
     head.tabIndex = 0;
     head.setAttribute('role', 'button');
     head.append(chevron());
-    if (name === 'Pinned') head.append(icon('pin', 'icon group-icon'));
+    if (key === 'Pinned') head.append(icon('pin', 'icon group-icon'));
+    if (spec) head.append(icon('box', 'icon group-icon'));
     head.append(el('span', 'group-name', name), el('span', 'group-count', String(sessions.length)));
     // The folder is already known, so a new session in it is one click: the
-    // same thing as New session, with the folder picked for you.
-    if (cwd) {
+    // same thing as New session, with the folder (or the spec) picked for you.
+    if (cwd || spec) {
       const add = el('button', 'group-add');
-      add.title = `New session in ${cwd}`;
+      add.title = cwd ? `New session in ${cwd}` : `New cloud session on "${spec.name}"`;
       add.setAttribute('aria-label', `New session in ${name}`);
       add.innerHTML = ICON.plus;
       add.addEventListener('click', (event) => {
         event.stopPropagation();
-        newSessionIn(cwd);
+        if (cwd) newSessionIn(cwd);
+        else newSessionOnSpec(spec.id);
       });
       head.append(add);
     }
     const toggle = () => {
-      if (collapsed) S.collapsed.delete(name);
-      else S.collapsed.add(name);
+      if (collapsed) S.collapsed.delete(key);
+      else S.collapsed.add(key);
       renderSidebar();
     };
     head.addEventListener('click', toggle);

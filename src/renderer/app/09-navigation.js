@@ -36,6 +36,14 @@ function newSessionIn(cwd) {
   newSession();
 }
 
+// A new cloud session on a spec, from the spec's folder in the sidebar.
+function newSessionOnSpec(specId) {
+  setDraftSpec(specId);
+  S.draftSandbox = true;
+  S.draftCwd = null;
+  newSession();
+}
+
 function newSession() {
   closeMenus();
   hideBanner();

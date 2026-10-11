@@ -51,8 +51,17 @@ function transcriptOf(id) {
   return S.transcripts.get(id);
 }
 
-// Which sidebar folder a session belongs to.
+// A cloud session built from a spec, while the spec is known here.
+function sessionSpec(session) {
+  return session.executor !== 'client' && session.sandbox_spec ? specById(session.sandbox_spec) : null;
+}
+
+// The sidebar folder a session is in. A cloud session built from a spec has a
+// folder of its own, named after the spec: like a local folder, it says what
+// the session works on.
 function sessionGroup(session) {
+  const spec = sessionSpec(session);
+  if (spec) return spec.name;
   if (session.executor !== 'client') return 'Cloud sandbox';
   const cwd = local(session.id).cwd;
   return cwd ? baseName(cwd) : 'Another computer';
