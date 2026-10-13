@@ -205,7 +205,7 @@ function onRunEvent({ sessionId, event, data }) {
       }
       break;
     case 'client.error':
-      addItem(sessionId, { type: 'error', text: data.message });
+      addItem(sessionId, { type: 'error', text: data.message, link: data.link || null });
       break;
     case 'client.finished':
       finishRun(sessionId);
@@ -242,7 +242,13 @@ function finishRun(sessionId) {
   }
 
   const ended = run && run.ended;
-  if (ended && ended.reason === 'error') addItem(sessionId, { type: 'error', text: ended.error || 'The run failed.' });
+  // A turn that stopped itself (a rate limit, a lost model stream) already ends
+  // its answer with the reason, which the server also sends as the error.
+  const saidInAnswer = ended && ended.error && transcriptOf(sessionId).slice(run.turnStart || 0)
+    .some((item) => item.type === 'assistant' && String(item.text || '').includes(ended.error));
+  if (ended && ended.reason === 'error' && !saidInAnswer) {
+    addItem(sessionId, { type: 'error', text: ended.error || 'The run failed.' });
+  }
   if (run && run.files && run.files.length) {
     addItem(sessionId, {
       type: 'files', sessionId, files: run.files, open: new Set(), runId: run.runId || run.filesRunId || null,

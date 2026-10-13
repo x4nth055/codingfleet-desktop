@@ -227,6 +227,12 @@ function renderItem(item) {
     case 'error':
       node = el('div', 'error-card');
       node.append(el('span', null, item.text));
+      if (errorLinkUrl(item.link)) {
+        // The page that fixes the refusal (pricing, account settings), in the browser.
+        const button = el('button', 'btn small primary', item.link.label || 'Open');
+        button.addEventListener('click', () => window.open(errorLinkUrl(item.link)));
+        node.append(button);
+      }
       break;
     case 'note':
       node = el('div', 'note-card');
@@ -801,4 +807,13 @@ function onAgentEvent(sessionId, event, data) {
       return;
   }
   agentChanged(sessionId, agentId);
+}
+
+// Only a page on the server this app talks to: the link comes in an API error.
+function errorLinkUrl(link) {
+  if (!link || typeof link.url !== 'string') return null;
+  try {
+    const url = new URL(link.url);
+    return url.origin === originOf(S.settings.apiBase) && /^https?:$/.test(url.protocol) ? url.href : null;
+  } catch { return null; }
 }

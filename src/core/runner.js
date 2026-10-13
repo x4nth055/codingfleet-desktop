@@ -107,7 +107,11 @@ class Run {
       }
     } catch (err) {
       if (!this.ended && err.name !== 'AbortError') {
-        this.emit('client.error', { message: err.message, status: err.status || null, code: err.code || null });
+        // link: the page that fixes a refusal (out of credits, a higher plan), {url, label}.
+        this.emit('client.error', {
+          message: err.message, status: err.status || null, code: err.code || null,
+          link: (err.details && err.details.link) || null,
+        });
       }
     }
     // The stream is over: a call still waiting for approval can no longer be
