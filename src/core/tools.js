@@ -61,7 +61,8 @@ function isInside(cwd, target) {
 function killTree(child) {
   if (!child.pid) return;
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+    // An 'error' with no listener would throw in the process that owns the run.
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }).on('error', () => {});
   } else {
     try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
   }
@@ -108,9 +109,13 @@ function runShell(command, { cwd, timeout, signal, callId, adopt } = {}) {
       return;
     }
     child.stdin.end();
+    // Decoded by the stream, not chunk by chunk: a character split across two
+    // chunks would otherwise reach the model as two replacement characters.
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     // Kept a little past the cap, so clip() can still show the tail.
-    const onOut = (d) => { if (stdout.length < MAX_OUTPUT_CHARS * 2) stdout += d.toString('utf8'); };
-    const onErr = (d) => { if (stderr.length < MAX_OUTPUT_CHARS * 2) stderr += d.toString('utf8'); };
+    const onOut = (d) => { if (stdout.length < MAX_OUTPUT_CHARS * 2) stdout += d; };
+    const onErr = (d) => { if (stderr.length < MAX_OUTPUT_CHARS * 2) stderr += d; };
     child.stdout.on('data', onOut);
     child.stderr.on('data', onErr);
 
@@ -314,7 +319,10 @@ function approvalReason(name, args, cwd) {
   // not, so it always waits for the user.
   if (name === 'take_screenshot') return 'takes a picture of your screen';
   if (name === 'fs_read' || name === 'fs_glob') {
-    return isInside(cwd, resolvePath(cwd, args.path)) && !path.isAbsolute(String(args.pat || ''))
+    // A pattern can leave the folder by itself: "/etc/*", or "../*", which the
+    // glob follows like a path.
+    const pat = String(args.pat || '').replace(/\\/g, '/');
+    return isInside(cwd, resolvePath(cwd, args.path)) && !path.isAbsolute(pat) && !/(^|\/)\.\.(\/|$)/.test(pat)
       ? null
       : 'reads outside the project folder';
   }

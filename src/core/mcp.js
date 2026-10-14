@@ -50,28 +50,38 @@ class McpServer {
     const shell = needsShell(this.command);
     const args = shell ? this.args.map(quoteForCmd) : this.args;
     const command = shell ? quoteForCmd(this.command) : this.command;
-    this.child = spawn(command, args, {
+    // A restart begins clean: half a line from the old process is not the new one's.
+    this.buffer = '';
+    this.stderr = '';
+    const child = spawn(command, args, {
       cwd: this.cwd,
       env: { ...process.env, ...this.env },
       shell,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    this.child.stdout.setEncoding('utf8');
-    this.child.stderr.setEncoding('utf8');
-    this.child.stdout.on('data', (chunk) => this.onData(chunk));
-    this.child.stderr.on('data', (chunk) => {
+    this.child = child;
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    // Writing to a server that just died fails on the pipe (EPIPE). Without a
+    // listener that error would throw in the app; the exit below reports it.
+    child.stdin.on('error', () => {});
+    child.stdout.on('data', (chunk) => this.onData(chunk));
+    child.stderr.on('data', (chunk) => {
       this.stderr = (this.stderr + chunk).slice(-STDERR_KEEP);
     });
     const exited = new Promise((_, reject) => {
-      this.child.once('error', (err) => reject(new Error(`${this.name} could not start: ${err.message}`)));
-      this.child.once('exit', (code) => {
+      child.once('error', (err) => reject(new Error(`${this.name} could not start: ${err.message}`)));
+      child.once('exit', (code) => {
         const detail = this.stderr.trim().split('\n').slice(-3).join(' ').slice(0, 300);
         const err = new Error(`${this.name} stopped (exit code ${code})${detail ? `: ${detail}` : ''}`);
+        reject(err);
+        // A server stopped and started again: this exit is the old process's,
+        // and must not cut off the new one or fail its requests.
+        if (this.child !== child) return;
         this.failAll(err);
         this.child = null;
         this.ready = null;
-        reject(err);
       });
     });
     exited.catch(() => {});

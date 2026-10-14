@@ -341,3 +341,10 @@ test('a sub-agent call on this computer waits for the person and follows the ans
   assert.ok(at('client.tool_running', 'OK') > at('tool.call', 'OK'));
   assert.equal(at('client.tool_running', 'NO'), -1);
 });
+
+test('a binary file the run wrote is handed to undo, which then says it cannot put it back', () => {
+  const run = new Run({ sessionId: 'session', cwd: '/work', approve: () => 'allow', onEvent: () => {} });
+  run.changes.set('/work/logo.png', { before: { exists: true, text: null }, after: { exists: true, text: null } });
+  run.changes.set('/work/same.txt', { before: { exists: true, text: 'a' }, after: { exists: true, text: 'a' } });
+  assert.deepEqual(run.restorePoints().map((entry) => entry.path), ['/work/logo.png']);
+});

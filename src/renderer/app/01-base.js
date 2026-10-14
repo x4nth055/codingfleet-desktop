@@ -94,7 +94,7 @@ async function call(fn, arg) {
 // Formatting lives in lib/format.js, where it is tested.
 const {
   fmtNum, baseName, firstLine, lineCount, fmtCompact, fmtTokens, fmtDuration,
-  relTime, relAgo, startOfDay, groupOf, fmtStamp, clipText,
+  relTime, relAgo, startOfDay, groupOf, fmtStamp, clipText, runErrorText,
 } = CF_FORMAT;
 const nowIso = () => new Date().toISOString();
 

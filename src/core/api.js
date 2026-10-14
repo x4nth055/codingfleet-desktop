@@ -127,6 +127,8 @@ async function* readEvents(body, onActivity = () => {}) {
       if (frame) yield frame;
     }
   }
+  // Bytes the decoder held back for a character that never completed.
+  buffer = (buffer + decoder.decode()).replace(/\r\n/g, '\n');
   const tail = parseFrame(buffer);
   if (tail) yield tail;
 }

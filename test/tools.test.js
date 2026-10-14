@@ -25,6 +25,19 @@ test('fs_read honours offset, limit and with_line_numbers', async () => {
   assert.equal((await run('fs_read', { path: 'f.txt', offset: 3, with_line_numbers: false }, cwd)).output, 'four');
 });
 
+test('a character split across two output chunks reaches the model whole', async () => {
+  const cwd = tmp();
+  // "é" and "€" are several bytes each; the first write ends inside "é".
+  fs.writeFileSync(path.join(cwd, 'split.js'), [
+    "const b = Buffer.from('héllo €');",
+    'process.stdout.write(b.subarray(0, 2));',
+    'setTimeout(() => process.stdout.write(b.subarray(2)), 150);',
+  ].join('\n'));
+  const node = process.execPath.replace(/\\/g, '/');
+  const result = await run('run_command', { command: `"${node}" split.js` }, cwd);
+  assert.equal(result.output.stdout, 'héllo €');
+});
+
 test('fs_read reports a missing file as an error', async () => {
   const result = await run('fs_read', { path: 'nope.txt' }, tmp());
   assert.deepEqual(result, { output: 'error: file not found', is_error: true });
@@ -121,6 +134,11 @@ test('approval: reads inside the folder run; commands, writes and outside reads 
   assert.equal(tools.approvalReason('read_background', { id: 'bg_1' }, cwd), null);
   assert.equal(tools.approvalReason('stop_background', { id: 'bg_1' }, cwd), null);
   assert.equal(tools.approvalReason('fs_glob', { pat: '/etc/*' }, cwd), 'reads outside the project folder');
+  // The glob follows "..", so a relative pattern can leave the folder too.
+  assert.equal(tools.approvalReason('fs_glob', { pat: '../*' }, cwd), 'reads outside the project folder');
+  assert.equal(tools.approvalReason('fs_glob', { pat: 'src/../../**/*.pem' }, cwd), 'reads outside the project folder');
+  assert.equal(tools.approvalReason('fs_glob', { pat: '..\\other\\*' }, cwd), 'reads outside the project folder');
+  assert.equal(tools.approvalReason('fs_glob', { pat: '**/..foo/*.js' }, cwd), null);
   assert.equal(tools.approvalReason('view_image', { source: 'out/chart.png' }, cwd), null);
   assert.equal(tools.approvalReason('view_image', { source: '../photos/me.jpg' }, cwd), 'reads outside the project folder');
   assert.equal(tools.approvalReason('run_command', { command: 'ls' }, cwd), 'runs a command');

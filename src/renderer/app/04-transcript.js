@@ -226,7 +226,9 @@ function renderItem(item) {
       break;
     case 'error':
       node = el('div', 'error-card');
-      node.append(el('span', null, item.text));
+      // A provider's raw error, made readable (lib/format.js). The app's log
+      // keeps the original.
+      node.append(el('span', null, runErrorText(item.text)));
       if (errorLinkUrl(item.link)) {
         // The page that fixes the refusal (pricing, account settings), in the browser.
         const button = el('button', 'btn small primary', item.link.label || 'Open');

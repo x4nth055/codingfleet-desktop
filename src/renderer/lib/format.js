@@ -94,9 +94,45 @@
     return t.length > max ? `${t.slice(0, max)}\n… ${t.length - max} more characters` : t;
   }
 
+  // A run that a model provider stopped can end with the provider's error as
+  // the SDK printed it: "Generation stopped: Error code: 429 - {'error': {...},
+  // 'user_id': ...}". That is a dump for a log, with ids in it and advice for
+  // another service's users. The person gets what happened and what to do,
+  // and the provider's own first sentence when it says more. Anything else is
+  // shown as it came.
+  const PROVIDER_ERROR = /^(?:[^\n]*?:\s*)?Error code:\s*(\d{3})\s*-\s*([{[][\s\S]*)$/;
+
+  function quotedField(body, name) {
+    for (const re of [new RegExp(`'${name}':\\s*'((?:[^'\\\\]|\\\\.)*)'`), new RegExp(`"${name}":\\s*"((?:[^"\\\\]|\\\\.)*)"`)]) {
+      const hit = re.exec(body);
+      if (hit && hit[1].trim()) return hit[1].replace(/\\(.)/g, '$1').trim();
+    }
+    return '';
+  }
+
+  function runErrorText(text) {
+    const raw = String(text == null ? '' : text).trim();
+    const match = PROVIDER_ERROR.exec(raw);
+    if (!match) return raw;
+    const code = Number(match[1]);
+    const body = match[2];
+    let what;
+    if (code === 429) what = 'The model is rate-limited by its provider right now. Wait a moment and send again, or pick another model.';
+    else if (code >= 500) what = "The model's provider had a problem. Send again in a moment, or pick another model.";
+    else if (code === 401 || code === 403) what = "The model's provider refused the request. Pick another model, or check your own key for it in Settings.";
+    else if (code === 413) what = 'The request was too large for this model. Start a new session, or compact this one.';
+    else what = "The model's provider returned an error.";
+    // The provider's words, when they are more than "Provider returned error":
+    // the first sentence only, before the advice meant for its own users.
+    const said = quotedField(body, 'raw') || quotedField(body, 'message');
+    const sentence = said && !/^provider returned error\.?$/i.test(said)
+      ? (said.match(/^[\s\S]*?[.!?](?=\s|$)/) || [said])[0].slice(0, 300) : '';
+    return `${what} (HTTP ${code}${sentence ? `: ${sentence}` : ''})`;
+  }
+
   const api = {
     fmtNum, baseName, firstLine, lineCount, fmtCompact, fmtTokens, fmtDuration,
-    relTime, relAgo, startOfDay, groupOf, fmtStamp, clipText,
+    relTime, relAgo, startOfDay, groupOf, fmtStamp, clipText, runErrorText,
   };
   root.CF_FORMAT = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

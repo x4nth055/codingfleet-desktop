@@ -90,6 +90,10 @@ class BackgroundJobs {
       return { output: `error: could not start ${this.shell.name}: ${err.message}`, is_error: true };
     }
     child.stdin.end();
+    // A character split across two chunks must not turn into two broken ones.
+    // (An adopted command's streams were set up the same way by runShell.)
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     const job = this.track(sessionId, command, cwd, child, '');
     const limit = Math.min(Math.floor(Number(stopAfter) || 0), MAX_STOP_AFTER_S);
     if (limit > 0) {

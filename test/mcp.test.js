@@ -75,3 +75,23 @@ test('changing a server restarts it; removing one stops it', async () => {
     mcp.stopAll();
   }
 });
+
+test('a server started again is not cut off when its old process exits', async () => {
+  const mcp = new LocalMcp();
+  mcp.configure([{ id: 'a', name: 'fake', command: process.execPath, args: [FAKE], enabled: true }]);
+  const { server } = mcp.servers.get('a');
+  try {
+    await server.start();
+    const old = server.child;
+    const gone = new Promise((resolve) => old.once('exit', resolve));
+    server.stop();
+    await server.start();
+    const fresh = server.child;
+    await gone;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(server.child, fresh);
+    assert.deepEqual(await server.call('echo', { text: 'still here' }), { output: 'echo: still here', is_error: false });
+  } finally {
+    mcp.stopAll();
+  }
+});

@@ -79,3 +79,18 @@ test('the window asks about exactly what the guard says must always be asked abo
   assert.ok(words.ALLOW_LABELS[guard.SECRETS]);
   for (const reason of guard.ALWAYS_ASK) assert.equal(words.ALLOW_LABELS[reason], undefined, reason);
 });
+
+test("a provider's raw error reads as what happened and what to do", () => {
+  const raw = "Generation stopped: Error code: 429 - {'error': {'message': 'Provider returned error', 'code': 429, "
+    + "'metadata': {'raw': 'inclusionai/ling-3.1-flash is temporarily rate-limited upstream. Please retry shortly, "
+    + "or add your own key: https://openrouter.ai/settings/integrations', 'provider_name': 'Novita'}}, 'user_id': 'user_2r60'}";
+  const shown = fmt.runErrorText(raw);
+  assert.match(shown, /^The model is rate-limited by its provider right now\./);
+  assert.match(shown, /\(HTTP 429: inclusionai\/ling-3\.1-flash is temporarily rate-limited upstream\.\)$/);
+  assert.doesNotMatch(shown, /user_2r60|openrouter|Novita/);
+  assert.equal(fmt.runErrorText('Error code: 502 - {"error": {"message": "Provider returned error"}}'),
+    "The model's provider had a problem. Send again in a moment, or pick another model. (HTTP 502)");
+  // Anything that is not such a dump is shown as it came.
+  assert.equal(fmt.runErrorText('Out of credits. Top up to continue.'), 'Out of credits. Top up to continue.');
+  assert.equal(fmt.runErrorText(null), '');
+});

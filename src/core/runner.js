@@ -279,7 +279,10 @@ class Run {
     const out = [];
     for (const [abs, { before, after }] of this.changes) {
       if (!after || !before) continue;
-      if (before.exists === after.exists && before.text === after.text) continue;
+      // Two nulls are two unread files, not two equal ones: kept, so undo says
+      // it could not put this file back instead of claiming everything is.
+      const unread = before.text === null || after.text === null;
+      if (!unread && before.exists === after.exists && before.text === after.text) continue;
       out.push({ path: abs, before, after });
     }
     return out;

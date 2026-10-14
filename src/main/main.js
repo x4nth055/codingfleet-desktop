@@ -101,9 +101,15 @@ function loadState() {
   } catch { /* first start */ }
 }
 
+// Written whole to a temporary file, then moved over the old one: a crash or a
+// power cut mid-write must not leave a half file, which the next start would
+// fail to read and replace with an empty state (every session's folder lost).
 function saveState() {
-  fs.mkdirSync(path.dirname(statePath()), { recursive: true });
-  fs.writeFileSync(statePath(), JSON.stringify(state, null, 2));
+  const file = statePath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(state, null, 2));
+  fs.renameSync(temporary, file);
 }
 
 // ---------------------------------------------------------------------------
@@ -1177,15 +1183,20 @@ function registerIpc() {
         try {
           answer = await api.pollDeviceAuth(start.device_code);
         } catch (err) {
-          // A dropped connection or a busy server: ask again on the next tick.
-          if (err.status === 0 || err.status >= 500) continue;
+          // A dropped connection, a busy server, or polling too fast (429): ask
+          // again on the next tick.
+          if (err.transient) continue;
           throw err;
         }
         if (answer.status === 'denied') throw new Error('The sign-in was declined in the browser.');
         if (answer.status === 'approved' && answer.api_key) {
           api.configure({ apiBase: base, apiKey: answer.api_key });
           storeCredentials(base, answer.api_key);
-          return { settings: settingsView(), credits: await api.credits() };
+          // Signed in from here on, even if the balance cannot be read right
+          // now: failing would put the old key back in memory while the new
+          // one is already saved. The window loads the balance itself.
+          const credits = await api.credits().catch(() => null);
+          return { settings: settingsView(), credits };
         }
       }
       throw new Error('The sign-in request expired. Try again.');
