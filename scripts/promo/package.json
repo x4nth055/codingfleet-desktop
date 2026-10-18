@@ -1,0 +1,7 @@
+{
+  "name": "codingfleet-desktop-promo",
+  "productName": "CodingFleet",
+  "version": "1.2.0",
+  "private": true,
+  "main": "app.cjs"
+}

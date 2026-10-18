@@ -13,9 +13,9 @@
 
 [**Download**](#download) · [Features](#features) · [Tools](#tools) · [Build it yourself](#build-it-yourself) · [codingfleet.com](https://codingfleet.com)
 
-<img src="docs/demo.gif" alt="CodingFleet Desktop adds a feature, writes a test and runs the tests in a real project" width="100%">
+<img src="docs/demo.gif" alt="CodingFleet Desktop fixes a phone layout from a screenshot, speeds up a slow API endpoint while being steered, and moves a codebase to TypeScript with four sub-agents" width="100%">
 
-<sub>A real run, sped up a little: the agent reads the project, asks before it runs a command or edits a file, then shows what it changed.</sub>
+<sub>Three jobs on low-cost models: fix a layout from a screenshot, hunt down a slow endpoint (p99 3,152 ms → 36 ms), and move a codebase to TypeScript with four sub-agents in parallel. <a href="https://codingfleet.com/download/">Watch the full video</a>.</sub>
 
 </div>
 

@@ -1,0 +1,63 @@
+:root {
+  --ink: #14213d;
+  --muted: #5c6b84;
+  --sea: #1f6feb;
+  --sand: #fbf6ee;
+  --tile: #e85d3f;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--sand);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 40px;
+  padding: 20px 32px;
+  white-space: nowrap;
+}
+.brand { font-weight: 800; font-size: 22px; color: var(--tile); text-decoration: none; letter-spacing: -0.5px; }
+.nav nav { display: flex; gap: 28px; }
+.nav nav a, .account { color: var(--ink); text-decoration: none; font-weight: 600; }
+.account { margin-left: auto; padding: 8px 16px; border: 2px solid var(--ink); border-radius: 999px; }
+
+.hero { padding: 32px 32px 8px; max-width: 760px; }
+.eyebrow { color: var(--tile); font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; font-size: 13px; }
+h1 { font-size: 64px; line-height: 1.02; margin: 8px 0 16px; letter-spacing: -2px; }
+.lede { color: var(--muted); font-size: 19px; line-height: 1.5; }
+
+.trip { padding: 24px 32px; }
+.trip-card {
+  display: flex;
+  width: 820px;
+  background: #fff;
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 18px 40px rgba(20, 33, 61, 0.12);
+}
+.trip-photo {
+  flex: 0 0 300px;
+  min-height: 240px;
+  background:
+    radial-gradient(circle at 70% 30%, #ffd88a 0 14%, transparent 15%),
+    linear-gradient(180deg, #ffb37a 0%, #ff7a59 45%, #2e5aa8 46%, #1c3f7a 100%);
+}
+.trip-body { padding: 26px 28px; position: relative; flex: 1; }
+.trip-head { display: flex; gap: 12px; }
+.trip-head h2 { margin: 0; font-size: 26px; white-space: nowrap; }
+.price { position: absolute; top: 22px; right: 28px; font-size: 26px; font-weight: 800; color: var(--sea); }
+.facts { display: flex; gap: 10px; padding: 0; margin: 16px 0 22px; list-style: none; }
+.facts li { background: #eef3ff; color: var(--sea); font-weight: 600; font-size: 14px; padding: 6px 12px; border-radius: 999px; white-space: nowrap; }
+.book {
+  font: inherit; font-weight: 700; font-size: 17px; color: #fff; background: var(--tile);
+  border: 0; border-radius: 14px; padding: 15px 26px; cursor: pointer;
+}
+
+.days { display: grid; grid-template-columns: repeat(3, 280px); gap: 18px; padding: 8px 32px 48px; }
+.day { background: #fff; border-radius: 18px; padding: 20px; box-shadow: 0 8px 22px rgba(20, 33, 61, 0.08); }
+.day span { color: var(--tile); font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+.day h3 { margin: 6px 0; }
+.day p { margin: 0; color: var(--muted); }

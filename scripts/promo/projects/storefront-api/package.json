@@ -1,0 +1,11 @@
+{
+  "name": "storefront-api",
+  "version": "3.8.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "bench": "node scripts/bench.js",
+    "test": "node --test --test-reporter=spec"
+  }
+}

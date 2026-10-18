@@ -1,0 +1,10 @@
+{
+  "name": "wayfare",
+  "version": "2.3.0",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/serve.js",
+    "snap": "node scripts/snap.js"
+  },
+  "type": "module"
+}
