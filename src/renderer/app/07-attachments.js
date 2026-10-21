@@ -356,7 +356,7 @@ function menuOption(list, iconName, name, sub, run) {
 function openAttachMenu() {
   closeMenus();
   const menu = $('attachMenu');
-  menu.style.left = `${$('attachButton').offsetLeft}px`;
+  placeMenu(menu, $('attachButton'));
   const list = $('attachList');
   list.replaceChildren();
   const option = (iconName, name, sub, run) => menuOption(list, iconName, name, sub, run);

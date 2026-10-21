@@ -107,6 +107,22 @@ contextBridge.exposeInMainWorld('cf', {
   stopBackground: call('background:stop'),
   backgroundTail: call('background:tail'),
   moveToBackground: call('background:move'),
+  terminalShells: call('terminal:shells'),
+  createTerminal: call('terminal:create'),
+  terminals: call('terminal:list'),
+  killTerminal: call('terminal:kill'),
+  writeTerminal: (id, data) => ipcRenderer.send('terminal:write', { id, data }),
+  resizeTerminal: (id, cols, rows) => ipcRenderer.send('terminal:resize', { id, cols, rows }),
+  onTerminalData: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on('terminal:data', wrapped);
+    return () => ipcRenderer.removeListener('terminal:data', wrapped);
+  },
+  onTerminalExit: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on('terminal:exit', wrapped);
+    return () => ipcRenderer.removeListener('terminal:exit', wrapped);
+  },
   folders: call('files:folders'),
   fileIndex: call('files:index'),
   saveText: call('files:saveText'),

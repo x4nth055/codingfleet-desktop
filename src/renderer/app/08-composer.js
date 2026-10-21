@@ -671,7 +671,7 @@ function renderChanges() {
 function openChangesMenu() {
   if (!S.git || !S.git.repo || !S.git.files.length) return;
   closeMenus();
-  $('changesMenu').style.left = `${$('changesPill').offsetLeft}px`;
+  placeMenu($('changesMenu'), $('changesPill'));
   renderChangesMenu();
   $('changesMenu').hidden = false;
 }

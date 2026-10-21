@@ -15,8 +15,10 @@ function wire() {
   wireMention();
   wireSessionSearch();
   wireSidebarResize();
+  wireSidebarToggle();
   wireKeys();
   wireFind();
+  wireTerminal();
 
   const prompt = $('prompt');
   prompt.addEventListener('input', () => {
@@ -377,6 +379,10 @@ async function boot() {
   if (S.init.shotMenu === 'effort') openEffortMenu();
   if (S.init.shotMenu === 'permissions') openPermMenu();
   if (S.init.shotMenu === 'settings') openSettings(false);
+  if (S.init.shotMenu === 'terminal' || S.init.shotMenu === 'terminal-right') {
+    TERM.position = S.init.shotMenu === 'terminal-right' ? 'right' : 'bottom';
+    openTerminalPanel();
+  }
   if (['privacy', 'preferences', 'mcp'].includes(S.init.shotMenu)) openSettings(false, S.init.shotMenu);
   if (S.init.shotMenu === 'copy') {
     setTimeout(() => { const button = document.querySelector('.code-copy'); if (button) button.click(); }, 2500);

@@ -6,6 +6,15 @@
 <title>CodingFleet</title>
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="settings.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/inter/index.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/geist/index.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/ibm-plex-sans/index.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/jetbrains-mono/index.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/geist-mono/index.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/fira-code/index.css">
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css">
+<link rel="stylesheet" href="terminal.css">
 <link rel="stylesheet" href="themes.css">
 <link rel="stylesheet" id="hljsTheme" href="../../node_modules/@highlightjs/cdn-assets/styles/github-dark.min.css" data-dark="../../node_modules/@highlightjs/cdn-assets/styles/github-dark.min.css" data-light="../../node_modules/@highlightjs/cdn-assets/styles/github.min.css" data-hacker="../../node_modules/@highlightjs/cdn-assets/styles/base16/green-screen.min.css">
 <script src="theme-boot.js"></script>
@@ -13,7 +22,7 @@
 <body>
 <div class="app">
   <aside class="sidebar">
-    <div class="brand drag"><span class="logo" id="brandLogo"></span><span>CodingFleet</span></div>
+    <div class="brand drag"><span class="logo" id="brandLogo"></span><span class="brand-name">CodingFleet</span><button class="icon-button sidebar-toggle" id="sidebarToggle" title="Hide the sidebar (Ctrl+B)" aria-label="Hide the sidebar"></button></div>
     <button class="new-session" id="newSession"><span class="icon" id="plusIcon"></span>New session<kbd>Ctrl N</kbd></button>
     <div class="session-search"><span class="icon" id="searchIcon"></span><input id="sessionSearch" type="search" placeholder="Search sessions" aria-label="Search sessions" autocomplete="off" spellcheck="false"><kbd>Ctrl K</kbd></div>
     <nav class="session-list" id="sessionList"></nav>
@@ -77,6 +86,10 @@
       </div>
       <div class="hint" id="hint" aria-live="polite"></div>
     </footer>
+    <section class="term-panel bottom" id="termPanel" hidden aria-label="Terminal">
+      <div class="term-head" id="termHead"></div>
+      <div class="term-body" id="termBody"></div>
+    </section>
   </main>
 
   <aside class="agents-panel" id="agentsPanel" hidden aria-label="Sub-agents"></aside>
@@ -193,6 +206,10 @@
 <script src="lib/mention.js"></script>
 <script src="lib/session-tools.js"></script>
 <script src="lib/sandbox-specs.js"></script>
+<script src="lib/csp-styles.js"></script>
+<script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+<script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
 <script src="app/01-base.js"></script>
 <script src="app/02-state.js"></script>
 <script src="app/03-sidebar.js"></script>
@@ -210,6 +227,7 @@
 <script src="app/12-sandboxes.js"></script>
 <script src="app/12-find.js"></script>
 <script src="app/12-mention.js"></script>
+<script src="app/12-terminal.js"></script>
 <script src="app/13-boot.js"></script>
 </body>
 </html>

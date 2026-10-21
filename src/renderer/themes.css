@@ -67,8 +67,8 @@
   --switch-off: #0f3a21;
   --knob: #b4ffc8;
   --overlay: rgba(0, 8, 3, .78);
-  --font: "Cascadia Code", "Cascadia Mono", Consolas, "Lucida Console", monospace;
-  --mono: "Cascadia Code", "Cascadia Mono", Consolas, "Lucida Console", monospace;
+  /* All of it in the code font chosen in Preferences (fonts.css). */
+  --font: var(--mono);
   color-scheme: dark;
 }
 :root[data-theme="hacker"] body { font-size: 13px; }
@@ -98,8 +98,8 @@
 }
 :root[data-theme="hacker"] .markdown { text-shadow: 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent); }
 :root[data-theme="hacker"] .markdown a { color: #5cffd0; }
-:root[data-theme="hacker"] .brand > span:last-child::before { content: "> "; color: var(--faint); }
-:root[data-theme="hacker"] .brand > span:last-child::after {
+:root[data-theme="hacker"] .brand > .brand-name::before { content: "> "; color: var(--faint); }
+:root[data-theme="hacker"] .brand > .brand-name::after {
   content: "_";
   margin-left: 2px;
   animation: cf-blink 1.1s steps(1) infinite;

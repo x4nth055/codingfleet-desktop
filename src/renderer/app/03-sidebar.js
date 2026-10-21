@@ -183,7 +183,7 @@ let sidebarWidth = null; // px once chosen; null = the usual width
 
 function sidebarMax() {
   const panel = $('agentsPanel');
-  const panelWidth = panel && !panel.hidden ? panel.getBoundingClientRect().width : 0;
+  const panelWidth = (panel && !panel.hidden ? panel.getBoundingClientRect().width : 0) + terminalRightWidth();
   // A wide sidebar gives way to a small window, down to the usual width and
   // no further: below that the conversation is better off scrolling sideways
   // than the sidebar turning to slivers on its own.
@@ -256,6 +256,45 @@ function wireSidebarResize() {
   // A smaller window takes the sidebar down with it, and gives it back once
   // there is room again: the width chosen is kept, only what is shown changes.
   window.addEventListener('resize', () => applySidebarWidth(sidebarWidth ?? SIDEBAR_DEFAULT));
+}
+
+// ── Hiding the sidebar ─────────────────────────────────────────────────────
+// The button beside the app's name, or Ctrl+B. While it is hidden, a button at
+// the start of the top bar brings it back. Kept on this computer.
+const SIDEBAR_HIDDEN_KEY = 'cf.sidebar-hidden';
+let sidebarAnimation = null;
+
+const sidebarHidden = () => document.documentElement.classList.contains('sidebar-hidden');
+
+function setSidebarHidden(hidden) {
+  const root = document.documentElement;
+  if (hidden === sidebarHidden()) return;
+  root.classList.add('sidebar-animating');
+  clearTimeout(sidebarAnimation);
+  sidebarAnimation = setTimeout(() => root.classList.remove('sidebar-animating'), 220);
+  // Focus in the sidebar would be left on something nobody can see.
+  if (hidden && document.activeElement && document.activeElement.closest('.sidebar')) $('prompt').focus();
+  root.classList.toggle('sidebar-hidden', hidden);
+  try { localStorage.setItem(SIDEBAR_HIDDEN_KEY, hidden ? '1' : '0'); } catch { /* this run only */ }
+  if (!hidden) applySidebarWidth(sidebarWidth ?? SIDEBAR_DEFAULT);
+  renderTopbar();
+}
+
+const toggleSidebar = () => setSidebarHidden(!sidebarHidden());
+
+function sidebarOpenButton() {
+  const button = el('button', 'icon-button sidebar-open');
+  button.title = 'Show the sidebar (Ctrl+B)';
+  button.setAttribute('aria-label', 'Show the sidebar');
+  button.innerHTML = ICON.sidebar;
+  button.addEventListener('click', () => setSidebarHidden(false));
+  return button;
+}
+
+function wireSidebarToggle() {
+  const button = $('sidebarToggle');
+  button.innerHTML = ICON.sidebar;
+  button.addEventListener('click', () => setSidebarHidden(true));
 }
 
 // ── Searching the sessions ─────────────────────────────────────────────────
@@ -694,6 +733,7 @@ function renderTopbar() {
   const bar = $('topbar');
   bar.replaceChildren();
   const session = currentSession();
+  if (sidebarHidden()) bar.append(sidebarOpenButton());
   bar.append(el('div', 'top-title', session ? sessionLabel(session) : S.current ? 'Session' : 'New session'));
 
   const cwd = session ? local(session.id).cwd : S.draftCwd;
@@ -722,4 +762,5 @@ function renderTopbar() {
     status.append(el('span', 'dot running'), el('span', null, 'Working'));
     bar.append(status);
   }
+  bar.append(terminalToggleButton());
 }

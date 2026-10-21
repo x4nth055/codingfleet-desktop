@@ -15,6 +15,8 @@ function shortcutGroups() {
       ['Ctrl+Tab', 'Next session in the list'],
       ['Ctrl+Shift+Tab', 'Previous session'],
       ['Ctrl+F', 'Find in the conversation'],
+      ['Ctrl+B', 'Show or hide the sidebar'],
+      ['Ctrl+`', 'Show or hide the terminal'],
       ['Ctrl+,', 'Settings'],
       ['Ctrl+/', 'This list'],
     ]],
@@ -129,10 +131,15 @@ function wireKeys() {
     } else if (event.key === '/' && !event.shiftKey) {
       event.preventDefault();
       openShortcuts();
+    } else if (event.key.toLowerCase() === 'b' && !event.shiftKey) {
+      if (!$('settings').hidden || document.querySelector('.confirm-overlay')) return;
+      event.preventDefault();
+      toggleSidebar();
     } else if (event.key.toLowerCase() === 'k' && !event.shiftKey) {
       event.preventDefault();
       if (!$('settings').hidden) return;
       closeMenus();
+      setSidebarHidden(false);
       focusSessionSearch();
     }
   });

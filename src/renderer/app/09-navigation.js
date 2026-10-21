@@ -338,6 +338,23 @@ function retryNow(id) {
 }
 
 // ── Menus ──────────────────────────────────────────────────────────────────
+// A composer menu opens just above the button that opened it, from its left
+// edge, or centered over it (`center`, for a menu already shown, so its width
+// is known), kept inside the composer. The composer is the menus' positioned
+// parent: offsets are from its padding box, inside its border.
+function placeMenu(menu, anchor, { center = false } = {}) {
+  const composer = $('composer');
+  const outer = composer.getBoundingClientRect();
+  const box = anchor.getBoundingClientRect();
+  let left = box.left - outer.left - composer.clientLeft;
+  if (center) {
+    left += (box.width - menu.offsetWidth) / 2;
+    left = Math.min(left, composer.clientWidth - menu.offsetWidth);
+  }
+  menu.style.left = `${Math.max(0, Math.round(left))}px`;
+  menu.style.bottom = `${Math.round(outer.bottom - composer.clientTop - box.top + 6)}px`;
+}
+
 function closeMenus() {
   $('sessionMenu').hidden = true;
   for (const menu of document.querySelectorAll('.pref-menu')) menu.hidden = true;
@@ -359,7 +376,7 @@ function openFolderMenu() {
   closeMenus();
   const session = currentSession();
   const menu = $('folderMenu');
-  menu.style.left = `${$('folderButton').offsetLeft}px`;
+  placeMenu(menu, $('folderButton'));
   const list = $('folderList');
   list.replaceChildren();
 
@@ -421,8 +438,8 @@ function openModelMenu() {
   closeMenus();
   ensureModels();
   const menu = $('modelMenu');
-  menu.style.left = `${$('modelButton').offsetLeft}px`;
   menu.hidden = false;
+  placeMenu(menu, $('modelButton'), { center: true });
   $('modelSearch').value = '';
   renderModelList('');
   $('modelSearch').focus();
@@ -655,9 +672,9 @@ function openEffortMenu() {
   const entry = entryOf(S.model);
   if (!entry || entry.variants.length < 2) return;
   const menu = $('effortMenu');
-  menu.style.left = `${$('effortButton').offsetLeft}px`;
   fillEffortList($('effortList'), S.model, chooseModel);
   menu.hidden = false;
+  placeMenu(menu, $('effortButton'), { center: true });
 }
 
 function fillEffortList(list, selectedId, choose) {
@@ -714,7 +731,6 @@ function chooseModel(id) {
 function openPermMenu() {
   closeMenus();
   const menu = $('permMenu');
-  menu.style.left = `${$('permButton').offsetLeft}px`;
   const list = $('permList');
   list.replaceChildren();
   const options = [
@@ -735,4 +751,5 @@ function openPermMenu() {
     list.append(row);
   }
   menu.hidden = false;
+  placeMenu(menu, $('permButton'), { center: true });
 }

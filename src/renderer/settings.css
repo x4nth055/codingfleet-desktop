@@ -183,6 +183,18 @@
 .switch input:focus-visible + .switch-track { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
 .switch input:disabled + .switch-track { opacity: .5; }
 
+/* Font picker (Preferences): each choice shown in its own face. */
+.font-row { margin-top: 10px; }
+.font-grid { flex: 1 1 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.font-card {
+  display: grid; gap: 4px; padding: 10px 12px; text-align: left;
+  border: 1px solid var(--line-2); border-radius: 9px; background: var(--well);
+}
+.font-card:hover { border-color: var(--line-3); }
+.font-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.font-sample { font-size: 17px; line-height: 1.2; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.font-name { font-size: 11.5px; color: var(--muted); }
+.font-card.active .font-name { color: var(--accent); }
 .seg { display: inline-flex; flex: none; padding: 2px; border-radius: 8px; background: var(--well); border: 1px solid var(--line-2); }
 .seg-btn { height: 26px; padding: 0 12px; border-radius: 6px; font-size: 12px; color: var(--muted); }
 .seg-btn.active { background: var(--panel-2); color: var(--text); box-shadow: 0 0 0 1px var(--line-2); }

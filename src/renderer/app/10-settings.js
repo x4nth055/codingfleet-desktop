@@ -366,6 +366,7 @@ function applyTheme(id) {
   const link = $('hljsTheme');
   if (link && link.dataset[id]) link.href = link.dataset[id];
   if (S.init && S.init.state) S.init.state.theme = id;
+  refreshTerminalTheme();
   return cf.setTheme(id);
 }
 
@@ -393,7 +394,66 @@ function themeSection() {
     grid.append(card);
   }
   wrap.append(grid);
+  wrap.append(fontRow('font'), fontRow('mono'));
   return wrap;
+}
+
+// ── Fonts ──────────────────────────────────────────────────────────────────
+// Kept on this computer; theme-boot.js sets them before the first paint, and
+// fonts.css has the faces, which ship with the app.
+const FONTS = {
+  font: {
+    key: 'cf.font', attr: 'font', title: 'Interface font', sample: 'Ag 123',
+    desc: 'For the conversation, the menus and everything else but code.',
+    choices: [
+      { id: 'inter', name: 'Inter', family: '"Inter Variable"' },
+      { id: 'geist', name: 'Geist', family: '"Geist Variable"' },
+      { id: 'plex', name: 'IBM Plex Sans', family: '"IBM Plex Sans Variable"' },
+      { id: 'system', name: 'System', family: 'var(--font-fallback)' },
+    ],
+  },
+  mono: {
+    key: 'cf.mono-font', attr: 'monoFont', title: 'Code font', sample: '0O 1lI =>',
+    desc: 'For code, commands, diffs and the terminal. The Hacker theme uses it everywhere.',
+    choices: [
+      { id: 'jetbrains', name: 'JetBrains Mono', family: '"JetBrains Mono Variable"' },
+      { id: 'geist-mono', name: 'Geist Mono', family: '"Geist Mono Variable"' },
+      { id: 'fira-code', name: 'Fira Code', family: '"Fira Code Variable"' },
+      { id: 'system', name: 'System', family: 'var(--mono-fallback)' },
+    ],
+  },
+};
+
+const currentFont = (kind) => document.documentElement.dataset[FONTS[kind].attr] || FONTS[kind].choices[0].id;
+
+function applyFont(kind, id) {
+  const spec = FONTS[kind];
+  if (!spec.choices.some((c) => c.id === id)) id = spec.choices[0].id;
+  document.documentElement.dataset[spec.attr] = id;
+  try { localStorage.setItem(spec.key, id); } catch { /* this run only */ }
+  refreshTerminalFont();
+}
+
+function fontRow(kind) {
+  const spec = FONTS[kind];
+  const row = el('div', 'set-row stack font-row');
+  const text = el('div', 'set-text');
+  text.append(el('div', 'set-title', spec.title), el('div', 'set-desc', spec.desc));
+  const grid = el('div', 'font-grid');
+  for (const choice of spec.choices) {
+    const card = el('button', `font-card${currentFont(kind) === choice.id ? ' active' : ''}`);
+    card.type = 'button';
+    const sample = el('span', 'font-sample', spec.sample);
+    sample.style.fontFamily = choice.family;
+    card.append(sample, el('span', 'font-name', choice.name));
+    card.addEventListener('click', () => {
+      applyFont(kind, choice.id);
+      for (const other of grid.children) other.classList.toggle('active', other === card);
+    });
+    grid.append(card);
+  }
+  row.append(text, grid);
+  return row;
 }
 
 // Computer use: off until the user turns it on. It is kept on this computer,

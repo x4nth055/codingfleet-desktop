@@ -203,7 +203,7 @@ function openGithubMenu() {
   if (!GH.status || !GH.status.repo) return;
   closeMenus();
   const menu = $('githubMenu');
-  menu.style.left = `${Math.max(0, $('github').offsetLeft)}px`;
+  placeMenu(menu, $('github'));
   maybeLoadPulls({ force: true });
   renderGithubMenu();
   menu.hidden = false;

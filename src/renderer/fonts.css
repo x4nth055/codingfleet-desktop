@@ -1,0 +1,21 @@
+/* The app's fonts, chosen in Preferences (10-settings.js) and set before the
+   first paint (theme-boot.js) as data-font and data-mono-font on <html>.
+   The faces ship with the app (node_modules/@fontsource-variable), so they look
+   the same on every computer and need no network. Inter, as on codingfleet.com,
+   and JetBrains Mono for code, unless the user picks others. */
+:root {
+  --font-fallback: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --mono-fallback: "Cascadia Code", "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, monospace;
+  --font: "Inter Variable", var(--font-fallback);
+  --mono: "JetBrains Mono Variable", var(--mono-fallback);
+}
+:root[data-font="geist"] { --font: "Geist Variable", var(--font-fallback); }
+:root[data-font="plex"] { --font: "IBM Plex Sans Variable", var(--font-fallback); }
+:root[data-font="system"] { --font: var(--font-fallback); }
+
+:root[data-mono-font="geist-mono"] { --mono: "Geist Mono Variable", var(--mono-fallback); }
+:root[data-mono-font="fira-code"] { --mono: "Fira Code Variable", var(--mono-fallback); }
+:root[data-mono-font="system"] { --mono: var(--mono-fallback); }
+
+/* Inter's l with a tail and I with bars, so l, I and 1 never look alike. */
+:root:not([data-font]) body, :root[data-font="inter"] body { font-feature-settings: "cv05", "cv08", "calt"; }

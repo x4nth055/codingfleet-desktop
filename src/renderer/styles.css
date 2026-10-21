@@ -14,8 +14,7 @@
   --green: #3ecf8e;
   --red: #f4636b;
   --amber: #f0b44c;
-  --font: "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, sans-serif;
-  --mono: "Cascadia Code", "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+  /* --font and --mono: fonts.css */
   --well: #0a0c10;
   --well-2: #0f1217;
   --line-3: #3a424d;
@@ -260,6 +259,17 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
 /* macOS draws its window buttons at the top left, over the sidebar. */
 .platform-darwin .topbar { padding: 0 22px; }
 .platform-darwin .brand { padding-left: 84px; }
+.brand .sidebar-toggle { margin-left: auto; margin-right: -6px; font-weight: normal; }
+
+/* The sidebar hidden (Ctrl+B, or the button beside the name): its column
+   closes, and the top bar gets a button to bring it back. The class is on
+   <html>, set before the first paint by theme-boot.js. */
+:root.sidebar-hidden .app { --sidebar-width: 0px; }
+:root.sidebar-hidden .sidebar { visibility: hidden; overflow: hidden; border-right: 0; }
+:root.sidebar-animating .app { transition: grid-template-columns .2s ease; }
+:root.sidebar-animating .sidebar { transition: visibility .2s; }
+.topbar .sidebar-open { margin-left: -8px; }
+:root.sidebar-hidden .platform-darwin .topbar { padding-left: 84px; }
 .top-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .chip {
   display: inline-flex;

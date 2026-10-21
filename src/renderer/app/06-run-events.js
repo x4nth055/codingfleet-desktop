@@ -113,7 +113,7 @@ function onRunEvent({ sessionId, event, data }) {
       updateTool(sessionId, data.id, patch);
       const tool = findTool(sessionId, data.id);
       if (tool && tool.group.agentId && sessionId === S.current) openPanel(tool.group.agentId);
-      notifyApproval(sessionId);
+      // The main process tells someone in another window (notify in main.js).
       break;
     }
     case 'client.tool_running':
@@ -308,14 +308,4 @@ function expandForScreenshot(sessionId) {
     const tip = [...document.querySelectorAll('.has-tip')].pop();
     if (tip) tip.classList.add('show');
   }
-}
-
-function notifyApproval(sessionId) {
-  if (document.hasFocus()) return;
-  try {
-    // eslint-disable-next-line no-new
-    new Notification('CodingFleet needs your approval', {
-      body: sessionLabel(S.sessions.find((s) => s.id === sessionId)),
-    });
-  } catch { /* notifications are optional */ }
 }

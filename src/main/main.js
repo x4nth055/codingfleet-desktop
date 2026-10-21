@@ -15,6 +15,7 @@ const { createTaskbar } = require('./taskbar');
 const fileIndex = require('../core/file-index');
 const { createLog } = require('../core/log');
 const { BackgroundJobs } = require('../core/background');
+const { Terminals, listShells } = require('../core/terminal');
 const capture = require('./capture');
 const { createComputer } = require('./computer');
 const { computerUseAllowed } = require('../core/computer');
@@ -35,6 +36,7 @@ const { revertRun } = require('../core/undo');
 // --shot-model=<model id> (not saved), --shot-menu=effort|folder|attach|shot|agents|quota|changes|github, --shot-scroll=top,
 // --shot-menu=poolcap (the 5-hour limit strip, not stored; --shot-pool-cap=top hides Upgrade),
 // --shot-menu=shortcuts|find|mention|search (the shortcut list, find, @ mentions, session search),
+// --shot-menu=terminal|terminal-right (the terminal panel, at the bottom or on the right),
 // --shot-attach=<path>[|<path>...] (attaches files on start).
 //
 // An installed app ignores all of them but --open and --theme. Several would
@@ -714,6 +716,21 @@ async function screenshotForAgent(args, { call, sessionId } = {}) {
 const backgroundJobs = new BackgroundJobs({ shell: tools.SHELL, env: tools.commandEnv, kill: tools.killTree });
 backgroundJobs.onChange((sessionId, jobs) => send('background:changed', { sessionId, jobs }));
 
+// The terminal panel's shells. node-pty is loaded on the first one, so an app
+// whose native module cannot load still starts, and says so in the panel.
+let terminals = null;
+function terminalHost() {
+  if (terminals) return terminals;
+  const pty = require('node-pty');
+  terminals = new Terminals({
+    spawn: pty.spawn,
+    env: tools.commandEnv,
+    onData: (id, data) => send('terminal:data', { id, data }),
+    onExit: (id, code) => send('terminal:exit', { id, code }),
+  });
+  return terminals;
+}
+
 // A cloud session's background commands run in its sandbox. The API lists,
 // reads and stops them, and they go to the same pill as local ones, in the same
 // shape. Asked again when a tool result says one started or stopped, every
@@ -1316,6 +1333,18 @@ function registerIpc() {
     log.error(`window: ${text}`);
   });
 
+  // The terminal panel. Typing and resizing are sent without waiting for an answer.
+  handle('terminal:shells', () => listShells().map(({ id, name }) => ({ id, name })));
+  handle('terminal:create', (options) => terminalHost().create(options || {}));
+  handle('terminal:list', () => (terminals ? terminals.list() : []));
+  handle('terminal:kill', (id) => terminals && terminals.kill(Number(id)));
+  ipcMain.on('terminal:write', (_event, payload) => {
+    if (terminals && payload) terminals.write(Number(payload.id), payload.data);
+  });
+  ipcMain.on('terminal:resize', (_event, payload) => {
+    if (terminals && payload) terminals.resize(Number(payload.id), payload.cols, payload.rows);
+  });
+
   // Commands running in the background, for the pill above the prompt.
   // A cloud session's are in its sandbox, through the API (listCloudJobs).
   handle('background:list', (value) => {
@@ -1793,5 +1822,6 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
     for (const run of runs.values()) run.suspend();
     // A dev server the agent started must not outlive the app that started it.
     backgroundJobs.stopAll();
+    if (terminals) terminals.killAll();
   });
 }

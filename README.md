@@ -52,9 +52,10 @@ Open the app, click **Sign in with your browser**, and approve. That's all.
 | 🖼️ **Images and voice** | Paste images, take screenshots, speak your prompt. |
 | 💳 **Cost before you send** | An estimate next to the Send button, and what the session has cost so far. |
 | @ **Mention files** | Type `@` to pick a file or folder of the project. |
+| 🖥️ **Terminal** | Your own shells beside the conversation, at the bottom or on the right. Ctrl+\` shows and hides it. |
 | ⌨️ **Keyboard first** | Answer approvals with Alt+Y / Alt+N, search sessions, find in a conversation. Ctrl+/ lists every shortcut. |
 | 📄 **Export** | Copy an answer as Markdown, or save a whole session as a `.md` file. |
-| 🎨 **Three themes** | Dark, Light and Hacker. |
+| 🎨 **Three themes** | Dark, Light and Hacker, and a choice of fonts (Inter and JetBrains Mono unless you pick others). |
 
 ## Tools
 

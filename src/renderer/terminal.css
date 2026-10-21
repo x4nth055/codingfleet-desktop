@@ -1,0 +1,110 @@
+/* ── Terminal panel (12-terminal.js) ─────────────────────────
+   Under the conversation, or as a column of its own on the right; with the
+   sub-agents panel open too, under it in the same column. Its size is
+   --term-height / --term-width, set when it is dragged. */
+.term-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--well);
+}
+.term-panel.bottom { flex: none; height: var(--term-height, 280px); border-top: 1px solid var(--line); }
+.term-panel.right { border-left: 1px solid var(--line); }
+
+.app.with-term-right {
+  grid-template-columns: var(--sidebar-width, 272px) minmax(0, 1fr) var(--term-width, 460px);
+}
+.app.with-panel.with-term-right {
+  grid-template-columns: var(--sidebar-width, 272px) minmax(0, 1fr)
+    var(--agents-panel-width, minmax(340px, 30vw)) var(--term-width, 460px);
+}
+/* With the sub-agents panel: the right column is split, agents above. */
+.app.with-panel.with-term-right {
+  grid-template-columns: var(--sidebar-width, 272px) minmax(0, 1fr) var(--agents-panel-width, minmax(340px, 30vw));
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+}
+.app.with-panel.with-term-right > .sidebar { grid-column: 1; grid-row: 1 / span 2; }
+.app.with-panel.with-term-right > .main { grid-column: 2; grid-row: 1 / span 2; }
+.app.with-panel.with-term-right > .agents-panel { grid-column: 3; grid-row: 1; }
+.app.with-panel.with-term-right > .term-panel { grid-column: 3; grid-row: 2; border-top: 1px solid var(--line); }
+/* The window buttons sit over the right-most column: the terminal's, then. */
+.app.with-term-right .topbar { padding-right: 22px; }
+
+/* The edge to drag: the top one at the bottom, the left one on the right. */
+.term-resizer { position: absolute; z-index: 6; -webkit-app-region: no-drag; }
+.term-panel.bottom .term-resizer { left: 0; right: 0; top: -4px; height: 9px; cursor: ns-resize; }
+.term-panel.right .term-resizer { top: 0; bottom: 0; left: -4px; width: 9px; cursor: ew-resize; }
+.term-resizer::after { content: ""; position: absolute; background: transparent; transition: background .12s; }
+.term-panel.bottom .term-resizer::after { left: 0; right: 0; top: 4px; height: 1px; }
+.term-panel.right .term-resizer::after { top: 0; bottom: 0; left: 4px; width: 1px; }
+.term-resizer:hover::after { background: var(--accent); }
+.term-panel.bottom .term-resizer:hover::after { height: 2px; }
+.term-panel.right .term-resizer:hover::after { width: 2px; }
+body.term-resizing { cursor: ns-resize; user-select: none; }
+body.term-resizing * { cursor: ns-resize !important; }
+
+.term-head {
+  height: 36px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 8px;
+  background: var(--sidebar);
+  border-bottom: 1px solid var(--line);
+}
+/* Alone on the right, the head is two rows: its name and buttons beside the
+   window buttons, the tabs under them. */
+.term-title { display: none; align-items: center; gap: 8px; min-width: 0; font-weight: 600; font-size: 13.5px; }
+.term-title .icon { width: 16px; height: 16px; color: var(--accent); }
+.app:not(.with-panel) .term-panel.right .term-head {
+  height: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 44px 36px;
+  padding: 0;
+}
+.app:not(.with-panel) .term-panel.right .term-title { display: flex; grid-row: 1; grid-column: 1; padding-left: 14px; -webkit-app-region: drag; height: 100%; }
+.app:not(.with-panel) .term-panel.right .term-tools { grid-row: 1; grid-column: 2; padding-right: 150px; }
+.platform-darwin .app:not(.with-panel) .term-panel.right .term-tools { padding-right: 8px; }
+.app:not(.with-panel) .term-panel.right .term-tabs { grid-row: 2; grid-column: 1 / -1; padding: 0 8px; border-top: 1px solid var(--line); height: 100%; }
+.term-tabs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; }
+/* The tabs shrink to fit, then scroll; the + stays in view after them. */
+.term-tablist { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 4px; overflow-x: auto; }
+.term-tablist::-webkit-scrollbar { height: 0; }
+.term-tab {
+  flex: 0 1 auto;
+  min-width: 96px;
+  max-width: 230px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--muted);
+}
+.term-tab:hover { color: var(--text); background: var(--hover); }
+.term-tab.selected { color: var(--text); background: var(--panel-2); border-color: var(--line-2); }
+.term-tab.exited .term-tab-label { color: var(--faint); font-style: italic; }
+.term-tab-label { min-width: 0; height: 100%; display: flex; align-items: center; gap: 6px; padding: 0 2px 0 8px; font-size: 12px; }
+.term-tab-label .icon { width: 14px; height: 14px; }
+.term-tab-label span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-tab-close { width: 20px; height: 20px; margin-right: 3px; opacity: 0; }
+.term-tab-close svg { width: 11px; height: 11px; }
+.term-tab:hover .term-tab-close, .term-tab.selected .term-tab-close, .term-tab-close:focus-visible { opacity: 1; }
+.term-add { flex: none; display: flex; align-items: center; }
+.term-add .icon-button { width: 24px; height: 24px; }
+.term-add .icon-button + .icon-button { width: 18px; }
+.term-add .icon-button + .icon-button svg { width: 13px; height: 13px; }
+.term-tools { flex: none; display: flex; align-items: center; gap: 2px; }
+.term-tools .icon-button { width: 26px; height: 26px; }
+
+.term-body { flex: 1; min-height: 0; position: relative; }
+.term-host { position: absolute; inset: 6px 4px 2px 12px; }
+.term-host .xterm { height: 100%; }
+.term-host .xterm .xterm-viewport { background-color: transparent; }
+
+.term-menu { position: fixed; bottom: auto; width: 220px; z-index: 80; }
+.term-toggle.active { color: var(--accent); background: var(--hover); }
