@@ -1188,6 +1188,8 @@ function registerIpc() {
     settings: settingsView(),
     shell: tools.SHELL.name,
     platform: process.platform,
+    // Where "Install it for me" (Settings > Coding agents) starts its session.
+    home: os.homedir(),
     computerUse: { supported: computer.supported, shortcut: computer.shortcutLabel },
     state: { ...state, permissionMode: PERMISSION_OVERRIDE || state.permissionMode },
     openSession: flag('open'),

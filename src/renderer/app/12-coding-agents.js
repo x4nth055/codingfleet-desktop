@@ -96,7 +96,10 @@ function drawCodingAgents() {
       const link = el('a', 'byok-link', 'How to install');
       link.href = cli.install;
       link.target = '_blank';
-      row.append(text, link);
+      const forMe = el('button', 'byok-link ca-install', 'Install it for me');
+      forMe.title = 'Opens a new session with the install request written for you: press Enter to start.';
+      forMe.addEventListener('click', () => installWithAgent(cli, d));
+      row.append(text, link, forMe);
       list.append(row);
     }
     pane.append(list);
@@ -238,6 +241,46 @@ function codingAgentsLog(pane, entries) {
   }
   return box;
 }
+
+// ── "Install it for me" ────────────────────────────────────────────────────
+// A new session on this computer, in the home folder (an install is not about
+// any project), with the request written out: the person only presses Enter.
+// The agent reads the CLI's own install page instead of guessing commands.
+let caInstallAskedAt = 0;
+
+function installPrompt(cli, d) {
+  const system = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[S.init.platform] || S.init.platform;
+  const lines = [
+    `Install ${cli.name} (${cli.vendor}'s coding CLI) on this computer (${system}).`,
+    '',
+    `1. Read the official install instructions first: ${cli.install}`,
+    '   Fetch that page and follow the install method it recommends for this operating system. Do not guess the commands.',
+    '2. Before installing, check what is already here (for example node --version and npm --version if it installs with npm).',
+    '3. Install it for my user only. If a step needs administrator rights, or the page offers several methods, ask me first.',
+    `4. When it is done, run \`${cli.bin} --version\` in a new shell to confirm it is on PATH. Tell me if I must restart `
+      + 'the CodingFleet app or my terminal for it to be found.',
+    cli.signIn
+      ? `5. Do not sign in for me. Tell me to run \`${cli.signIn}\` myself, or to click "Sign in…" in Settings > Coding agents.`
+      : '5. Tell me which API key it needs and where to set it. Do not ask me to paste a key into this chat.',
+  ];
+  if (d && d.note) lines.push('', `CodingFleet found this about it on this computer: ${d.note}`);
+  return lines.join('\n');
+}
+
+function installWithAgent(cli, d) {
+  const home = (S.init && S.init.home) || (S.init && S.init.state.lastCwd);
+  closeSettings();
+  if (home) newSessionIn(home);
+  else newSession();
+  promptFor(installPrompt(cli, d));
+  caInstallAskedAt = Date.now();
+}
+
+// After an install run ends, look again, so the card shows up by itself.
+cf.onRunEvent(({ event }) => {
+  if (event !== 'client.finished' || !caInstallAskedAt || Date.now() - caInstallAskedAt > 2 * 3600e3) return;
+  call(cf.detectCodingAgents).catch(() => {});
+});
 
 // A CLI's own sign-in, in a new terminal: its sign-in happens in its own flow,
 // never through this app.

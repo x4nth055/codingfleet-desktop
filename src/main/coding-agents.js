@@ -56,8 +56,8 @@ function createCodingAgents({ getState, saveState, send, logFile, log, backgroun
   function view() {
     const p = prefs();
     return {
-      catalog: clis.CATALOG.map(({ id, name, vendor, signIn, install, note, headless }) =>
-        ({ id, name, vendor, signIn, install, note, headless })),
+      catalog: clis.CATALOG.map(({ id, name, vendor, bins, signIn, install, note, headless }) =>
+        ({ id, name, vendor, bin: bins[0], signIn, install, note, headless })),
       detected: detection(),
       detecting: Boolean(detecting),
       prefs: Object.fromEntries(clis.CATALOG.map(({ id }) => [id, clis.prefOf(p, id)])),

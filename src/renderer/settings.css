@@ -554,3 +554,5 @@ textarea.sbx-input { height: auto; padding: 8px 10px; resize: vertical; line-hei
 .ca-log-where { margin-top: 2px; font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ca-foot-note { color: var(--faint); }
 .ca-head .btn { flex: none; white-space: nowrap; }
+.ca-missing-row .byok-link { white-space: nowrap; }
+.ca-install { padding: 0; border: 0; background: none; cursor: pointer; font-weight: 600; }
