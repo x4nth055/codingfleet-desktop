@@ -19,6 +19,7 @@ function wire() {
   wireKeys();
   wireFind();
   wireTerminal();
+  wireBrowser();
 
   const prompt = $('prompt');
   prompt.addEventListener('input', () => {
@@ -60,6 +61,7 @@ function wire() {
     button.prepend(icon(button.dataset.icon));
     button.addEventListener('click', () => showSettingsTab(button.dataset.tab));
   }
+  wirePrefsMenu();
   $('settingsCancel').addEventListener('click', closeSettings);
   $('settingsSave').addEventListener('click', saveSettings);
   $('keyRemove').addEventListener('click', removeKey);
@@ -388,6 +390,7 @@ async function boot() {
     setTimeout(() => { const button = document.querySelector('.code-copy'); if (button) button.click(); }, 2500);
   }
   if (S.init.shotMenu === 'prefmodel') {
+    prefsTab = 'sessions';
     openSettings(false, 'preferences');
     setTimeout(() => { const toggle = document.querySelector('.pref-toggle'); if (toggle) toggle.click(); }, 1500);
   }

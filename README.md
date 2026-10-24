@@ -52,6 +52,7 @@ Open the app, click **Sign in with your browser**, and approve. That's all.
 | 🖼️ **Images and voice** | Paste images, take screenshots, speak your prompt. |
 | 💳 **Cost before you send** | An estimate next to the Send button, and what the session has cost so far. |
 | @ **Mention files** | Type `@` to pick a file or folder of the project. |
+| 🌐 **Browser** | A browser beside the conversation. The agent opens your dev server there to check what it built: it reads the page, clicks, types, and looks at it. |
 | 🖥️ **Terminal** | Your own shells beside the conversation, at the bottom or on the right. Ctrl+\` shows and hides it. |
 | ⌨️ **Keyboard first** | Answer approvals with Alt+Y / Alt+N, search sessions, find in a conversation. Ctrl+/ lists every shortcut. |
 | 📄 **Export** | Copy an answer as Markdown, or save a whole session as a `.md` file. |
@@ -72,6 +73,7 @@ What the agent can use on your computer:
 | `read_background` / `stop_background` | Read or stop a background command |
 | `view_image` | Look at an image in your folder |
 | `take_screenshot` | Take a picture of your screen (always asks first) |
+| `browser` | Use the app's browser: open a page, read it, click, type, take a picture, read the console |
 
 It also has CodingFleet's server tools, such as web search and image generation, if you turn
 them on.
@@ -137,6 +139,28 @@ is still your real safety net.
 While a run goes, the app keeps the computer awake. If the computer goes to sleep anyway, the
 run stops and is kept: type **continue** to go on. Cloud sandbox runs do not need your
 computer.
+
+### The browser
+
+The panel under the conversation (or on the right) has two views: Terminal and Browser. The
+browser is for your own apps: type an address, or click **Open** on a running dev server.
+The agent uses the same page, so you see what it does.
+
+| What the agent does in the browser | What happens |
+|---|---|
+| Opens or uses a page on this computer (`localhost`) | Runs at once |
+| Opens or uses a site on your list (Preferences) | Runs at once, typing included |
+| Opens or uses another site | Asks once per site: **Allow example.com this session**, or **Always allow example.com**, which adds it to your list |
+| Types into another site | Asks **every time** |
+
+In Preferences > Agent tools, **Sites the agent may use without asking** holds your own sites, such as a
+staging server. **Let the agent use any site without asking** skips the per-site question; it
+is less safe (a page can hold instructions meant for the agent), and typing into a site that
+is not on your list still asks every time.
+
+The browser has its own profile: none of your real browser's logins or cookies, no downloads,
+and no camera, location or notifications. **Clear browsing data** in Preferences empties it.
+Turn **Browser for the agent** off in Preferences > Agent tools to keep the agent out of it.
 
 ## Project instructions (`AGENTS.md`)
 

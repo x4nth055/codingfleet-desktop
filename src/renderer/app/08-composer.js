@@ -566,9 +566,9 @@ function renderBackground() {
       // A dev server that said where it listens: open it in the browser.
       if (job.url) {
         const visit = el('button', 'btn small');
-        visit.title = `Open ${job.url} in your browser`;
+        visit.title = `Open ${job.url} in the app's browser (Shift+click: in your own browser)`;
         visit.append(icon('external'), el('span', null, 'Open'));
-        visit.addEventListener('click', () => window.open(job.url));
+        visit.addEventListener('click', (event) => (event.shiftKey ? window.open(job.url) : openInAppBrowser(job.url)));
         actions.append(visit);
       }
       const stop = el('button', 'btn small danger', 'Stop');

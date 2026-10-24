@@ -22,6 +22,7 @@
     view_image: (a) => ['View image', a.source],
     take_screenshot: (a) => ['Take a screenshot', a.window ? `window: ${a.window}` : 'the screen'],
     computer: (a) => computerWords(a),
+    browser: (a) => browserWords(a),
     generate_image: (a) => ['Generate image', a.prompt],
     read_file: (a) => ['Read attachment', a.path || a.file_id],
   };
@@ -38,7 +39,27 @@
     web_search: ['Searched the web', 'time', 'times'],
     spawn_agent: ['Delegated', 'task', 'tasks'],
     computer: ['Used the computer', 'time', 'times'],
+    browser: ['Used the browser', 'time', 'times'],
   };
+
+  // One browser action: what it does, and to what.
+  function browserWords(a) {
+    switch (a.action) {
+      case 'navigate': return ['Open', a.url || ''];
+      case 'back': return ['Go back', ''];
+      case 'reload': return ['Reload the page', ''];
+      case 'read_page': return ['Read the page', a.ref || ''];
+      case 'find': return ['Find on the page', a.query || ''];
+      case 'click': return ['Click', a.ref || (a.x != null ? `${a.x}, ${a.y}` : '')];
+      case 'type': return ['Type', `${a.text || ''}${a.ref ? ` into ${a.ref}` : ''}`];
+      case 'press': return ['Press', a.keys || ''];
+      case 'scroll': return ['Scroll', a.ref || a.direction || 'down'];
+      case 'screenshot': return ['Look at the page', a.ref || ''];
+      case 'console': return ['Read the console', a.errors_only ? 'errors' : ''];
+      case 'viewport': return ['Resize the page', a.preset || ''];
+      default: return ['Use the browser', a.action || ''];
+    }
+  }
 
   // One computer action: what it does, and to what.
   function computerWords(a) {
@@ -87,8 +108,38 @@
     'controls your computer': 'wants to use your mouse, keyboard and screen',
   };
 
-  // Reasons the app asks about every time (src/core/guard.js ALWAYS_ASK).
+  // Reasons the app asks about every time (src/core/guard.js ALWAYS_ASK), and
+  // the browser typing into a site ("types into example.com", guard.alwaysAsk).
   const ALWAYS_ASKED = new Set(['may delete or overwrite data', 'runs a script from the internet']);
+  const alwaysAsked = (reason) => ALWAYS_ASKED.has(reason) || /^types into /.test(String(reason || ''));
+
+  // The browser's reasons name the site: "uses example.com in the browser",
+  // asked once per site and session; "types into example.com", every time.
+  const SITE_REASON = /^uses (.+) in the browser$/;
+  // A site is allowed for the rest of the session, or not at all: no "once".
+  const sessionOnly = (reason) => SITE_REASON.test(String(reason || ''));
+
+  function reasonText(reason) {
+    if (REASONS[reason]) return REASONS[reason];
+    const r = String(reason || '');
+    let m = SITE_REASON.exec(r);
+    if (m) return `wants to use ${m[1]} in its browser`;
+    m = /^types into (.+)$/.exec(r);
+    if (m) return `wants to type into ${m[1]} in its browser`;
+    return 'wants to use a tool';
+  }
+
+  // The site a browser reason names, for "Always allow <site>": its host, no port.
+  function siteOfReason(reason) {
+    const m = SITE_REASON.exec(String(reason || ''));
+    return m ? m[1].replace(/:\d+$/, '') : null;
+  }
+
+  function allowLabel(reason) {
+    if (ALLOW_LABELS[reason]) return ALLOW_LABELS[reason];
+    const m = SITE_REASON.exec(String(reason || ''));
+    return m ? `Allow ${m[1]} this session` : 'Allow all calls this session';
+  }
 
   function toolSummary(tool) {
     const args = tool.arguments || {};
@@ -119,7 +170,10 @@
     }).join(', ');
   }
 
-  const api = { VERBS, GROUP_WORDS, ALLOW_LABELS, REASONS, ALWAYS_ASKED, toolSummary, groupSummary };
+  const api = {
+    VERBS, GROUP_WORDS, ALLOW_LABELS, REASONS, ALWAYS_ASKED, alwaysAsked, sessionOnly, siteOfReason, reasonText, allowLabel,
+    toolSummary, groupSummary,
+  };
   root.CF_TOOL_WORDS = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 }(typeof window !== 'undefined' ? window : globalThis));

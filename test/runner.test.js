@@ -86,6 +86,25 @@ function stubbedApi(stream) {
   return { posted, restore: () => Object.assign(api, before) };
 }
 
+test('a server older than the browser tool is asked again without it, once', async () => {
+  const { restore } = stubbedApi(null);
+  const bodies = [];
+  api.startRun = async (_session, body) => {
+    bodies.push(body);
+    if (body.browser_use) {
+      throw Object.assign(new Error('Unknown field: browser_use.'), { code: 'unknown_field', status: 400 });
+    }
+    return events([{ event: 'run.started', data: { run_id: 'RUN1' } }, { event: 'run.ended', data: { reason: 'completed' } }]);
+  };
+  try {
+    const run = new Run({ sessionId: 'S1', cwd: process.cwd(), approve: () => 'allow', onEvent: () => {} });
+    await run.start({ message: 'check the page', browser_use: true });
+  } finally {
+    restore();
+  }
+  assert.deepEqual(bodies, [{ message: 'check the page', browser_use: true }, { message: 'check the page' }]);
+});
+
 test('a screenshot call reaches the app handler with its call, and the picture goes back', async () => {
   const stream = events([
     { event: 'run.started', data: { run_id: 'RUN1' } },

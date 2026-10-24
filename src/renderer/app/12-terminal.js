@@ -8,14 +8,18 @@
 
 const TERM_KEYS = {
   open: 'cf.term-open', position: 'cf.term-position', height: 'cf.term-height', width: 'cf.term-width',
+  view: 'cf.panel-view',
 };
 const TERM_MIN_HEIGHT = 120;
 const TERM_MIN_WIDTH = 300;
 const TERM_DEFAULT_HEIGHT = 280;
 const TERM_DEFAULT_WIDTH = 460;
 
+// The dock panel holds the terminals and the browser (12-browser.js): one
+// shows at a time, switched in its head.
 const TERM = {
   open: false,
+  view: 'terminal',       // 'terminal' | 'browser'
   position: 'bottom',     // 'bottom' | 'right'
   tabs: [],               // { id, shell, cwd, xterm, fit, host, exited }
   active: null,
@@ -192,8 +196,8 @@ function forgetTerminal(tab) {
     TERM.active = next ? next.id : null;
   }
   if (!TERM.tabs.length) {
-    if (TERM.open) closeTerminalPanel();
-  } else if (TERM.open) {
+    if (TERM.open && TERM.view === 'terminal') closeTerminalPanel();
+  } else if (TERM.open && TERM.view === 'terminal') {
     showTerminal(TERM.active);
   } else {
     renderTerminalPanel();
@@ -227,11 +231,35 @@ function onTerminalExit({ id, code }) {
 
 // ── The panel ──────────────────────────────────────────────────────────────
 function toggleTerminalPanel() {
-  if (TERM.open) closeTerminalPanel();
+  if (TERM.open && TERM.view === 'terminal') closeTerminalPanel();
   else openTerminalPanel();
 }
 
+function toggleBrowserPanel() {
+  if (browserShown()) closeTerminalPanel();
+  else openBrowserPanel();
+}
+
+function setPanelView(view) {
+  TERM.view = view;
+  termStore('view', view);
+}
+
+function openBrowserPanel({ focus = true } = {}) {
+  setPanelView('browser');
+  TERM.open = true;
+  termStore('open', 1);
+  renderTerminalPanel();
+  if (focus && !BROWSER.state.url) {
+    requestAnimationFrame(() => {
+      const address = $('browserUrl');
+      if (address) address.focus();
+    });
+  }
+}
+
 function openTerminalPanel() {
+  setPanelView('terminal');
   TERM.open = true;
   termStore('open', 1);
   renderTerminalPanel();
@@ -416,11 +444,20 @@ function renderTerminalPanel() {
 
   const head = $('termHead');
   head.replaceChildren();
-  const title = el('div', 'term-title');
-  title.append(icon('terminal'), el('span', null, 'Terminal'));
-  const tabs = el('div', 'term-tabs');
+  // Which one the panel shows: the terminals or the browser.
+  const title = el('div', 'term-title panel-views');
+  for (const [view, iconName, label, open] of [
+    ['terminal', 'terminal', 'Terminal', openTerminalPanel], ['browser', 'globe', 'Browser', openBrowserPanel]]) {
+    const button = el('button', `panel-view${TERM.view === view ? ' selected' : ''}`);
+    button.append(icon(iconName), el('span', null, label));
+    button.title = view === 'terminal' ? 'Terminal (Ctrl+`)' : 'Browser';
+    button.addEventListener('click', () => { if (TERM.view !== view) open(); });
+    title.append(button);
+  }
+  const browser = TERM.view === 'browser';
+  const tabs = browser ? renderBrowserBar() : el('div', 'term-tabs');
   const list = el('div', 'term-tablist');
-  for (const tab of TERM.tabs) {
+  for (const tab of browser ? [] : TERM.tabs) {
     const item = el('div', `term-tab${tab.id === TERM.active ? ' selected' : ''}${tab.exited != null ? ' exited' : ''}`);
     const label = el('button', 'term-tab-label');
     label.title = `${tab.shell} in ${tab.cwd}`;
@@ -433,38 +470,53 @@ function renderTerminalPanel() {
     item.append(label, close);
     list.append(item);
   }
-  tabs.append(list);
-  const add = el('div', 'term-add');
-  add.append(
-    terminalButton('plus', 'New terminal', () => newTerminal()),
-    terminalButton('caret', 'New terminal with another shell', (event) => openShellMenu(event.currentTarget)),
-  );
-  tabs.append(add);
+  if (!browser) {
+    tabs.append(list);
+    const add = el('div', 'term-add');
+    add.append(
+      terminalButton('plus', 'New terminal', () => newTerminal()),
+      terminalButton('caret', 'New terminal with another shell', (event) => openShellMenu(event.currentTarget)),
+    );
+    tabs.append(add);
+  }
   const tools = el('div', 'term-tools');
   tools.append(
-    terminalButton(right ? 'dockBottom' : 'dockRight', right ? 'Move the terminal to the bottom' : 'Move the terminal to the right',
+    terminalButton(right ? 'dockBottom' : 'dockRight', right ? 'Move the panel to the bottom' : 'Move the panel to the right',
       () => setTerminalPosition(right ? 'bottom' : 'right')),
-    terminalButton('x', 'Hide the terminal (Ctrl+`)', closeTerminalPanel),
+    terminalButton('x', 'Hide the panel', closeTerminalPanel),
   );
   head.append(title, tabs, tools);
 
-  for (const tab of TERM.tabs) tab.host.hidden = tab.id !== TERM.active;
-  fitTerminal();
+  for (const tab of TERM.tabs) tab.host.hidden = browser || tab.id !== TERM.active;
+  const host = $('browserHost');
+  if (host) host.hidden = !browser;
+  if (browser) updateBrowserBar();
+  else fitTerminal();
 }
 
-// The button in the top bar: shows and hides the panel.
+// The buttons in the top bar: show and hide the panel on that view.
 function renderTerminalToggle() {
-  const button = $('termToggle');
-  if (button) button.classList.toggle('active', TERM.open);
+  const terminal = $('termToggle');
+  if (terminal) terminal.classList.toggle('active', TERM.open && TERM.view === 'terminal');
+  const browser = $('browserToggle');
+  if (browser) browser.classList.toggle('active', browserShown());
+  syncBrowserLayout();
 }
 
 function terminalToggleButton() {
-  const button = el('button', `icon-button term-toggle${TERM.open ? ' active' : ''}`);
-  button.id = 'termToggle';
-  button.title = 'Terminal (Ctrl+`)';
-  button.innerHTML = ICON.terminal;
-  button.addEventListener('click', toggleTerminalPanel);
-  return button;
+  const holder = document.createDocumentFragment();
+  const browser = el('button', `icon-button term-toggle${browserShown() ? ' active' : ''}`);
+  browser.id = 'browserToggle';
+  browser.title = 'Browser';
+  browser.innerHTML = ICON.globe;
+  browser.addEventListener('click', toggleBrowserPanel);
+  const terminal = el('button', `icon-button term-toggle${TERM.open && TERM.view === 'terminal' ? ' active' : ''}`);
+  terminal.id = 'termToggle';
+  terminal.title = 'Terminal (Ctrl+`)';
+  terminal.innerHTML = ICON.terminal;
+  terminal.addEventListener('click', toggleTerminalPanel);
+  holder.append(browser, terminal);
+  return holder;
 }
 
 // Under the sub-agents panel, in its column: the two share its width.
@@ -480,7 +532,7 @@ function terminalRightWidth() {
 async function wireTerminal() {
   const panel = $('termPanel');
   const grip = el('div', 'term-resizer');
-  grip.title = 'Drag to resize the terminal. Double-click to reset.';
+  grip.title = 'Drag to resize the panel. Double-click to reset.';
   grip.addEventListener('pointerdown', startTerminalDrag);
   grip.addEventListener('dblclick', resetTerminalSize);
   panel.prepend(grip);
@@ -505,6 +557,7 @@ async function wireTerminal() {
   });
 
   TERM.position = termStored('position') === 'right' ? 'right' : 'bottom';
+  TERM.view = termStored('view') === 'browser' ? 'browser' : 'terminal';
   const height = Number(termStored('height'));
   if (Number.isFinite(height) && height > 0) TERM.height = clampTerminalHeight(height);
   const width = Number(termStored('width'));

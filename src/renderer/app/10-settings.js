@@ -217,6 +217,7 @@ function showSettingsTab(tab) {
     button.classList.toggle('active', button.dataset.tab === tab);
   }
   for (const pane of document.querySelectorAll('.settings-pane')) pane.hidden = pane.dataset.pane !== tab;
+  markPrefsMenu();
   if (tab === 'privacy') renderPrivacyPane();
   if (tab === 'preferences') renderPreferencesPane();
   if (tab === 'mcp') renderMcpPane();
@@ -372,7 +373,7 @@ function applyTheme(id) {
 
 function themeSection() {
   const wrap = el('div', 'theme-section');
-  wrap.append(el('div', 'pane-section first', 'Appearance'));
+  wrap.append(el('div', 'pane-section first', 'Theme'));
   const grid = el('div', 'theme-grid');
   for (const theme of THEMES) {
     const card = el('button', `theme-card${currentTheme() === theme.id ? ' active' : ''}`);
@@ -480,13 +481,198 @@ function computerUseRow(pane) {
   });
 }
 
+// The browser tool: on unless the user turns it off. The app's browser itself
+// stays for the user either way; this is whether the agent may use it.
+function browserRow(pane) {
+  const row = switchRow({
+    title: 'Browser for the agent',
+    desc: "Let the agent open your app's pages in the browser beside the conversation, to check what it "
+      + 'built: read them, click, type and take pictures. Pages on this computer open at once; another site '
+      + 'asks you once per session, and typing into one asks every time. It never sees your own browser.',
+    checked: S.init.state.browser !== false,
+    onChange: (on) => {
+      S.init.state.browser = on;
+      cf.setState({ browser: on });
+      paneStatus(pane, on ? 'Saved. The agent can use the browser from your next message.' : 'Saved.', 'ok');
+    },
+  });
+  const clear = el('button', 'btn small', 'Clear browsing data');
+  clear.title = "Sign out of every site in the app's browser, and forget its cookies, storage and cache";
+  clear.addEventListener('click', async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const ok = await confirmDialog({
+      title: 'Clear browsing data?',
+      text: "The app's browser forgets its cookies, logins, storage and cache. Your own browser is not touched.",
+      confirm: 'Clear', danger: true,
+    });
+    if (!ok) return;
+    try {
+      await call(cf.browserClear);
+      paneStatus(pane, 'Browsing data cleared.', 'ok');
+    } catch (err) {
+      paneStatus(pane, err.message, 'error');
+    }
+  });
+  row.querySelector('.set-text').append(clear);
+  clear.style.marginTop = '8px';
+  const holder = document.createDocumentFragment();
+  holder.append(row, browserSitesRow(pane), browserAnySiteRow(pane));
+  return holder;
+}
+
+// Sites the agent may open, use and type into without asking, like the pages
+// on this computer: the user's own staging or docs. A site covers the sites
+// under it (example.com covers docs.example.com).
+function browserSitesRow(pane) {
+  const row = el('div', 'set-row sub stack browser-sites');
+  const text = el('div', 'set-text');
+  text.append(el('div', 'set-title', 'Sites the agent may use without asking'),
+    el('div', 'set-desc', 'Your own sites, such as a staging server: the agent opens, reads and types into them '
+      + 'without asking, as with pages on this computer. Other sites ask once per session.'));
+  const list = el('div', 'site-list');
+  const sites = () => S.init.state.browserSites || [];
+  const save = async (next, message) => {
+    try {
+      const state = await call(cf.setState, { browserSites: next });
+      S.init.state.browserSites = state.browserSites || [];
+      draw();
+      paneStatus(pane, message, 'ok');
+    } catch (err) {
+      paneStatus(pane, err.message, 'error');
+    }
+  };
+  const draw = () => {
+    list.replaceChildren();
+    for (const site of sites()) {
+      const chip = el('span', 'site-chip');
+      const remove = el('button', 'icon-button');
+      remove.title = `Remove ${site}`;
+      remove.innerHTML = ICON.x;
+      remove.addEventListener('click', () => save(sites().filter((s) => s !== site), `Removed ${site}.`));
+      chip.append(icon('globe'), el('span', null, site), remove);
+      list.append(chip);
+    }
+    if (!sites().length) list.append(el('span', 'site-none', 'No sites yet.'));
+  };
+  const form = el('form', 'site-add');
+  const input = el('input', 'set-select');
+  input.placeholder = 'Add a site, like staging.example.com';
+  input.spellcheck = false;
+  input.setAttribute('aria-label', 'A site to allow');
+  const add = el('button', 'btn small', 'Add');
+  add.type = 'submit';
+  form.append(input, add);
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const value = input.value.trim();
+    if (!value) return;
+    const before = sites().length;
+    save([...sites(), value], 'Saved.').then(() => {
+      if (sites().length === before) paneStatus(pane, `"${value}" is not a site name, like example.com.`, 'error');
+      else input.value = '';
+    });
+  });
+  draw();
+  row.append(text, list, form);
+  return row;
+}
+
+function browserAnySiteRow(pane) {
+  return switchRow({
+    title: 'Let the agent use any site without asking',
+    desc: 'Less safe: a page the agent reads can hold instructions meant for it, and it could follow them to '
+      + 'other sites. Typing into a site that is not in your list still asks every time.',
+    checked: S.init.state.browserAnySite === true,
+    sub: true,
+    warn: true,
+    onChange: (on) => {
+      S.init.state.browserAnySite = on;
+      cf.setState({ browserAnySite: on });
+      paneStatus(pane, on ? 'Saved. Other sites no longer ask first; typing into them still does.' : 'Saved.', 'ok');
+    },
+  });
+}
+
+// Preferences has sections, listed under it in the Settings menu, so no one
+// screen holds everything: how the app looks, what new sessions get, the tools
+// the agent may use on this computer, and the app itself. The one chosen is
+// kept on this computer.
+const PREF_TABS = [
+  ['appearance', 'Appearance', 'sparkle', 'How the app looks. Kept on this computer.'],
+  ['sessions', 'Sessions', 'model', 'Your defaults for new sessions, and how much one message may spend. '
+    + 'These belong to your CodingFleet account, as on the web.'],
+  ['tools', 'Agent tools', 'monitor', 'What the agent may use on this computer besides files and commands.'],
+  ['app', 'App', 'gear', "Notifications, updates and the app's log."],
+];
+let prefsTab = null;
+
+function currentPrefsTab() {
+  if (prefsTab) return prefsTab;
+  try { prefsTab = localStorage.getItem('cf.prefs-tab'); } catch { /* the first one */ }
+  if (!PREF_TABS.some(([id]) => id === prefsTab)) prefsTab = 'appearance';
+  return prefsTab;
+}
+
+function showPrefsTab(id) {
+  prefsTab = id;
+  try { localStorage.setItem('cf.prefs-tab', id); } catch { /* this run only */ }
+  closeMenus();
+  showSettingsTab('preferences');
+  $('prefsPane').scrollTop = 0;
+}
+
+// The sections, under Preferences in the Settings menu. Built once; the one
+// showing is marked whenever a pane is chosen (showSettingsTab).
+function wirePrefsMenu() {
+  const parent = document.querySelector('#settingsTabs [data-tab="preferences"]');
+  if (!parent || document.querySelector('.settings-sub')) return;
+  parent.classList.add('has-sub');
+  let after = parent;
+  for (const [id, label, iconName] of PREF_TABS) {
+    const button = el('button', 'settings-sub');
+    button.dataset.sub = id;
+    button.append(icon(iconName), el('span', null, label));
+    button.addEventListener('click', () => showPrefsTab(id));
+    after.after(button);
+    after = button;
+  }
+}
+
+function markPrefsMenu() {
+  const tab = currentPrefsTab();
+  for (const button of document.querySelectorAll('#settingsTabs .settings-sub')) {
+    button.classList.toggle('active', settingsTab === 'preferences' && button.dataset.sub === tab);
+  }
+}
+
 function renderPreferencesPane() {
-  const pane = accountPane('prefsPane', 'Preferences',
-    'How the app looks, your defaults for new sessions, and how much one message may spend.');
-  // The theme is kept on this computer, so it shows even before the account loads.
-  $('prefsPane').insertBefore(themeSection(), $('prefsPane').children[1] || null);
-  if (!pane) return;
-  pane.append(el('div', 'pane-section', 'New sessions'));
+  const pane = $('prefsPane');
+  const tab = currentPrefsTab();
+  const [, label, , intro] = PREF_TABS.find(([id]) => id === tab);
+  pane.replaceChildren(paneHead(label, intro));
+  const body = pane;
+
+  if (tab === 'appearance') body.append(themeSection());
+  else if (tab === 'sessions') renderSessionPrefs(body);
+  else if (tab === 'tools') body.append(computerUseRow(pane), browserRow(pane));
+  else renderAppPrefs(body, pane);
+
+  const foot = el('div', 'pane-foot');
+  foot.append(el('div', 'pane-status'));
+  pane.append(foot);
+  applyStatus(pane);
+}
+
+// New sessions and spending: the account's settings, the same on the web.
+function renderSessionPrefs(body) {
+  const pane = $('prefsPane');
+  if (!S.account) {
+    body.append(el('div', 'pane-empty', S.accountError || 'Loading your settings…'));
+    if (!S.accountError) loadAccountSettings().then(() => showSettingsTab(settingsTab));
+    return;
+  }
+  body.append(el('div', 'pane-section first', 'New sessions'));
   const prefs = S.account.preferences;
   const save = (change, options) => saveAccountSettings(pane, { preferences: change }, options);
 
@@ -557,9 +743,9 @@ function renderPreferencesPane() {
   }
   modelRow.append(modelText, field);
   if (!S.models.length) modelRow.append(el('div', 'set-desc', S.modelsError || 'Loading models…'));
-  pane.append(modelRow);
+  body.append(modelRow);
 
-  pane.append(switchRow({
+  body.append(switchRow({
     title: 'Show legacy models',
     desc: 'List older models in the picker. They may have reduced support.',
     checked: prefs.show_legacy_models,
@@ -574,14 +760,14 @@ function renderPreferencesPane() {
     cf.setState({ capabilities: { [key]: on } });
     paneStatus(pane, 'Saved. New sessions use this.', 'ok');
   };
-  pane.append(switchRow({
+  body.append(switchRow({
     title: 'Image generation',
     desc: 'The agent can create images from a description. Each image costs credits. '
       + 'Applies to new sessions.',
     checked: caps.image_generation,
     onChange: (on) => setCapability('image_generation', on),
   }));
-  pane.append(switchRow({
+  body.append(switchRow({
     title: 'Memory',
     desc: 'The agent can read and update your CodingFleet memory: what it knows about you and your work, '
       + 'shared with the web chat. Applies to new sessions.',
@@ -589,73 +775,7 @@ function renderPreferencesPane() {
     onChange: (on) => setCapability('memory', on),
   }));
 
-  pane.append(el('div', 'pane-section', 'This computer'));
-  pane.append(switchRow({
-    title: 'Notifications',
-    desc: 'Tell me when a run finishes or waits for my approval while I am in another window.',
-    checked: S.init.state.notifications !== false,
-    onChange: (on) => {
-      S.init.state.notifications = on;
-      cf.setState({ notifications: on });
-      paneStatus(pane, 'Saved.', 'ok');
-    },
-  }));
-  pane.append(switchRow({
-    title: 'Keep the computer awake while the agent works',
-    desc: 'Stops Windows from putting the computer to sleep on its own during a run, so you can walk '
-      + 'away. The screen still turns off. Closing the lid or choosing Sleep still sleeps it.',
-    checked: S.init.state.keepAwake !== false,
-    onChange: (on) => {
-      S.init.state.keepAwake = on;
-      cf.setState({ keepAwake: on });
-      paneStatus(pane, 'Saved.', 'ok');
-    },
-  }));
-  pane.append(computerUseRow(pane));
-  const keysRow = el('div', 'set-row');
-  const keysText = el('div', 'set-text');
-  keysText.append(el('div', 'set-title', 'Keyboard shortcuts'),
-    el('div', 'set-desc', 'Answer approvals, move between sessions, find in a conversation. Ctrl+/ shows them anywhere.'));
-  const keysButton = el('button', 'btn small', 'Show');
-  keysButton.addEventListener('click', openShortcuts);
-  keysRow.append(keysText, keysButton);
-  pane.append(keysRow);
-
-  pane.append(el('div', 'pane-section', 'Updates'));
-  const updateRow = el('div', 'set-row');
-  const updateText2 = el('div', 'set-text');
-  updateText2.append(el('div', 'set-title', 'Version'), el('div', 'set-desc'));
-  updateText2.querySelector('.set-desc').id = 'updateLine';
-  updateRow.append(updateText2, el('button', 'btn small', 'Check now'));
-  pane.append(updateRow);
-  renderUpdateRow(updateRow);
-  if (!updateState && typeof cf.updateStatus === 'function') {
-    call(cf.updateStatus).then((status) => { updateState = status; renderUpdateRow(updateRow); }).catch(() => {});
-  }
-  pane.append(switchRow({
-    title: 'Update automatically',
-    desc: 'Check for new versions and download them in the background; they install when you restart '
-      + 'the app, never on their own. Off: the app never contacts the update server unless you press Check now.',
-    checked: S.init.state.autoUpdate === true,
-    onChange: (on) => {
-      S.init.state.autoUpdate = on;
-      cf.setState({ autoUpdate: on });
-      paneStatus(pane, 'Saved.', 'ok');
-    },
-  }));
-
-  pane.append(el('div', 'pane-section', 'Diagnostics'));
-  const logs = el('div', 'set-row');
-  const logsText = el('div', 'set-text');
-  logsText.append(el('div', 'set-title', 'Log and crash reports'),
-    el('div', 'set-desc', 'The app keeps a log of what it did — runs, tools, connection trouble, crashes — '
-      + 'but never your messages, files or key. After a crash it asks before sending anything.'));
-  const openLogs = el('button', 'btn small', 'Open log folder');
-  openLogs.addEventListener('click', () => call(cf.openLogs).catch((err) => paneStatus(pane, err.message, 'error')));
-  logs.append(logsText, openLogs);
-  pane.append(logs);
-
-  pane.append(el('div', 'pane-section', 'Spending control'));
+  body.append(el('div', 'pane-section', 'Spending control'));
   const capRow = el('div', 'set-row');
   const capText = el('div', 'set-text');
   capText.append(el('div', 'set-title', 'Credit cap per message'),
@@ -678,17 +798,82 @@ function renderPreferencesPane() {
   cap.addEventListener('change', saveCap);
   cap.addEventListener('keydown', (event) => { if (event.key === 'Enter') cap.blur(); });
   capRow.append(capText, cap);
-  pane.append(capRow);
+  body.append(capRow);
 
-  pane.append(switchRow({
+  body.append(switchRow({
     title: 'Economy mode',
     desc: 'Spend fewer credits on long sessions: the conversation is compacted at 40% of your context limit '
       + 'instead of 90%, so each tool round re-sends much less. Older details are summarized sooner.',
     checked: prefs.economy_mode,
     onChange: (on) => save({ economy_mode: on }),
   }));
-  const foot = el('div', 'pane-foot');
-  foot.append(el('div', 'pane-status'));
-  pane.append(foot);
-  applyStatus(pane);
+}
+
+// The app on this computer: notifications, sleep, shortcuts, updates, its log.
+function renderAppPrefs(body, pane = $('prefsPane')) {
+  body.append(el('div', 'pane-section first', 'This computer'));
+  body.append(switchRow({
+    title: 'Notifications',
+    desc: 'Tell me when a run finishes or waits for my approval while I am in another window.',
+    checked: S.init.state.notifications !== false,
+    onChange: (on) => {
+      S.init.state.notifications = on;
+      cf.setState({ notifications: on });
+      paneStatus(pane, 'Saved.', 'ok');
+    },
+  }));
+  body.append(switchRow({
+    title: 'Keep the computer awake while the agent works',
+    desc: 'Stops Windows from putting the computer to sleep on its own during a run, so you can walk '
+      + 'away. The screen still turns off. Closing the lid or choosing Sleep still sleeps it.',
+    checked: S.init.state.keepAwake !== false,
+    onChange: (on) => {
+      S.init.state.keepAwake = on;
+      cf.setState({ keepAwake: on });
+      paneStatus(pane, 'Saved.', 'ok');
+    },
+  }));
+  const keysRow = el('div', 'set-row');
+  const keysText = el('div', 'set-text');
+  keysText.append(el('div', 'set-title', 'Keyboard shortcuts'),
+    el('div', 'set-desc', 'Answer approvals, move between sessions, find in a conversation. Ctrl+/ shows them anywhere.'));
+  const keysButton = el('button', 'btn small', 'Show');
+  keysButton.addEventListener('click', openShortcuts);
+  keysRow.append(keysText, keysButton);
+  body.append(keysRow);
+
+  body.append(el('div', 'pane-section', 'Updates'));
+  const updateRow = el('div', 'set-row');
+  const updateText2 = el('div', 'set-text');
+  updateText2.append(el('div', 'set-title', 'Version'), el('div', 'set-desc'));
+  updateText2.querySelector('.set-desc').id = 'updateLine';
+  updateRow.append(updateText2, el('button', 'btn small', 'Check now'));
+  body.append(updateRow);
+  renderUpdateRow(updateRow);
+  if (!updateState && typeof cf.updateStatus === 'function') {
+    call(cf.updateStatus).then((status) => { updateState = status; renderUpdateRow(updateRow); }).catch(() => {});
+  }
+  body.append(switchRow({
+    title: 'Update automatically',
+    desc: 'Check for new versions and download them in the background; they install when you restart '
+      + 'the app, never on their own. Off: the app never contacts the update server unless you press Check now.',
+    checked: S.init.state.autoUpdate === true,
+    onChange: (on) => {
+      S.init.state.autoUpdate = on;
+      cf.setState({ autoUpdate: on });
+      paneStatus(pane, 'Saved.', 'ok');
+    },
+  }));
+
+  body.append(el('div', 'pane-section', 'Diagnostics'));
+  const logs = el('div', 'set-row');
+  const logsText = el('div', 'set-text');
+  logsText.append(el('div', 'set-title', 'Log and crash reports'),
+    el('div', 'set-desc', 'The app keeps a log of what it did — runs, tools, connection trouble, crashes — '
+      + 'but never your messages, files or key. After a crash it asks before sending anything.'));
+  const openLogs = el('button', 'btn small', 'Open log folder');
+  openLogs.addEventListener('click', () => call(cf.openLogs).catch((err) => paneStatus(pane, err.message, 'error')));
+  logs.append(logsText, openLogs);
+  body.append(logs);
+
 }

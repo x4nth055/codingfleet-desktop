@@ -18,6 +18,8 @@ const { BackgroundJobs } = require('../core/background');
 const { Terminals, listShells } = require('../core/terminal');
 const capture = require('./capture');
 const { createComputer } = require('./computer');
+const { createBrowser } = require('./browser');
+const browserPage = require('../core/browser-page');
 const { computerUseAllowed } = require('../core/computer');
 const config = require('../core/config');
 const git = require('./git');
@@ -716,6 +718,16 @@ async function screenshotForAgent(args, { call, sessionId } = {}) {
 const backgroundJobs = new BackgroundJobs({ shell: tools.SHELL, env: tools.commandEnv, kill: tools.killTree });
 backgroundJobs.onChange((sessionId, jobs) => send('background:changed', { sessionId, jobs }));
 
+// The browser in the dock panel: the user's, and the agent's browser tool.
+const browser = createBrowser({
+  getWindow: () => win, send, log,
+  // The sites the user trusts, and whether any site may be used without asking (Preferences).
+  policy: () => ({ sites: state.browserSites || [], anySite: state.browserAnySite === true }),
+  onImage: (sessionId, { id, image, title }) => send('run:event', {
+    sessionId, event: 'client.tool_image', data: { id, url: previewOf(image), title, quiet: true },
+  }),
+});
+
 // The terminal panel's shells. node-pty is loaded on the first one, so an app
 // whose native module cannot load still starts, and says so in the panel.
 let terminals = null;
@@ -821,6 +833,9 @@ const handlersFor = (sessionId) => new Map([
   ['computer', (args, context) => ((state.sessions[sessionId] || {}).cwd
     ? computer.forAgent(sessionId, args, context)
     : { output: 'Computer use is only for sessions that work on this computer, not in a cloud sandbox.', is_error: true })],
+  ['browser', (args, context) => ((state.sessions[sessionId] || {}).cwd
+    ? browser.forAgent(sessionId, args, context)
+    : { output: 'The browser is only for sessions that work on this computer, not in a cloud sandbox.', is_error: true })],
   // run_command stays the ordinary tool unless it asks for the background.
   ['run_command', (args, context) => (args.background
     ? backgroundJobs.start(sessionId, String(args.command || ''), context.cwd, { stopAfter: args.stop_after })
@@ -837,9 +852,10 @@ const FINISHED_TEXT = {
 };
 
 function approve(sessionId, cwd, call, localTools) {
-  const reason = localTools && localTools.has(call.name)
-    ? 'uses a local MCP tool'
-    : tools.approvalReason(call.name, call.arguments, cwd);
+  let reason;
+  if (localTools && localTools.has(call.name)) reason = 'uses a local MCP tool';
+  else if (call.name === 'browser') reason = browser.approvalReason(call.arguments);
+  else reason = tools.approvalReason(call.name, call.arguments, cwd);
   const auto = (PERMISSION_OVERRIDE || state.permissionMode) === 'auto';
   // Destructive commands ask every time; secrets ask even in auto mode.
   if (!guard.mustAsk(reason, { auto, allowedThisSession: allowedReasons(sessionId).has(reason) })) return 'allow';
@@ -1333,6 +1349,18 @@ function registerIpc() {
     log.error(`window: ${text}`);
   });
 
+  // The browser pane. Where it is goes without waiting for an answer.
+  ipcMain.on('browser:layout', (_event, layout) => browser.forUser.setLayout(layout || {}));
+  handle('browser:navigate', (url) => browser.forUser.navigate(url));
+  handle('browser:command', (command) => {
+    const run = { back: 'back', forward: 'forward', reload: 'reload', stop: 'stop', devtools: 'devtools', external: 'openExternal' }[command];
+    if (run) browser.forUser[run]();
+    return browser.forUser.state();
+  });
+  handle('browser:preset', (name) => browser.forUser.setPreset(name));
+  handle('browser:state', () => browser.forUser.state());
+  handle('browser:clear', () => browser.forUser.clearData());
+
   // The terminal panel. Typing and resizing are sent without waiting for an answer.
   handle('terminal:shells', () => listShells().map(({ id, name }) => ({ id, name })));
   handle('terminal:create', (options) => terminalHost().create(options || {}));
@@ -1484,10 +1512,15 @@ function registerIpc() {
   });
 
   handle('state:set', (patch) => {
-    for (const key of ['model', 'permissionMode', 'lastCwd', 'notifications', 'keepAwake', 'autoUpdate']) {
+    for (const key of ['model', 'permissionMode', 'lastCwd', 'notifications', 'keepAwake', 'autoUpdate', 'browser']) {
       if (patch && key in patch) state[key] = patch[key];
     }
     // The sandbox spec new cloud sessions use: an id, or null for the account's default.
+    // The browser's trusted sites, cleaned and kept short; and "any site", a plain yes or no.
+    if (patch && Array.isArray(patch.browserSites)) {
+      state.browserSites = [...new Set(patch.browserSites.map(browserPage.normalizeSite).filter(Boolean))].slice(0, 100);
+    }
+    if (patch && 'browserAnySite' in patch) state.browserAnySite = patch.browserAnySite === true;
     if (patch && 'sandboxSpec' in patch) state.sandboxSpec = sessionIdOf(patch.sandboxSpec);
     // A staged development start must not change what the next real start opens.
     if (patch && 'lastSession' in patch && !STAGED) state.lastSession = sessionIdOf(patch.lastSession);
@@ -1678,6 +1711,8 @@ function registerIpc() {
     if (computerUseAllowed({ enabled: state.computerUse, supported: computer.supported, executor, cwd: local.cwd })) {
       body.computer_use = true;
     }
+    // The browser tool: a folder session, while the Browser setting is on (it is by default).
+    if (local.cwd && state.browser !== false) body.browser_use = true;
     recoveryStore.start(sessionId, local.cwd);
     runInBackground(sessionId, makeRun(sessionId, localTools), body);
     return true;
@@ -1759,8 +1794,18 @@ function registerIpc() {
     approvals.delete(callId);
     syncTaskbar();
     // A destructive command is never allowed for a whole session, whatever the window sends.
-    if (decision === 'allow-session' && !guard.ALWAYS_ASK.has(waiting.reason)) {
+    if (decision === 'allow-session' && !guard.alwaysAsk(waiting.reason)) {
       rememberAllow(waiting.sessionId, waiting.reason);
+    }
+    // "Always allow <site>": only for a browser site's question, and it adds
+    // the site to the ones the user trusts (Preferences > Agent tools).
+    const site = /^uses (.+) in the browser$/.exec(String(waiting.reason || ''));
+    if (decision === 'allow-site' && site) {
+      const host = browserPage.normalizeSite(site[1]);
+      if (host && !(state.browserSites || []).includes(host)) {
+        state.browserSites = [...(state.browserSites || []), host].slice(0, 100);
+        saveState();
+      }
     }
     computer.approvalAnswered(waiting.sessionId);
     waiting.resolve(decision === 'deny' ? 'deny' : 'allow');

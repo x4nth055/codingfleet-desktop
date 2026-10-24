@@ -81,6 +81,13 @@ class Run {
           await this.consume(events);
           attempts = 0;
         } catch (err) {
+          // A server older than this app refuses the browser tool's field
+          // before any run exists (400 unknown_field): start again without it.
+          if (!this.runId && body.browser_use && err.code === 'unknown_field' && /browser_use/.test(err.message || '')) {
+            body = { ...body };
+            delete body.browser_use;
+            continue;
+          }
           // Never repeat a start POST: it could create a second paid turn.
           if (this.controller.signal.aborted || !err.transient) throw err;
           if (!this.runId) {

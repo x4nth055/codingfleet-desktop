@@ -183,6 +183,26 @@
 .switch input:focus-visible + .switch-track { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
 .switch input:disabled + .switch-track { opacity: .5; }
 
+/* Preferences' sections, indented under it in the Settings menu. The section
+   showing carries the mark; Preferences itself only says it is open. */
+.settings-tabs button.settings-sub { height: 32px; padding-left: 38px; font-size: 12.5px; }
+.settings-tabs button.settings-sub .icon { width: 14px; height: 14px; }
+.settings-tabs button.settings-sub.active .icon { color: var(--accent); }
+.settings-tabs button.has-sub.active { background: none; box-shadow: none; }
+
+/* The browser's sites (Preferences). */
+.browser-sites .site-list { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+.site-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 2px 0 9px;
+  border: 1px solid var(--line-2); border-radius: 8px; background: var(--well); font-size: 12.5px;
+}
+.site-chip .icon { width: 13px; height: 13px; color: var(--muted); }
+.site-chip .icon-button { width: 22px; height: 22px; }
+.site-chip .icon-button svg { width: 11px; height: 11px; }
+.site-none { font-size: 12px; color: var(--faint); }
+.site-add { flex: 1 1 100%; display: flex; gap: 8px; }
+.site-add .set-select { flex: 1; min-width: 0; height: 30px; }
+
 /* Font picker (Preferences): each choice shown in its own face. */
 .font-row { margin-top: 10px; }
 .font-grid { flex: 1 1 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }

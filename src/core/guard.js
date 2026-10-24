@@ -27,6 +27,10 @@ const COMPUTER = 'controls your computer';
 
 // Never covered by auto mode or by "allow for this session".
 const ALWAYS_ASK = new Set([DESTRUCTIVE, REMOTE_SCRIPT]);
+// The browser typing into a site that is not on this computer: "types into
+// example.com" (main/browser.js). A form there can send what is typed anywhere.
+const BROWSER_TYPES = /^types into /;
+const alwaysAsk = (reason) => ALWAYS_ASK.has(reason) || BROWSER_TYPES.test(String(reason || ''));
 // Not covered by auto mode, but "allow for this session" is fine.
 const ASK_EVEN_IN_AUTO = new Set([SECRETS, COMPUTER]);
 
@@ -140,7 +144,7 @@ function guardReason(name, args) {
 /** Whether a reason may be skipped by auto mode or a session's "allow all". */
 function mustAsk(reason, { auto, allowedThisSession }) {
   if (!reason) return false;
-  if (ALWAYS_ASK.has(reason)) return true;
+  if (alwaysAsk(reason)) return true;
   if (allowedThisSession) return false;
   if (ASK_EVEN_IN_AUTO.has(reason)) return true;
   return !auto;
@@ -148,5 +152,5 @@ function mustAsk(reason, { auto, allowedThisSession }) {
 
 module.exports = {
   SECRETS, DESTRUCTIVE, REMOTE_SCRIPT, COMPUTER, ALWAYS_ASK, ASK_EVEN_IN_AUTO,
-  isSecretPath, commandRisk, guardReason, mustAsk,
+  isSecretPath, commandRisk, guardReason, mustAsk, alwaysAsk,
 };

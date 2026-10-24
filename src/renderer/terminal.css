@@ -1,9 +1,10 @@
-/* ── Terminal panel (12-terminal.js) ─────────────────────────
+/* ── Dock panel: the terminal (12-terminal.js) and the browser (12-browser.js)
    Under the conversation, or as a column of its own on the right; with the
    sub-agents panel open too, under it in the same column. Its size is
    --term-height / --term-width, set when it is dragged. */
 .term-panel {
   position: relative;
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -55,10 +56,21 @@ body.term-resizing * { cursor: ns-resize !important; }
   background: var(--sidebar);
   border-bottom: 1px solid var(--line);
 }
-/* Alone on the right, the head is two rows: its name and buttons beside the
-   window buttons, the tabs under them. */
-.term-title { display: none; align-items: center; gap: 8px; min-width: 0; font-weight: 600; font-size: 13.5px; }
-.term-title .icon { width: 16px; height: 16px; color: var(--accent); }
+/* Alone on the right, the head is two rows: the view switch and buttons beside
+   the window buttons, the tabs or the address bar under them. */
+.panel-views { display: flex; align-items: center; gap: 2px; flex: none; }
+.panel-view {
+  height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 9px;
+  border: 1px solid transparent; border-radius: 7px; font-size: 12px; color: var(--muted);
+}
+.panel-view .icon { width: 14px; height: 14px; }
+.panel-view:hover { color: var(--text); background: var(--hover); }
+.panel-view.selected { color: var(--text); background: var(--panel-2); border-color: var(--line-2); }
+.panel-view.selected .icon { color: var(--accent); }
+/* A narrow panel keeps the icons. */
+@container (max-width: 620px) {
+  .term-panel.bottom .panel-view span, .app.with-panel .term-panel.right .panel-view span { display: none; }
+}
 .app:not(.with-panel) .term-panel.right .term-head {
   height: auto;
   display: grid;
@@ -66,7 +78,7 @@ body.term-resizing * { cursor: ns-resize !important; }
   grid-template-rows: 44px 36px;
   padding: 0;
 }
-.app:not(.with-panel) .term-panel.right .term-title { display: flex; grid-row: 1; grid-column: 1; padding-left: 14px; -webkit-app-region: drag; height: 100%; }
+.app:not(.with-panel) .term-panel.right .term-title { grid-row: 1; grid-column: 1; padding-left: 10px; -webkit-app-region: drag; height: 100%; }
 .app:not(.with-panel) .term-panel.right .term-tools { grid-row: 1; grid-column: 2; padding-right: 150px; }
 .platform-darwin .app:not(.with-panel) .term-panel.right .term-tools { padding-right: 8px; }
 .app:not(.with-panel) .term-panel.right .term-tabs { grid-row: 2; grid-column: 1 / -1; padding: 0 8px; border-top: 1px solid var(--line); height: 100%; }
@@ -105,6 +117,34 @@ body.term-resizing * { cursor: ns-resize !important; }
 .term-host { position: absolute; inset: 6px 4px 2px 12px; }
 .term-host .xterm { height: 100%; }
 .term-host .xterm .xterm-viewport { background-color: transparent; }
+
+/* The browser's bar, in the tabs' place. */
+.browser-bar { gap: 2px; }
+.browser-bar .icon-button { width: 26px; height: 26px; }
+.browser-bar .icon-button:disabled { opacity: .35; cursor: default; background: none; }
+.browser-url {
+  flex: 1; min-width: 60px; height: 26px; margin: 0 4px; padding: 0 10px;
+  border: 1px solid var(--line-2); border-radius: 7px; outline: 0;
+  background: var(--well); color: var(--text); font: 12.5px var(--font);
+}
+.browser-url:focus { border-color: var(--accent); }
+.browser-url::placeholder { color: var(--faint); }
+.browser-bar.loading .browser-url { border-bottom-color: var(--accent); }
+.browser-preset {
+  flex: none; height: 26px; padding: 0 4px; border: 1px solid var(--line-2); border-radius: 7px;
+  background: var(--well); color: var(--muted); font: 12px var(--font); outline: 0;
+}
+@container (max-width: 520px) { .browser-devtools, .browser-preset { display: none; } }
+/* Where the page is drawn (by the main process, over this box). */
+.browser-host { position: absolute; inset: 0; background: var(--well); }
+.browser-host.empty { display: grid; place-items: center; }
+.browser-empty { display: grid; justify-items: center; gap: 8px; max-width: 360px; padding: 20px; text-align: center; color: var(--muted); }
+.browser-empty-icon { width: 30px; height: 30px; color: var(--faint); }
+.browser-empty-title { font-weight: 600; color: var(--text); }
+.browser-empty-text { font-size: 12.5px; line-height: 1.5; }
+.browser-empty-link { max-width: 100%; display: inline-flex; align-items: center; gap: 6px; }
+.browser-empty-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-empty-link .icon { width: 13px; height: 13px; }
 
 .term-menu { position: fixed; bottom: auto; width: 220px; z-index: 80; }
 .term-toggle.active { color: var(--accent); background: var(--hover); }

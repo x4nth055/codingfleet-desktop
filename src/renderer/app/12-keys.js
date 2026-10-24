@@ -17,6 +17,7 @@ function shortcutGroups() {
       ['Ctrl+F', 'Find in the conversation'],
       ['Ctrl+B', 'Show or hide the sidebar'],
       ['Ctrl+`', 'Show or hide the terminal'],
+      ['Ctrl+L', 'The browser\'s address bar, when it has the focus'],
       ['Ctrl+,', 'Settings'],
       ['Ctrl+/', 'This list'],
     ]],
@@ -109,11 +110,12 @@ function cycleSession(step) {
 // open session. Plain letters would answer while someone types a message.
 function answerByKey(event) {
   if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
-  const decision = Object.keys(APPROVAL_KEYS).find((key) => APPROVAL_KEYS[key] === event.code);
+  let decision = Object.keys(APPROVAL_KEYS).find((key) => APPROVAL_KEYS[key] === event.code);
   if (!decision) return false;
   // A dialog on top is what the keys are for, not the conversation under it.
   if (!$('settings').hidden || document.querySelector('.confirm-overlay')) return false;
   const tool = waitingTools(S.current)[0];
+  if (tool && decision === 'allow' && !approvalChoices(tool).includes('allow')) decision = 'allow-session';
   if (!tool || !approvalChoices(tool).includes(decision)) return false;
   event.preventDefault();
   decideTool(tool, decision);

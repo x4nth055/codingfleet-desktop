@@ -107,6 +107,18 @@ contextBridge.exposeInMainWorld('cf', {
   stopBackground: call('background:stop'),
   backgroundTail: call('background:tail'),
   moveToBackground: call('background:move'),
+  browserLayout: (layout) => ipcRenderer.send('browser:layout', layout),
+  browserNavigate: call('browser:navigate'),
+  browserCommand: call('browser:command'),
+  browserPreset: call('browser:preset'),
+  browserState: call('browser:state'),
+  browserClear: call('browser:clear'),
+  onBrowser: (listener) => {
+    const channels = ['browser:state', 'browser:reveal', 'browser:shortcut'];
+    const wrapped = channels.map((channel) => [channel, (_event, payload) => listener(channel, payload)]);
+    for (const [channel, fn] of wrapped) ipcRenderer.on(channel, fn);
+    return () => { for (const [channel, fn] of wrapped) ipcRenderer.removeListener(channel, fn); };
+  },
   terminalShells: call('terminal:shells'),
   createTerminal: call('terminal:create'),
   terminals: call('terminal:list'),

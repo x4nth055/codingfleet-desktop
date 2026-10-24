@@ -6,7 +6,9 @@
 
 // ── Tool calls, grouped ────────────────────────────────────────────────────
 // The words for tools and approvals live in lib/tool-words.js, where they are tested.
-const { VERBS, GROUP_WORDS, ALLOW_LABELS, REASONS, ALWAYS_ASKED, toolSummary, groupSummary } = CF_TOOL_WORDS;
+const {
+  VERBS, GROUP_WORDS, alwaysAsked, sessionOnly, siteOfReason, reasonText, allowLabel, toolSummary, groupSummary,
+} = CF_TOOL_WORDS;
 
 const ACTIVE = ['queued', 'running', 'waiting'];
 
@@ -23,7 +25,8 @@ const approvalKey = (decision) => `${altLabel()}${APPROVAL_KEYS[decision].slice(
 // What the approval bar offers for a call: retry, always-asked, or the usual three.
 function approvalChoices(tool) {
   if (tool.reason === 'retry interrupted tool') return ['deny', 'allow'];
-  if (ALWAYS_ASKED.has(tool.reason)) return ['deny', 'allow'];
+  if (alwaysAsked(tool.reason)) return ['deny', 'allow'];
+  if (sessionOnly(tool.reason)) return ['deny', 'allow-session', 'allow-site'];
   return ['deny', 'allow-session', 'allow'];
 }
 
@@ -40,6 +43,12 @@ async function decideTool(tool, decision) {
     if (next.group.agentId) agentChanged(sessionId, next.group.agentId);
   }
   await cf.decide({ callId: tool.id, decision });
+  // "Always allow <site>": the main process added it to the sites in Preferences.
+  if (decision === 'allow-site') {
+    const site = siteOfReason(tool.reason);
+    const sites = S.init.state.browserSites || [];
+    if (site && !sites.includes(site)) S.init.state.browserSites = [...sites, site];
+  }
 }
 
 // The calls waiting for an answer in a session, oldest first, sub-agents' too.
@@ -321,6 +330,7 @@ function toolBody(tool) {
       if (tool.image) section(tool.imageTitle || 'Screenshot', shownImage(tool.image));
       break;
     case 'computer':
+    case 'browser':
       // What the agent saw after the action, when it asked for a picture.
       if (tool.image) section(tool.imageTitle || 'The screen after', shownImage(tool.image));
       if (Object.keys(args).length) section('Action', codeBlock(JSON.stringify(args, null, 2)));
@@ -337,26 +347,33 @@ function toolBody(tool) {
 function approvalBar(tool) {
   const bar = el('div', 'approval');
   const retry = tool.reason === 'retry interrupted tool';
-  bar.append(el('span', 'approval-text', `CodingFleet ${REASONS[tool.reason] || 'wants to use a tool'}.`));
+  bar.append(el('span', 'approval-text', `CodingFleet ${reasonText(tool.reason)}.`));
   // Only the oldest call waiting answers to the keys, so only it says so.
   const keyed = waitingTools(tool.group.sessionId)[0] === tool;
   const button = (className, label, decision) => {
     const node = el('button', className, label);
     node.addEventListener('click', () => decideTool(tool, decision));
-    if (keyed) {
+    if (keyed && APPROVAL_KEYS[decision]) {
       node.title = `${label} (${approvalKey(decision)})`;
       node.append(el('kbd', 'approval-kbd', approvalKey(decision)));
     }
     return node;
   };
   const deny = button('btn danger', retry ? 'Do not retry' : 'Deny', 'deny');
-  const always = button('btn', ALLOW_LABELS[tool.reason] || 'Allow all calls this session', 'allow-session');
+  const always = button('btn', allowLabel(tool.reason), 'allow-session');
   const allow = button('btn primary', retry ? 'Retry tool' : 'Allow', 'allow');
   if (retry) bar.append(deny, allow);
-  else if (ALWAYS_ASKED.has(tool.reason)) {
+  else if (alwaysAsked(tool.reason)) {
     // Asked every time, even in auto mode: there is no "allow all" for these.
     bar.classList.add('risky');
     bar.append(el('span', 'approval-note', 'Always asked'), deny, allow);
+  } else if (sessionOnly(tool.reason)) {
+    // A site in the browser: allowed for this session, or for good (it joins
+    // the sites in Preferences, which never ask).
+    always.classList.add('primary');
+    const forever = button('btn', `Always allow ${siteOfReason(tool.reason)}`, 'allow-site');
+    forever.title = 'Add it to the sites the agent may use without asking, typing included (Preferences > Agent tools)';
+    bar.append(deny, forever, always);
   } else bar.append(deny, always, allow);
   return bar;
 }
