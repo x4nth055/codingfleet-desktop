@@ -16,6 +16,8 @@ function renderTranscript() {
   box.replaceChildren();
   if (!S.current) {
     box.append(renderEmpty());
+    // A new session has no messages: the rail must not keep the last one's.
+    renderThreadNav();
     return;
   }
   const column = el('div', 'column');

@@ -112,6 +112,24 @@ app.whenReady().then(async () => {
       return reloadTranscript('t').then(() => {
         same('a finished turn keeps what this window drew',
              shape(S.transcripts.get('t') || []), ['user', 'stamp', 'assistant', 'tools:fs_read']);
+
+        // The rail of prompts on the right belongs to the session it lists: a
+        // new session (no prompts yet) shows none of the last one's.
+        $('settings').hidden = true;
+        S.settings.hasKey = true;
+        S.sessions = [{ id: 'rail', title: 'Two prompts', executor: 'client', created_at: new Date().toISOString() }];
+        S.transcripts.set('rail', fromHistory('rail', [
+          { role: 'user', text: 'First prompt' }, { role: 'assistant', text: 'One.' },
+          { role: 'user', text: 'Second prompt' }, { role: 'assistant', text: 'Two.' },
+        ], []));
+        S.loaded.add('rail');
+        S.current = 'rail';
+        renderMain();
+        const nav = $('threadNav');
+        check('a session with two prompts lists them on the rail', !nav.hidden && nav.children.length === 2);
+        newSession();
+        check('a new session shows no rail, and none of the last session\\'s prompts',
+              nav.hidden && nav.children.length === 0);
         return out;
       });
     })()`);
