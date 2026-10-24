@@ -12,6 +12,7 @@ const { createAwake } = require('./awake');
 const { startNativeDumps, createCrashes } = require('./crash');
 const { createUpdater } = require('./updater');
 const { createTaskbar } = require('./taskbar');
+const { createCodingAgents } = require('./coding-agents');
 const fileIndex = require('../core/file-index');
 const { createLog } = require('../core/log');
 const { BackgroundJobs } = require('../core/background');
@@ -347,6 +348,9 @@ function systemMessage(cwd) {
     `Operating system: ${os}. Shell for run_command and execute_code: ${shellNote}`,
     'Read files before you change them. Keep your answers short.',
   ];
+  // The coding CLIs the user switched on for agents (Settings > Coding agents).
+  const clis = codingAgents.instructions();
+  if (clis) lines.push('', clis);
   const project = projectInstructions(cwd);
   if (project) {
     lines.push(
@@ -718,6 +722,19 @@ async function screenshotForAgent(args, { call, sessionId } = {}) {
 const backgroundJobs = new BackgroundJobs({ shell: tools.SHELL, env: tools.commandEnv, kill: tools.killTree });
 backgroundJobs.onChange((sessionId, jobs) => send('background:changed', { sessionId, jobs }));
 
+// Codex, Claude Code and the other coding CLIs on this computer: what is
+// installed and signed in, and what the user lets CodingFleet agents do with
+// each (Settings > Coding agents; main/coding-agents.js).
+const codingAgents = createCodingAgents({
+  getState: () => state,
+  saveState,
+  send,
+  logFile: path.join(app.getPath('userData'), 'coding-agents-log.json'),
+  log,
+  backgroundJobs,
+  sessionLabel: (sessionId) => (state.sessions[sessionId] || {}).label || null,
+});
+
 // The browser in the dock panel: the user's, and the agent's browser tool.
 const browser = createBrowser({
   getWindow: () => win, send, log,
@@ -837,9 +854,10 @@ const handlersFor = (sessionId) => new Map([
     ? browser.forAgent(sessionId, args, context)
     : { output: 'The browser is only for sessions that work on this computer, not in a cloud sandbox.', is_error: true })],
   // run_command stays the ordinary tool unless it asks for the background.
-  ['run_command', (args, context) => (args.background
+  // A command that starts a coding CLI is refused when that CLI is off, and logged.
+  ['run_command', (args, context) => codingAgents.runCommand(sessionId, args, context, () => (args.background
     ? backgroundJobs.start(sessionId, String(args.command || ''), context.cwd, { stopAfter: args.stop_after })
-    : tools.executeTool('run_command', args, context))],
+    : tools.executeTool('run_command', args, context)))],
   ['read_background', (args, context) => backgroundJobs.read(sessionId, args.id, args.wait, context.signal)],
   ['stop_background', (args) => backgroundJobs.stop(sessionId, args.id)],
 ]);
@@ -856,10 +874,19 @@ function approve(sessionId, cwd, call, localTools) {
   if (localTools && localTools.has(call.name)) reason = 'uses a local MCP tool';
   else if (call.name === 'browser') reason = browser.approvalReason(call.arguments);
   else reason = tools.approvalReason(call.name, call.arguments, cwd);
+  // A command that starts a coding CLI follows the user's choice for that CLI
+  // (Settings > Coding agents), unless the guard has its own reason to ask.
+  const cli = guard.guardReason(call.name, call.arguments) ? null : codingAgents.approval(call);
+  if (cli && (cli.refuse || cli.allow)) return 'allow'; // an "off" CLI is refused when it runs, with the reason
+  if (cli) reason = cli.reason;
   const auto = (PERMISSION_OVERRIDE || state.permissionMode) === 'auto';
   // Destructive commands ask every time; secrets ask even in auto mode.
   if (!guard.mustAsk(reason, { auto, allowedThisSession: allowedReasons(sessionId).has(reason) })) return 'allow';
-  return new Promise((resolve) => {
+  return new Promise((answer) => {
+    const resolve = (decision) => {
+      if (cli && decision !== 'allow') codingAgents.declined(sessionId, call, cwd);
+      answer(decision);
+    };
     approvals.set(call.id, { resolve, sessionId, reason });
     syncTaskbar();
     send('run:event', { sessionId, event: 'client.approval', data: { id: call.id, reason } });
@@ -1153,6 +1180,7 @@ function pointGitWatch(target) {
 }
 
 function registerIpc() {
+  codingAgents.register(handle);
   handle('app:init', () => ({
     version: app.getVersion(),
     // A crash since the last window load, for the window to offer to send.
@@ -1853,6 +1881,7 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
     registerIpc();
     createWindow();
     updates.start();
+    codingAgents.start();
   });
   app.on('window-all-closed', () => app.quit());
   app.on('will-quit', () => {

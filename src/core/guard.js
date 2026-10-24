@@ -30,7 +30,11 @@ const ALWAYS_ASK = new Set([DESTRUCTIVE, REMOTE_SCRIPT]);
 // The browser typing into a site that is not on this computer: "types into
 // example.com" (main/browser.js). A form there can send what is typed anywhere.
 const BROWSER_TYPES = /^types into /;
-const alwaysAsk = (reason) => ALWAYS_ASK.has(reason) || BROWSER_TYPES.test(String(reason || ''));
+// A coding CLI the user set to "Ask each time" (Settings > Coding agents):
+// "starts Codex on this computer" (main/coding-agents.js).
+const STARTS_CLI = /^starts .+ on this computer$/;
+const alwaysAsk = (reason) => ALWAYS_ASK.has(reason) || BROWSER_TYPES.test(String(reason || ''))
+  || STARTS_CLI.test(String(reason || ''));
 // Not covered by auto mode, but "allow for this session" is fine.
 const ASK_EVEN_IN_AUTO = new Set([SECRETS, COMPUTER]);
 

@@ -143,6 +143,16 @@ contextBridge.exposeInMainWorld('cf', {
     ipcRenderer.on('background:changed', wrapped);
     return () => ipcRenderer.removeListener('background:changed', wrapped);
   },
+  // Codex, Claude Code and the other coding CLIs on this computer (Settings > Coding agents).
+  codingAgents: call('codingAgents:get'),
+  detectCodingAgents: call('codingAgents:detect'),
+  setCodingAgent: call('codingAgents:set'),
+  clearCodingAgentsLog: call('codingAgents:clearLog'),
+  onCodingAgents: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on('codingAgents:changed', wrapped);
+    return () => ipcRenderer.removeListener('codingAgents:changed', wrapped);
+  },
   // The path of a file dropped on the window (Electron no longer puts it on File).
   pathForFile: (file) => {
     try { return webUtils.getPathForFile(file) || ''; } catch { return ''; }

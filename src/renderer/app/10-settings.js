@@ -221,6 +221,7 @@ function showSettingsTab(tab) {
   if (tab === 'privacy') renderPrivacyPane();
   if (tab === 'preferences') renderPreferencesPane();
   if (tab === 'mcp') renderMcpPane();
+  if (tab === 'codingAgents') renderCodingAgentsPane();
   if (tab === 'keys') renderKeysPane();
   if (tab === 'billing') renderBillingPane();
   if (tab === 'sandboxes') renderSandboxesPane(true);

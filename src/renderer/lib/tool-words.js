@@ -110,8 +110,11 @@
 
   // Reasons the app asks about every time (src/core/guard.js ALWAYS_ASK), and
   // the browser typing into a site ("types into example.com", guard.alwaysAsk).
+  // So is a coding CLI set to "Ask each time": "starts Codex on this computer".
   const ALWAYS_ASKED = new Set(['may delete or overwrite data', 'runs a script from the internet']);
-  const alwaysAsked = (reason) => ALWAYS_ASKED.has(reason) || /^types into /.test(String(reason || ''));
+  const STARTS_CLI = /^starts (.+) on this computer$/;
+  const alwaysAsked = (reason) => ALWAYS_ASKED.has(reason) || /^types into /.test(String(reason || ''))
+    || STARTS_CLI.test(String(reason || ''));
 
   // The browser's reasons name the site: "uses example.com in the browser",
   // asked once per site and session; "types into example.com", every time.
@@ -126,6 +129,8 @@
     if (m) return `wants to use ${m[1]} in its browser`;
     m = /^types into (.+)$/.exec(r);
     if (m) return `wants to type into ${m[1]} in its browser`;
+    m = STARTS_CLI.exec(r);
+    if (m) return `wants to start ${m[1]} on this computer`;
     return 'wants to use a tool';
   }
 
