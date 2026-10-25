@@ -277,6 +277,10 @@
 }
 .mcp-env { height: auto; padding: 7px 10px; resize: vertical; }
 .mcp-token-row input:focus, .mcp-field input:focus, .mcp-env:focus { border-color: var(--accent); }
+/* The same height as the settings window's text inputs (.modal input). */
+.mcp-field .set-select { height: 36px; min-width: 0; }
+/* A field is a column: flex: 1 would stretch its input to the row's height. */
+.mcp-field > input, .mcp-field > .set-select, .mcp-field > .mcp-env { flex: none; }
 .mcp-token-row .btn { height: 30px; }
 .mcp-help { margin-top: 5px; font-size: 11.5px; color: var(--faint); }
 .mcp-help a { color: var(--accent); text-decoration: none; }

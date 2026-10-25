@@ -189,12 +189,23 @@ function saveMcp() {
   localMcp.configure(mcp.local);
 }
 
+// How a remote server's credentials go, read back from what is saved:
+// a full "Basic ..." value, the token in its own header, or a bearer token.
+function remoteAuth(r) {
+  if (!r.token) return { kind: 'none' };
+  if (r.authHeader && r.authHeader.toLowerCase() !== 'authorization') return { kind: 'header' };
+  if (!/^Basic\s/i.test(r.token)) return { kind: 'bearer' };
+  // The username is shown so an edit can keep it; the password never leaves here.
+  const plain = Buffer.from(r.token.replace(/^Basic\s+/i, ''), 'base64').toString('utf8');
+  return { kind: 'basic', username: plain.split(':')[0] };
+}
+
 function mcpView() {
   return {
     remote: mcp.remote.map((r) => ({
       id: r.id, key: r.key, name: r.name, url: r.url, catalog: r.catalog || null,
       authHeader: r.authHeader || null, tools: r.tools || null, enabled: Boolean(r.enabled),
-      hasToken: Boolean(r.token),
+      hasToken: Boolean(r.token), auth: remoteAuth(r),
     })),
     local: mcp.local.map((l) => ({
       id: l.id, name: l.name, command: l.command, args: l.args || [], enabled: Boolean(l.enabled),
@@ -228,7 +239,13 @@ function saveRemote(input) {
     tools: Array.isArray(entry.tools) ? entry.tools.filter((t) => typeof t === 'string').slice(0, 200) : null,
     enabled: Boolean(entry.enabled),
   });
-  if (typeof entry.token === 'string') existing.token = entry.token.trim().slice(0, 4000) || null;
+  if (typeof entry.token === 'string') {
+    const token = entry.token.trim();
+    // A line break would start a header of its own; the server refuses these too.
+    if (/[^\x20-\x7e\t]/.test(token)) throw new Error('The token can use only printable ASCII characters.');
+    if (token.length > 4000) throw new Error('The token is too long (at most 4000 characters).');
+    existing.token = token || null;
+  }
   if (existing.enabled && mcp.remote.filter((r) => r.enabled).length > MAX_REMOTE) {
     existing.enabled = false;
     saveMcp();
@@ -1524,6 +1541,16 @@ function registerIpc() {
     mcp.remote = mcp.remote.filter((r) => r.id !== id);
     saveMcp();
     return mcpView();
+  });
+  // The server connects as a run would, with the saved credentials, which
+  // never go back to the window.
+  handle('mcp:testRemote', (id) => {
+    const r = mcp.remote.find((x) => x.id === id);
+    if (!r) throw new Error('That server is gone.');
+    const server = { url: r.url };
+    if (r.token) server.token = r.token;
+    if (r.token && r.authHeader) server.auth_header = r.authHeader;
+    return api.testMcpServer(server);
   });
   handle('mcp:saveLocal', (entry) => saveLocal(entry));
   handle('mcp:deleteLocal', (id) => {

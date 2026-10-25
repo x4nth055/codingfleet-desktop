@@ -170,25 +170,69 @@ function catalogItem(key, info, saved, pane) {
   return item;
 }
 
+const AUTH_LABEL = { bearer: 'Bearer token', basic: 'Username and password', header: 'API key header' };
+
 function customItem(server, pane) {
   const item = el('div', 'mcp-item');
   const head = el('div', 'mcp-item-head');
   const text = el('div', 'mcp-item-text');
   const title = el('div', 'mcp-item-name', server.name);
-  if (server.hasToken) title.append(el('span', 'mcp-pill free', 'Token saved'));
+  const kind = (server.auth && server.auth.kind) || 'none';
+  if (kind !== 'none') title.append(el('span', 'mcp-pill free', AUTH_LABEL[kind]));
   text.append(title, el('div', 'mcp-item-desc mono', server.url));
+  const state = el('div', 'mcp-state');
+  const known = remoteStatus.get(server.id);
+  if (!known) state.textContent = 'Not tested yet';
+  else if (known.testing) state.textContent = 'Connecting…';
+  else if (!known.connected) {
+    state.textContent = known.error || 'Could not connect.';
+    state.classList.add('bad');
+  } else {
+    const names = known.tools.map((t) => t.name);
+    state.textContent = `${names.length} tool${names.length === 1 ? '' : 's'}: ${names.slice(0, 8).join(', ')}${names.length > 8 ? '…' : ''}`;
+    state.classList.add('good');
+  }
+  text.append(state);
+  const test = el('button', 'icon-button');
+  test.title = 'Test the connection';
+  test.innerHTML = ICON.refresh;
+  test.disabled = Boolean(known && known.testing);
+  test.addEventListener('click', () => testRemoteServer(server.id));
+  const edit = el('button', 'icon-button');
+  edit.title = 'Edit';
+  edit.innerHTML = ICON.edit;
   const remove = el('button', 'icon-button danger');
   remove.title = 'Remove this server';
   remove.innerHTML = ICON.trash;
   remove.addEventListener('click', async () => {
     if (await confirmDialog({ title: 'Remove this server?', text: `${server.name} and its token are removed from this computer.`, confirm: 'Remove', danger: true })) {
+      remoteStatus.delete(server.id);
       mcpAction(pane, cf.mcpDeleteRemote, server.id, 'Removed');
     }
   });
   const toggle = mcpSwitch(server.enabled, (on) => mcpAction(pane, cf.mcpSaveRemote, { ...server, enabled: on }));
-  head.append(mcpBadge(null, server.name), text, remove, toggle);
+  head.append(mcpBadge(null, server.name), text, test, edit, remove, toggle);
   item.append(head);
+  const form = customForm(pane, server);
+  form.hidden = true;
+  edit.addEventListener('click', () => { form.hidden = !form.hidden; });
+  item.append(form);
   return item;
+}
+
+const remoteStatus = new Map();
+
+// CodingFleet connects to the server as a run would and says what it offers,
+// or why it failed (wrong credentials, wrong path, a firewall...).
+async function testRemoteServer(id) {
+  remoteStatus.set(id, { testing: true });
+  renderMcpPane();
+  try {
+    remoteStatus.set(id, await call(cf.mcpTestRemote, id));
+  } catch (err) {
+    remoteStatus.set(id, { connected: false, error: err.message, tools: [] });
+  }
+  renderMcpPane();
 }
 
 function field(label, input, hint) {
@@ -208,23 +252,100 @@ function textInput(placeholder, value = '', type = 'text') {
   return input;
 }
 
-function customForm(pane) {
-  const form = el('details', 'mcp-form');
-  form.append(el('summary', null, '+ Add a remote server'));
-  const name = textInput('My server');
-  const url = textInput('https://example.com/mcp');
-  const token = textInput('Optional', '', 'password');
-  const header = textInput('Authorization');
-  const add = el('button', 'btn primary small', 'Add server');
-  add.addEventListener('click', () => mcpAction(pane, cf.mcpSaveRemote, {
-    name: name.value, url: url.value, token: token.value, authHeader: header.value.trim() || null, enabled: true,
-  }, 'Added'));
+// "Basic <base64>" for RFC 7617, with the UTF-8 bytes of user:password.
+function basicCredentials(username, password) {
+  const bytes = new TextEncoder().encode(`${username}:${password}`);
+  let binary = '';
+  bytes.forEach((b) => { binary += String.fromCharCode(b); });
+  return `Basic ${btoa(binary)}`;
+}
+
+// Adds a remote server, or edits `server`. Credentials left empty in an edit
+// keep the saved ones: the window never sees them.
+function customForm(pane, server = null) {
+  const editing = Boolean(server);
+  const savedKind = editing ? ((server.auth && server.auth.kind) || 'none') : 'none';
+  const keep = 'Saved. Type a new one to replace it.';
+  const form = editing ? el('div', 'mcp-form open') : el('details', 'mcp-form');
+  if (!editing) form.append(el('summary', null, '+ Add a remote server'));
+  const name = textInput('My server', editing ? server.name : '');
+  const url = textInput('https://example.com/mcp', editing ? server.url : '');
+  const kind = el('select', 'set-select');
+  for (const [value, label] of [['none', 'None'], ['bearer', 'Bearer token'],
+    ['basic', 'Username and password (Basic)'], ['header', 'API key in a header']]) {
+    const option = el('option', null, label);
+    option.value = value;
+    kind.append(option);
+  }
+  kind.value = savedKind;
+  const token = textInput(savedKind === 'bearer' ? keep : 'Token', '', 'password');
+  const username = textInput('Username', savedKind === 'basic' ? server.auth.username || '' : '');
+  const password = textInput(savedKind === 'basic' ? keep : 'Password', '', 'password');
+  const header = textInput('X-API-Key', savedKind === 'header' ? server.authHeader || '' : '');
+  const apiKey = textInput(savedKind === 'header' ? keep : 'API key', '', 'password');
+
+  const fields = {
+    bearer: [field('Bearer token', token, 'Sent as "Authorization: Bearer <token>". A value that starts '
+      + 'with a scheme ("Token abc") is sent as it is.')],
+    basic: [field('Username', username), field('Password', password, 'For WordPress, use an Application Password.')],
+    header: [field('Header name', header, 'The header the server reads the key from.'), field('API key', apiKey)],
+    none: [],
+  };
   const grid = el('div', 'mcp-grid');
-  grid.append(field('Name', name), field('Server URL', url, 'Streamable HTTP, https only.'),
-    field('Token', token, 'Sent as "Authorization: Bearer <token>".'),
-    field('Header name', header, 'Only if the server wants the token in its own header.'));
+  const showFields = () => {
+    grid.replaceChildren(field('Name', name), field('Server URL', url, 'Streamable HTTP or SSE, https only.'),
+      field('Authentication', kind, 'Stored encrypted on this computer.'), ...fields[kind.value]);
+  };
+  kind.addEventListener('change', showFields);
+  showFields();
+
+  // The credentials to save: undefined keeps the saved ones, '' removes them.
+  const credentials = () => {
+    const same = editing && kind.value === savedKind;
+    if (kind.value === 'none') return { token: '', authHeader: null };
+    if (kind.value === 'bearer') {
+      const value = token.value.trim();
+      if (!value && !same) throw new Error('Enter the bearer token.');
+      return { token: value || undefined, authHeader: null };
+    }
+    if (kind.value === 'basic') {
+      const user = username.value.trim();
+      if (!user) throw new Error('Enter the username.');
+      if (user.includes(':')) throw new Error('The username cannot contain ":".');
+      if (!password.value) {
+        if (same && user === server.auth.username) return { token: undefined, authHeader: null };
+        throw new Error('Enter the password.');
+      }
+      return { token: basicCredentials(user, password.value), authHeader: null };
+    }
+    const headerName = header.value.trim();
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(headerName)) throw new Error('Enter a header name (letters, digits, "-" and "_").');
+    const value = apiKey.value.trim();
+    if (!value && !same) throw new Error('Enter the API key.');
+    return { token: value || undefined, authHeader: headerName };
+  };
+
+  const save = el('button', 'btn primary small', editing ? 'Save' : 'Add server');
+  save.addEventListener('click', async () => {
+    let auth;
+    try {
+      auth = credentials();
+    } catch (err) {
+      paneStatus(pane, err.message, 'error');
+      return;
+    }
+    const ok = await mcpAction(pane, cf.mcpSaveRemote, {
+      id: editing ? server.id : undefined, name: name.value, url: url.value,
+      ...auth, enabled: editing ? server.enabled : true,
+    }, editing ? 'Saved' : 'Added');
+    if (!ok) return;
+    // Say at once whether it connects: a new server is the last one added.
+    const custom = mcpState.remote.filter((r) => !r.catalog);
+    const saved = editing ? server : custom[custom.length - 1];
+    if (saved) testRemoteServer(saved.id);
+  });
   const actions = el('div', 'mcp-actions');
-  actions.append(add);
+  actions.append(save);
   form.append(grid, actions);
   return form;
 }

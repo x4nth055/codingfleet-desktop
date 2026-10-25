@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('cf', {
   mcpGet: call('mcp:get'),
   mcpSaveRemote: call('mcp:saveRemote'),
   mcpDeleteRemote: call('mcp:deleteRemote'),
+  mcpTestRemote: call('mcp:testRemote'),
   mcpSaveLocal: call('mcp:saveLocal'),
   mcpDeleteLocal: call('mcp:deleteLocal'),
   mcpLocalStatus: call('mcp:localStatus'),
