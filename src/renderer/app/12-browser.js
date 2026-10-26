@@ -11,8 +11,15 @@
 const BROWSER = {
   state: { url: '', title: '', loading: false, canGoBack: false, canGoForward: false, preset: 'desktop' },
   sent: '',      // the last layout told to the main process
-  frame: 0,      // the loop that follows the pane while it shows
+  frame: 0,      // the loop that follows the pane while something moves it
+  still: 0,      // frames in a row the pane has not moved
 };
+
+// How many frames the pane is followed after it last moved: a slide that
+// pauses for a frame is still followed to its end.
+const BROWSER_SETTLE_FRAMES = 12;
+// Transitions that only repaint: they never move the pane.
+const PAINT_ONLY_TRANSITION = /^(opacity|color|background|border-color|box-shadow|filter|outline|text-shadow|fill|stroke)/;
 
 const BROWSER_PRESETS = [['desktop', 'Desktop'], ['tablet', 'Tablet'], ['mobile', 'Mobile']];
 
@@ -151,20 +158,48 @@ function renderBrowserEmpty() {
 // while a dialog, the image viewer or the drop target is open.
 const coveredByDialog = () => Boolean(document.querySelector('.overlay:not([hidden]), #viewer, #dropOverlay:not([hidden])'));
 
-function syncBrowserLayout() {
+// Tells the main process where the pane is, if that changed. True when it did.
+function sendBrowserLayout() {
   const host = $('browserHost');
-  if (!host || typeof cf.browserLayout !== 'function') return;
   const visible = browserShown() && Boolean(BROWSER.state.url) && !coveredByDialog();
   const r = host.getBoundingClientRect();
   const layout = { visible: visible && r.width > 0 && r.height > 0, rect: { x: r.left, y: r.top, width: r.width, height: r.height } };
   const key = JSON.stringify([layout.visible, Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]);
-  if (key !== BROWSER.sent) {
-    BROWSER.sent = key;
-    cf.browserLayout(layout);
+  if (key === BROWSER.sent) return false;
+  BROWSER.sent = key;
+  cf.browserLayout(layout);
+  return true;
+}
+
+// Something may have moved the pane: say where it is now, then follow it
+// frame by frame until it has stayed put for a while. A sidebar sliding shut
+// moves it without resizing it. A window where nothing moves draws nothing.
+function syncBrowserLayout() {
+  if (!$('browserHost') || typeof cf.browserLayout !== 'function') return;
+  sendBrowserLayout();
+  BROWSER.still = 0;
+  if (browserShown() && !BROWSER.frame) BROWSER.frame = requestAnimationFrame(followBrowserLayout);
+}
+
+function followBrowserLayout() {
+  BROWSER.frame = 0;
+  if (sendBrowserLayout()) BROWSER.still = 0;
+  else BROWSER.still++;
+  if (browserShown() && BROWSER.still < BROWSER_SETTLE_FRAMES) BROWSER.frame = requestAnimationFrame(followBrowserLayout);
+}
+
+// What can move the pane: the window, the sidebar, the panels and the pane
+// itself changing size, and anything sliding into place.
+function watchBrowserLayout() {
+  const resized = new ResizeObserver(() => syncBrowserLayout());
+  for (const node of [$('browserHost'), document.querySelector('.sidebar'), document.querySelector('.main'),
+    $('agentsPanel'), $('termPanel')]) {
+    if (node) resized.observe(node);
   }
-  // While it shows, follow the pane: a sidebar sliding shut moves it without resizing it.
-  cancelAnimationFrame(BROWSER.frame);
-  if (browserShown()) BROWSER.frame = requestAnimationFrame(syncBrowserLayout);
+  const moving = (event) => {
+    if (browserShown() && !PAINT_ONLY_TRANSITION.test(event.propertyName || '')) syncBrowserLayout();
+  };
+  for (const type of ['transitionrun', 'transitionend', 'transitioncancel']) document.addEventListener(type, moving, true);
 }
 
 function onBrowserEvent(channel, payload) {
@@ -189,6 +224,7 @@ async function wireBrowser() {
   $('termBody').append(host);
   if (typeof cf.onBrowser !== 'function') return;
   cf.onBrowser(onBrowserEvent);
+  watchBrowserLayout();
   // Dialogs open and close by their hidden attribute or by being added.
   new MutationObserver(() => syncBrowserLayout()).observe(document.body, {
     childList: true, subtree: false, attributes: true, attributeFilter: ['hidden'],

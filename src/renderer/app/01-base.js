@@ -190,19 +190,65 @@ function codeLanguage(code) {
   return match ? match[1].toLowerCase() : '';
 }
 
-function highlightCode(code, lang) {
+// A streamed answer is drawn again many times a second, and the code blocks it
+// has finished are the same each time: their colors are worked out once. Kept
+// newest last, within a count and a size.
+const HIGHLIGHT_CACHE_ENTRIES = 400;
+const HIGHLIGHT_CACHE_CHARS = 8_000_000;
+const highlightCache = new Map(); // `${language, or ? for a guess}\0${text}` -> { value, language, relevance }
+let highlightCacheChars = 0;
+
+function highlighted(language, text, work) {
+  const key = `${language}\0${text}`;
+  let hit = highlightCache.get(key);
+  if (hit) {
+    highlightCache.delete(key);
+    highlightCache.set(key, hit);
+    return hit;
+  }
+  hit = work();
+  highlightCache.set(key, hit);
+  highlightCacheChars += key.length + hit.value.length;
+  while (highlightCache.size > HIGHLIGHT_CACHE_ENTRIES || highlightCacheChars > HIGHLIGHT_CACHE_CHARS) {
+    const [oldKey, old] = highlightCache.entries().next().value;
+    highlightCache.delete(oldKey);
+    highlightCacheChars -= oldKey.length + old.value.length;
+  }
+  return hit;
+}
+
+const highlightAs = (language, text) => highlighted(language, text,
+  () => ({ value: hljs.highlight(text, { language, ignoreIllegals: true }).value }));
+
+// `writing`: the block of code an answer is still writing, { key, guess, provisional }.
+// Guessing a language tries every one, which is too slow for every frame: the
+// guess made for a shorter copy of the block stands until the block has
+// doubled, and `provisional` says the colors were drawn from that older guess.
+function highlightCode(code, lang, writing = null) {
   if (typeof hljs === 'undefined') return '';
   const text = code.textContent;
   if (!text || text.length > HIGHLIGHT_LIMIT) return '';
   const name = LANGUAGE_ALIASES[lang] || lang;
   try {
     if (name && hljs.getLanguage(name)) {
-      code.innerHTML = hljs.highlight(text, { language: name, ignoreIllegals: true }).value;
+      code.innerHTML = highlightAs(name, text).value;
       return name;
     }
     if (!lang && text.length <= GUESS_LIMIT) {
-      const guess = hljs.highlightAuto(text);
-      if (guess.language && guess.relevance >= 5) {
+      const before = writing && writing.guess;
+      if (before && before.key === writing.key && text.length < before.length * 2) {
+        writing.provisional = true;
+        if (!before.language || !hljs.getLanguage(before.language)) return '';
+        code.innerHTML = highlightAs(before.language, text).value;
+        return before.language;
+      }
+      const guess = highlighted('?', text, () => {
+        const found = hljs.highlightAuto(text);
+        return { value: found.value, language: found.language, relevance: found.relevance };
+      });
+      const sure = Boolean(guess.language && guess.relevance >= 5);
+      if (writing) writing.guess = { key: writing.key, language: sure ? guess.language : null, length: text.length };
+      if (sure) {
         code.innerHTML = guess.value;
         return guess.language;
       }
@@ -219,12 +265,15 @@ function languageLabel(lang, detected) {
   return (known && known.name) || key;
 }
 
-function decorateCode(node) {
-  for (const pre of node.querySelectorAll('pre')) {
+// `writing` (see highlightCode) goes to the last block of code in `node`: the
+// one an answer is still writing, when `node` is the end of that answer.
+function decorateCode(node, writing = null) {
+  const pres = [...node.querySelectorAll('pre')];
+  for (const [index, pre] of pres.entries()) {
     const code = pre.querySelector('code');
     if (!code || pre.parentElement.classList.contains('code-block')) continue;
     const lang = codeLanguage(code);
-    const detected = highlightCode(code, lang);
+    const detected = highlightCode(code, lang, index === pres.length - 1 ? writing : null);
     code.classList.add('hljs');
     const block = el('div', 'code-block');
     const head = el('div', 'code-head');
@@ -252,15 +301,28 @@ function decorateCode(node) {
 
 function setMarkdown(node, text) {
   node.innerHTML = md(text);
-  decorateCode(node);
+  finishMarkdown(node, new Set());
+  // Drawn whole: a streamed frame that follows starts over (streamMarkdown).
+  node.mdBlocks = null;
+  node.mdGuess = null;
+  node.mdText = text;
+  node.mdFinal = true;
+}
+
+// What sanitized markdown still needs once it is in `node`: code blocks, and
+// pictures. `seen` holds the pictures shown before `node` in the same answer.
+// Returns the pictures `node` adds to them.
+function finishMarkdown(node, seen, writing = null) {
+  decorateCode(node, writing);
   // A generated image is saved with the answer, and the model often shows it
   // again in its reply: each picture is shown once.
-  const seen = new Set();
+  const shown = [];
   for (const img of node.querySelectorAll('img')) {
     // A held-back remote image has no src yet: its address is kept aside.
     const key = img.getAttribute('data-remote-src') || img.src;
     if (!seen.has(key)) {
       seen.add(key);
+      shown.push(key);
       continue;
     }
     const holder = img.closest('a') || img;
@@ -288,6 +350,63 @@ function setMarkdown(node, text) {
     }, { once: true });
     img.addEventListener('error', () => img.classList.add('ready', 'broken'), { once: true });
   }
+  return shown;
+}
+
+// ── An answer as it streams ────────────────────────────────────────────────
+// A streamed answer is drawn again on every frame, and drawing all of it each
+// time costs more the longer it gets. So it is kept as its top-level blocks
+// (paragraphs, lists, code), and a frame draws again only the blocks whose
+// source changed: in practice, the last one. The markup is the same as
+// setMarkdown makes of the same text. Two things could make the two differ, so
+// an answer that has them is drawn whole: raw HTML, which can reach from one
+// block into the next, and a link defined below the text that uses it.
+// `live`: the answer is still being written. Once it is not, a block drawn
+// from an older guess of its language (highlightCode) is drawn again.
+function hasRawHtml(token) {
+  let found = false;
+  marked.walkTokens([token], (t) => { if (t.type === 'html') found = true; });
+  return found;
+}
+
+function streamMarkdown(node, text, live) {
+  const source = text || '';
+  const options = { ...marked.getDefaults(), gfm: true, breaks: false };
+  const tokens = marked.lexer(source, options);
+  const links = JSON.stringify(tokens.links || {});
+  let blocks = node.mdBlocks && node.mdLinks === links ? node.mdBlocks : null;
+  if (!blocks) {
+    blocks = [];
+    node.replaceChildren();
+  }
+  const last = tokens.length - 1;
+  let from = 0;
+  while (from < blocks.length && from < tokens.length && blocks[from].raw === tokens[from].raw
+    && !(blocks[from].provisional && !(live && from === last))) from++;
+  if (tokens.slice(from).some(hasRawHtml)) {
+    setMarkdown(node, source);
+    return;
+  }
+  for (const block of blocks.slice(from)) for (const child of block.nodes) child.remove();
+  blocks = blocks.slice(0, from);
+  const seen = new Set(blocks.flatMap((block) => block.shown));
+  for (let i = from; i < tokens.length; i++) {
+    const box = document.createElement('div');
+    box.innerHTML = DOMPurify.sanitize(marked.parser([tokens[i]], options));
+    // The block being written, and in it the code being written: the last one.
+    const writing = live && i === last
+      ? { key: `${i}:${box.querySelectorAll('pre').length}`, guess: node.mdGuess || null, provisional: false }
+      : null;
+    const shown = finishMarkdown(box, seen, writing);
+    if (writing) node.mdGuess = writing.guess;
+    const nodes = [...box.childNodes];
+    blocks.push({ raw: tokens[i].raw, nodes, shown, provisional: Boolean(writing && writing.provisional) });
+    node.append(...nodes);
+  }
+  node.mdBlocks = blocks;
+  node.mdLinks = links;
+  node.mdText = source;
+  node.mdFinal = !blocks.some((block) => block.provisional);
 }
 
 // ── Images in the session's folder ─────────────────────────────────────────

@@ -207,7 +207,8 @@ function renderItem(item) {
     case 'assistant': {
       node = el('div', 'msg assistant');
       const body = el('div', 'markdown');
-      setMarkdown(body, item.text);
+      if (item.live) streamMarkdown(body, item.text, true);
+      else setMarkdown(body, item.text);
       node.append(body);
       break;
     }
@@ -315,7 +316,8 @@ function assistantStamp(sessionId) {
   addItem(sessionId, { type: 'stamp', at: nowIso() });
 }
 
-// Streamed text is re-rendered at most once a frame.
+// Streamed text is drawn at most once a frame, and only its blocks that
+// changed (streamMarkdown).
 // Web-chat chip markup, as an older server can still send it as text.
 const LEAKED_MARKUP = /replace>>>>>|<span class='(custom-tooltip|tool-done-chip)/;
 
@@ -331,7 +333,7 @@ function appendText(sessionId, text) {
         last.scheduled = false;
         if (sessionId !== S.current || !last.node || !last.node.isConnected) return;
         const stick = nearBottom();
-        setMarkdown(last.node.querySelector('.markdown'), last.text);
+        streamMarkdown(last.node.querySelector('.markdown'), last.text, last.live);
         if (stick) scrollToBottom();
       });
     }
@@ -344,7 +346,18 @@ function appendText(sessionId, text) {
 
 function closeLiveText(sessionId) {
   for (const item of transcriptOf(sessionId)) {
-    if (item.type === 'assistant') item.live = false;
+    if (item.type !== 'assistant') continue;
+    const wasLive = item.live;
+    item.live = false;
+    // Drawn as it came: what is still to draw, and any code drawn from an
+    // older guess of its language, is drawn now for good.
+    const body = wasLive && sessionId === S.current && item.node && item.node.isConnected
+      && item.node.querySelector('.markdown');
+    if (body && (!body.mdFinal || body.mdText !== item.text)) {
+      const stick = nearBottom();
+      streamMarkdown(body, item.text, false);
+      if (stick) scrollToBottom();
+    }
   }
 }
 
@@ -486,18 +499,69 @@ function parentToolOf(agent) {
 }
 
 // Something about a sub-agent changed: its row in the transcript and the panel.
+// `textOnly`: it wrote more of its answer. Its row says how it is doing, not
+// what it writes, so the row stays as it is; and in the panel only the
+// paragraph being written is drawn again (streamPanelText).
 let panelFrame = 0;
-function agentChanged(sessionId, agentId) {
+let panelWhole = false;   // the next frame redraws the whole panel
+function agentChanged(sessionId, agentId, { textOnly = false } = {}) {
   const agent = agentsOf(sessionId).get(agentId);
   if (!agent) return;
-  const parent = parentToolOf(agent);
-  if (parent) refreshItem(sessionId, parent.group);
+  if (!textOnly) {
+    const parent = parentToolOf(agent);
+    if (parent) refreshItem(sessionId, parent.group);
+  }
   if (sessionId !== S.current || !S.panel.open) return;
+  if (!textOnly) panelWhole = true;
   if (panelFrame) return;
   panelFrame = requestAnimationFrame(() => {
     panelFrame = 0;
-    renderPanel();
+    const whole = panelWhole;
+    panelWhole = false;
+    if (whole || !streamPanelText()) renderPanel();
   });
+}
+
+// The sub-agent shown in the panel wrote more: its newest paragraph is drawn
+// again, or added. False when the panel is not showing what this assumes, and
+// has to be drawn whole.
+function streamPanelText() {
+  const panel = $('agentsPanel');
+  const body = panel.querySelector('.ap-body');
+  const agent = S.current ? agentsOf(S.current).get(S.panel.agentId) : null;
+  if (panel.hidden || !body || !agent || !agent.loaded || panel.dataset.agent !== agent.id) return false;
+  const last = agent.items[agent.items.length - 1];
+  // Text always ends an answer with a paragraph: without one, the text that
+  // came was another sub-agent's, which shows nothing here.
+  if (!last || last.type !== 'assistant') return true;
+  const stick = panelAtBottom(body);
+  const shown = last.node && body.contains(last.node) ? last.node.querySelector('.markdown') : null;
+  if (shown) {
+    streamMarkdown(shown, last.text, agent.status === 'running');
+  } else {
+    // A new paragraph: after the step before it, or first under the card.
+    const before = agent.items[agent.items.length - 2];
+    const anchor = before ? before.node : body.querySelector('.ap-card');
+    if (!anchor || !body.contains(anchor) || body.querySelector('.ap-empty')) return false;
+    const node = el('div', 'msg assistant');
+    const markdown = el('div', 'markdown');
+    streamMarkdown(markdown, last.text, agent.status === 'running');
+    node.append(markdown);
+    last.node = node;
+    anchor.after(node);
+  }
+  if (stick) body.scrollTop = body.scrollHeight;
+  return true;
+}
+
+// A paragraph in the panel already drawn as it stands is moved into the new
+// panel rather than drawn again: a sub-agent's answer can be long.
+function panelItemNode(item) {
+  if (item.type === 'assistant' && item.node) {
+    const markdown = item.node.querySelector('.markdown');
+    if (markdown && markdown.mdFinal && markdown.mdText === item.text) return item.node;
+  }
+  return renderItem(item);
 }
 
 function agentAppendText(agent, text) {
@@ -733,7 +797,7 @@ function renderPanel() {
   if (!agent.loaded) {
     body.append(el('div', 'ap-empty', 'Loading…'));
   } else {
-    for (const item of agent.items) body.append(renderItem(item));
+    for (const item of agent.items) body.append(panelItemNode(item));
     if (!agent.items.length && agent.status !== 'running') {
       body.append(el('div', 'ap-empty', 'This sub-agent left no transcript.'));
     }
@@ -771,6 +835,11 @@ function onAgentEvent(sessionId, event, data) {
     }
     case 'subagent.text':
       agentAppendText(ensureAgent(sessionId, agentId), data.text || '');
+      // A new sub-agent has a row to draw; one already known only wrote more.
+      if (!opening) {
+        agentChanged(sessionId, agentId, { textOnly: true });
+        return;
+      }
       break;
     case 'subagent.status': {
       const agent = ensureAgent(sessionId, agentId);

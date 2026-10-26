@@ -17,6 +17,8 @@
     "e2e:background": "node test/e2e-background.mjs",
     "test:layout": "electron test/layout.cjs",
     "test:transcript": "electron test/transcript.cjs",
+    "test:stream": "electron test/markdown-stream.cjs",
+    "test:browser-pane": "electron test/browser-pane.cjs",
     "shot": "electron . --screenshot=shot.png",
     "predist": "node scripts/check-dist-lock.cjs",
     "dist": "electron-builder --win nsis",
