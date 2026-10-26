@@ -403,7 +403,7 @@
   border: 1px solid color-mix(in srgb, var(--red-ink) 30%, transparent);
 }
 .signed-in-warn strong { color: var(--text); font-weight: 600; }
-.signed-in-actions { grid-column: 2; display: flex; gap: 8px; margin-top: 12px; }
+.signed-in-actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 
 /* ── Billing ─────────────────────────────────────────────── */
 .bill-plan {

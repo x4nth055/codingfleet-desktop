@@ -7,7 +7,8 @@
 // ── Settings ───────────────────────────────────────────────────────────────
 let settingsRequired = false;
 
-function openSettings(required = false, tab = 'account') {
+// Without a tab named, Settings opens where it was left.
+function openSettings(required = false, tab = lastSettingsTab()) {
   closeMenus();
   settingsRequired = required;
   const settings = S.settings;
@@ -181,7 +182,10 @@ function renderSignedIn(show) {
     });
     if (ok) removeKey();
   });
-  actions.append(other, out);
+  const page = el('button', 'btn', 'Open your account page');
+  page.title = `${originOf(S.settings.apiBase)}/account/`;
+  page.addEventListener('click', () => window.open(`${originOf(S.settings.apiBase)}/account/`));
+  actions.append(page, other, out);
   card.append(badge, text, actions);
   if (!credits.account && !S.creditsError) loadCredits().then(() => { if (!card.hidden) renderSignedIn(true); });
 }
@@ -210,9 +214,17 @@ async function removeKey() {
 
 // ── Settings tabs ──────────────────────────────────────────────────────────
 let settingsTab = 'account';
+const SETTINGS_TAB_KEY = 'cf.settings-tab';
+
+function lastSettingsTab() {
+  let tab = null;
+  try { tab = localStorage.getItem(SETTINGS_TAB_KEY); } catch { /* the first one */ }
+  return tab && document.querySelector(`#settingsTabs [data-tab="${tab}"]`) ? tab : 'account';
+}
 
 function showSettingsTab(tab) {
   settingsTab = tab;
+  try { localStorage.setItem(SETTINGS_TAB_KEY, tab); } catch { /* this run only */ }
   for (const button of document.querySelectorAll('#settingsTabs [data-tab]')) {
     button.classList.toggle('active', button.dataset.tab === tab);
   }

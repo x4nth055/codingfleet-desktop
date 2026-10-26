@@ -297,7 +297,7 @@ async function loadCredits({ quiet = false } = {}) {
     keyWarned = true;
     showBanner(`This app uses a key made for code, so your ${S.credits.plan.name || ''} plan's Unlimited `
       + 'models cost credits here. Sign in with your browser to get a desktop key.',
-    [{ label: 'Fix it', run: () => { openSettings(false); fixKeyType(); } }]);
+    [{ label: 'Fix it', run: () => { openSettings(false, 'account'); fixKeyType(); } }]);
   }
   // Redrawing an unchanged card would drop the hover on its details.
   if (changed || !quiet) renderAccount();

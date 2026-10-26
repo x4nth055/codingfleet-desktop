@@ -5,7 +5,7 @@ export async function scene({ mark = () => {} } = {}) {
   await showCursor(true);
   await js('window.__cursorTo(900, 620, 1)');
   await sleep(600);
-  await click('button[title="Settings"]', { ms: 900 });
+  await click('.account-who', { ms: 900 });
   await sleep(700);
   await click('#settingsTabs [data-tab="mcp"]', { ms: 700 });
   await sleep(500);
