@@ -105,6 +105,77 @@ test('a server older than the browser tool is asked again without it, once', asy
   assert.deepEqual(bodies, [{ message: 'check the page', browser_use: true }, { message: 'check the page' }]);
 });
 
+test('a server older than client_meta is asked again without it, and keeps the other fields', async () => {
+  const { restore } = stubbedApi(null);
+  const bodies = [];
+  api.startRun = async (_session, body) => {
+    bodies.push(body);
+    if (body.client_meta) {
+      throw Object.assign(new Error('Unknown field "client_meta". This endpoint takes "message", ...'),
+        { code: 'unknown_field', status: 400 });
+    }
+    return events([{ event: 'run.started', data: { run_id: 'RUN1' } }, { event: 'run.ended', data: { reason: 'completed' } }]);
+  };
+  try {
+    const run = new Run({ sessionId: 'S1', cwd: process.cwd(), approve: () => 'allow', onEvent: () => {} });
+    await run.start({ message: 'hi', browser_use: true, client_meta: { approval_mode: 'ask' } });
+  } finally {
+    restore();
+  }
+  assert.deepEqual(bodies.at(-1), { message: 'hi', browser_use: true });
+  assert.equal(bodies.length, 2);
+});
+
+test('each tool result says how it was let through: at once, allowed or declined after a question', async () => {
+  const stream = events([
+    { event: 'run.started', data: { run_id: 'RUN1' } },
+    { event: 'tool.call', data: { id: 'AUTO', name: 'local', executor: 'client', arguments: {} } },
+    { event: 'tool.call', data: { id: 'ASKED', name: 'local', executor: 'client', arguments: {} } },
+    { event: 'tool.call', data: { id: 'DENIED', name: 'local', executor: 'client', arguments: {} } },
+    { event: 'run.ended', data: { reason: 'completed' } },
+  ]);
+  const { restore } = stubbedApi(stream);
+  const approvals = {};
+  api.toolResult = async (_run, callId, _output, _isError, _signal, approval) => { approvals[callId] = approval; };
+  const answers = { AUTO: 'allow', ASKED: Promise.resolve('allow'), DENIED: Promise.resolve('deny') };
+  try {
+    const run = new Run({
+      sessionId: 'S1', approve: (call) => answers[call.id], onEvent: () => {},
+      clientHandlers: new Map([['local', async () => ({ output: 'ran', is_error: false })]]),
+    });
+    await run.start({ message: 'go' });
+  } finally {
+    restore();
+  }
+  assert.deepEqual(approvals, { AUTO: 'auto', ASKED: 'allowed', DENIED: 'denied' });
+});
+
+test('a server older than the approval field gets the result again without it, and no more after', async () => {
+  const stream = events([
+    { event: 'run.started', data: { run_id: 'RUN1' } },
+    { event: 'tool.call', data: { id: 'ONE', name: 'local', executor: 'client', arguments: {} } },
+    { event: 'run.ended', data: { reason: 'completed' } },
+  ]);
+  const { restore } = stubbedApi(stream);
+  const sent = [];
+  api.toolResult = async (_run, callId, output, _isError, _signal, approval) => {
+    sent.push({ callId, output, approval });
+    if (approval) throw Object.assign(new Error('Unknown field "approval".'), { code: 'unknown_field', status: 400 });
+  };
+  let run;
+  try {
+    run = new Run({
+      sessionId: 'S1', approve: () => 'allow', onEvent: () => {},
+      clientHandlers: new Map([['local', async () => ({ output: 'ran', is_error: false })]]),
+    });
+    await run.start({ message: 'go' });
+  } finally {
+    restore();
+  }
+  assert.deepEqual(sent, [{ callId: 'ONE', output: 'ran', approval: 'auto' }, { callId: 'ONE', output: 'ran', approval: null }]);
+  assert.equal(run.approvalRefused, true);
+});
+
 test('a screenshot call reaches the app handler with its call, and the picture goes back', async () => {
   const stream = events([
     { event: 'run.started', data: { run_id: 'RUN1' } },

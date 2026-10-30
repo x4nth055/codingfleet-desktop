@@ -12,6 +12,8 @@ const { CLIENT_TOOLS, executeTool, isInside, writeTarget } = require('./tools');
 
 // Bigger files are listed as changed, without a line diff.
 const MAX_TRACKED_BYTES = 2 * 1024 * 1024;
+// Fields a run can start without, which a server older than this app refuses.
+const OPTIONAL_RUN_FIELDS = ['browser_use', 'client_meta'];
 
 async function readForDiff(file) {
   try {
@@ -60,6 +62,8 @@ class Run {
     this.controller = new AbortController();
     this.streamDone = new Promise((resolve) => { this.markStreamDone = resolve; });
     this.heartbeatJob = null;
+    // Set once the server refuses a tool result's approval field (it is older than this app).
+    this.approvalRefused = false;
   }
 
   emit(event, data) {
@@ -81,11 +85,13 @@ class Run {
           await this.consume(events);
           attempts = 0;
         } catch (err) {
-          // A server older than this app refuses the browser tool's field
+          // A server older than this app refuses a field it does not know
           // before any run exists (400 unknown_field): start again without it.
-          if (!this.runId && body.browser_use && err.code === 'unknown_field' && /browser_use/.test(err.message || '')) {
+          const refused = !this.runId && err.code === 'unknown_field'
+            ? OPTIONAL_RUN_FIELDS.filter((field) => field in body && String(err.message || '').includes(field)) : [];
+          if (refused.length) {
             body = { ...body };
-            delete body.browser_use;
+            for (const field of refused) delete body[field];
             continue;
           }
           // Never repeat a start POST: it could create a second paid turn.
@@ -173,10 +179,14 @@ class Run {
 
   async handle(call) {
     let result;
+    // How the call was let through, for the usage dashboard: 'auto' (no
+    // question), 'allowed' or 'denied' (the user answered one).
+    let approval = null;
     try {
       const saved = this.journal?.call(call.id);
       if (saved?.state === 'result') {
         result = { output: saved.output, is_error: saved.is_error };
+        approval = saved.approval || null;
       } else {
         let retryApproved = false;
         if (saved?.state === 'executing') {
@@ -186,8 +196,12 @@ class Run {
           } else retryApproved = true;
         }
         if (!result) {
-          const decision = retryApproved ? 'allow'
-            : await Promise.race([this.approve(call), this.streamDone.then(() => 'deny')]);
+          // approve() answers at once when nothing needs asking, and with a
+          // promise when it asks the user.
+          const answer = retryApproved ? 'allow' : this.approve(call);
+          const asked = typeof answer?.then === 'function';
+          const decision = await Promise.race([answer, this.streamDone.then(() => 'deny')]);
+          if (!retryApproved) approval = decision === 'allow' ? (asked ? 'allowed' : 'auto') : (asked ? 'denied' : null);
           if (decision === 'allow') {
             this.emit('client.tool_running', { id: call.id });
             this.journal?.setCall(call.id, { state: 'executing' });
@@ -225,14 +239,16 @@ class Run {
       result = { output: `The client could not run this tool: ${err.message}`, is_error: true };
     }
     if (this.suspended) return;
-    try { this.journal?.setCall(call.id, { state: 'result', output: result.output, is_error: Boolean(result.is_error) }); }
-    catch (err) { this.emit('client.error', { message: `Could not save the ${call.name} result: ${err.message}` }); return; }
+    try {
+      this.journal?.setCall(call.id, { state: 'result', output: result.output, is_error: Boolean(result.is_error), approval });
+    } catch (err) { this.emit('client.error', { message: `Could not save the ${call.name} result: ${err.message}` }); return; }
     // Retain the result until delivery succeeds. Retrying the POST must never
     // re-run the command or ask for approval again.
     let rejectedOutput = false;
     for (let attempt = 0; ; attempt++) {
       try {
-        await api.toolResult(this.runId, call.id, result.output, result.is_error, this.controller.signal);
+        await api.toolResult(this.runId, call.id, result.output, result.is_error, this.controller.signal,
+          this.approvalRefused ? null : approval);
         this.journal?.setCall(call.id, { state: 'delivered' });
         break;
       } catch (err) {
@@ -240,6 +256,12 @@ class Run {
         if (err.code === 'call_not_pending' || err.code === 'not_running') {
           this.journal?.setCall(call.id, { state: 'delivered' });
           break;
+        }
+        // A server older than this app refuses the approval field: send the
+        // result without it, for this call and the rest of the run.
+        if (approval && !this.approvalRefused && err.code === 'unknown_field') {
+          this.approvalRefused = true;
+          continue;
         }
         if (!rejectedOutput && (err.status === 413 || err.code === 'invalid_body')) {
           rejectedOutput = true;

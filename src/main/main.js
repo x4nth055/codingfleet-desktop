@@ -21,6 +21,7 @@ const capture = require('./capture');
 const { createComputer } = require('./computer');
 const { createBrowser } = require('./browser');
 const browserPage = require('../core/browser-page');
+const { clientMeta } = require('../core/client-meta');
 const { computerUseAllowed } = require('../core/computer');
 const config = require('../core/config');
 const git = require('./git');
@@ -1770,6 +1771,17 @@ function registerIpc() {
     }
     // The browser tool: a folder session, while the Browser setting is on (it is by default).
     if (local.cwd && state.browser !== false) body.browser_use = true;
+    // The settings this run goes with, for CodingFleet's usage dashboard (core/client-meta.js).
+    body.client_meta = clientMeta({
+      permissionMode: PERMISSION_OVERRIDE || state.permissionMode,
+      platform: process.platform,
+      shell: tools.SHELL.name,
+      theme: themeOf(state.theme),
+      state,
+      mcp,
+      folder: local.cwd ? { agentsMd: Boolean(projectInstructions(local.cwd)), git: fs.existsSync(path.join(local.cwd, '.git')) } : null,
+      terminals: terminals ? terminals.list().length : 0,
+    });
     recoveryStore.start(sessionId, local.cwd);
     runInBackground(sessionId, makeRun(sessionId, localTools), body);
     return true;

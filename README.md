@@ -270,6 +270,10 @@ In practice:
 
 - It talks to CodingFleet only after you sign in, to do what you ask. See the
   [CodingFleet privacy policy](https://codingfleet.com/privacy-policy).
+- Each run also says which settings the app runs with: Ask before changes or Auto-approve,
+  your system and shell, which features and built-in connectors are on, which coding CLIs it
+  found, and whether each tool call ran at once or after you answered. These are words from a
+  fixed list and counts, never a path, a file or server name, or what is in a file.
 - It checks for updates only if you said yes.
 - It sends a crash report only if you click **Send report**.
 - Images from other websites load only when you click them.

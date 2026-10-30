@@ -316,6 +316,9 @@ module.exports = {
   uploadFile: upload,
   deleteFile: (fileId) => request('DELETE', `/files/${id(fileId)}`),
   fileContent: (fileId) => download(`/files/${id(fileId)}/content`),
-  toolResult: (runId, callId, output, isError, signal) =>
-    request('POST', `/runs/${id(runId)}/tool_results`, { call_id: callId, output, is_error: Boolean(isError) }, signal, 30000),
+  // approval: how the call was let through ('auto', 'allowed', 'denied'), for
+  // the usage dashboard; left out when there is none to say.
+  toolResult: (runId, callId, output, isError, signal, approval) =>
+    request('POST', `/runs/${id(runId)}/tool_results`,
+      { call_id: callId, output, is_error: Boolean(isError), ...(approval ? { approval } : {}) }, signal, 30000),
 };

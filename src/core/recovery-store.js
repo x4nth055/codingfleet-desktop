@@ -211,6 +211,7 @@ class RecoveryStore {
       // The server accepted it; only the idempotency marker is needed now.
       delete run.calls[id].output;
       delete run.calls[id].is_error;
+      delete run.calls[id].approval;
     }
     this.saveActive();
   }
