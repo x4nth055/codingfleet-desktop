@@ -409,18 +409,20 @@ function openFolderMenu() {
 
   // The cloud sandbox, and the specs it can be built from (12-sandboxes.js).
   for (const item of cloudMenuItems(session, option)) list.append(item);
-  const folder = !session && !S.draftSandbox && S.draftCwd;
-  list.append(option('folder', S.draftCwd && !session ? baseName(S.draftCwd) : 'A folder on this computer',
-    S.draftCwd && !session ? S.draftCwd : 'CodingFleet reads, edits and runs code inside it',
-    Boolean(folder), async () => {
+  // Always "A folder on this computer", whatever was picked before: it asks
+  // for a folder. The one picked for the next session is marked below it.
+  list.append(option('folder', 'A folder on this computer', 'CodingFleet reads, edits and runs code inside it',
+    false, async () => {
       if (session) newSession();
       S.draftSandbox = false;
       await pickFolder();
     }));
-  const recent = recentFolderList({ limit: 5, exclude: [!session && !S.draftSandbox ? S.draftCwd : null] });
+  const picked = !session && !S.draftSandbox ? S.draftCwd : null;
+  const recent = recentFolderList({ limit: picked ? 4 : 5, exclude: [picked] });
+  if (picked) recent.unshift(picked);
   if (recent.length) list.append(el('div', 'menu-group', 'Recent folders'));
   for (const dir of recent) {
-    list.append(option('folder', baseName(dir), dir, false, () => {
+    list.append(option('folder', baseName(dir), dir, dir === picked, () => {
       if (session) newSessionIn(dir);
       else {
         S.draftSandbox = false;
