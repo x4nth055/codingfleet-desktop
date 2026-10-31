@@ -72,9 +72,18 @@ test('a file outside the folder can be shown, never read', async () => {
 test('another computer is never touched', async () => {
   const { files, calls } = setup();
   for (const share of ['\\\\server\\share\\a.pdf', '//server/share/a.pdf']) {
-    await assert.rejects(files.info({ sessionId: 's1', path: share }), /on another computer/);
-    await assert.rejects(files.open({ sessionId: 's1', path: share }), /on another computer/);
-    await assert.rejects(files.reveal({ sessionId: 's1', path: share }), /on another computer/);
+    if (process.platform === 'win32') {
+      await assert.rejects(files.info({ sessionId: 's1', path: share }), /on another computer/);
+      await assert.rejects(files.open({ sessionId: 's1', path: share }), /on another computer/);
+      await assert.rejects(files.reveal({ sessionId: 's1', path: share }), /on another computer/);
+    } else {
+      // A share is a Windows path. Elsewhere \\server\share\a.pdf is a file
+      // name with backslashes in it, and //server/share is /server/share: a
+      // path on this computer, which is simply not there.
+      assert.equal((await files.info({ sessionId: 's1', path: share })).exists, false);
+      await assert.rejects(files.open({ sessionId: 's1', path: share }), /not there/);
+      await assert.rejects(files.reveal({ sessionId: 's1', path: share }), /not there/);
+    }
   }
   assert.deepEqual(calls.opened, []);
   assert.deepEqual(calls.revealed, []);
