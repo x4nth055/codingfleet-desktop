@@ -1,6 +1,6 @@
 'use strict';
 const {
-  app, BrowserWindow, Menu, Notification, clipboard, dialog, ipcMain, nativeImage, powerSaveBlocker, safeStorage,
+  app, BrowserWindow, ClipboardItem, Menu, Notification, clipboard, dialog, ipcMain, nativeImage, powerSaveBlocker, safeStorage,
   screen, session, shell,
 } = require('electron');
 const fs = require('fs');
@@ -20,6 +20,8 @@ const { Terminals, listShells } = require('../core/terminal');
 const capture = require('./capture');
 const { createComputer } = require('./computer');
 const { createBrowser } = require('./browser');
+const { createLinkedFiles } = require('./linked-files');
+const { createClipboard } = require('./clipboard');
 const browserPage = require('../core/browser-page');
 const { clientMeta } = require('../core/client-meta');
 const { computerUseAllowed } = require('../core/computer');
@@ -763,6 +765,16 @@ const browser = createBrowser({
   }),
 });
 
+// Files an answer links to: shown in their folder, opened with their app, or
+// read into the side panel (linked-files.js).
+const linkedFiles = createLinkedFiles({
+  folderOf: (sessionId) => (state.sessions[sessionIdOf(sessionId)] || {}).cwd || null,
+  shell,
+  dialog,
+  getWindow: () => win,
+  browse: (file) => browser.forUser.openFile(file),
+});
+
 // The terminal panel's shells. node-pty is loaded on the first one, so an app
 // whose native module cannot load still starts, and says so in the panel.
 let terminals = null;
@@ -1460,11 +1472,18 @@ function registerIpc() {
   // An image the agent made in the session's folder, for the conversation.
   handle('files:localImage', (arg) => localImage(arg));
 
-  // The window has no clipboard permission; copying goes through here.
-  handle('clipboard:write', (text) => {
-    clipboard.writeText(String(text ?? '').slice(0, 5_000_000));
-    return true;
-  });
+  // A file an answer links to: what it is, and the user's click on it.
+  handle('files:info', (arg) => linkedFiles.info(arg));
+  handle('files:readText', (arg) => linkedFiles.readText(arg));
+  handle('files:open', (arg) => linkedFiles.open(arg));
+  handle('files:reveal', (arg) => linkedFiles.reveal(arg));
+  handle('files:browse', (arg) => linkedFiles.browse(arg));
+
+  // The window has no clipboard permission; copying goes through here: text,
+  // and a picture the window shows, drawn again as a PNG there.
+  const copying = createClipboard({ clipboard, ClipboardItem, nativeImage });
+  handle('clipboard:write', (text) => copying.writeText(text));
+  handle('clipboard:writeImage', (url) => copying.writeImage(url));
 
   handle('api:credits', () => api.credits());
   handle('api:models', () => api.models({ include: 'provider,family' }));

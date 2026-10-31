@@ -25,7 +25,8 @@ const S = {
   seenAnswer: new Map(),    // session id -> last_message_at shown in the transcript
   remoteBusy: new Set(),    // sessions with a turn going in another client
   agents: new Map(),        // session id -> Map(agent id -> sub-agent)
-  panel: { open: false, agentId: null },
+  // The side panel: the sub-agents, or a file the conversation links to (view: 'agents' | 'file').
+  panel: { open: false, agentId: null, view: 'agents', file: null },
   images: new Map(),        // uploaded file id -> preview data URL
   attachments: [],          // the composer's: { key, name, size, kind, preview, status, fileId, error }
   git: null,                // what is uncommitted in this session's folder

@@ -134,10 +134,24 @@ function remoteImageHost(src) {
   }
 }
 
+// A path that names its drive (C:\out\run.mp4) or a file:// address is a
+// file on this computer, which the sanitizer does not know as an address: it
+// is kept on a link and a picture. A link is never followed (13-boot.js takes
+// the click); a picture's path is moved aside below, so nothing loads it.
+DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+  const wanted = (node.nodeName === 'A' && data.attrName === 'href') || (node.nodeName === 'IMG' && data.attrName === 'src');
+  if (wanted && window.CF_FILE_LINKS && CF_FILE_LINKS.isAbsoluteLocal(data.attrValue)) data.forceKeepAttr = true;
+});
+
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   // srcset can name any host and is never needed in an answer.
   if (node.hasAttribute('srcset')) node.removeAttribute('srcset');
   if (node.nodeName !== 'IMG' && !(node.nodeName === 'INPUT' && node.getAttribute('type') === 'image')) return;
+  if (node.nodeName === 'IMG' && window.CF_FILE_LINKS && CF_FILE_LINKS.isAbsoluteLocal(node.getAttribute('src'))) {
+    node.setAttribute('data-local-src', node.getAttribute('src'));
+    node.removeAttribute('src');
+    return;
+  }
   const host = remoteImageHost(node.getAttribute('src'));
   if (host && !trustedImageHost(host)) {
     node.setAttribute('data-remote-src', node.getAttribute('src'));
@@ -318,8 +332,9 @@ function finishMarkdown(node, seen, writing = null) {
   // again in its reply: each picture is shown once.
   const shown = [];
   for (const img of node.querySelectorAll('img')) {
-    // A held-back remote image has no src yet: its address is kept aside.
-    const key = img.getAttribute('data-remote-src') || img.src;
+    // A held-back remote image has no src yet, nor a local one named by its
+    // drive: their addresses are kept aside.
+    const key = img.getAttribute('data-remote-src') || img.getAttribute('data-local-src') || img.src;
     if (!seen.has(key)) {
       seen.add(key);
       shown.push(key);
@@ -466,7 +481,7 @@ function paintLocalImage(img, entry) {
 // Makes one <img> a picture of a local file, or leaves it alone when its src
 // is a URL. Returns whether it took it over.
 function adoptLocalImage(img, sessionId = S.current) {
-  const raw = img.getAttribute('src') || '';
+  const raw = img.getAttribute('src') || img.getAttribute('data-local-src') || '';
   const src = window.CF_IMAGES ? CF_IMAGES.localImageSource(raw) : null;
   const folder = Boolean(sessionId && local(sessionId).cwd);
   if (!src) {

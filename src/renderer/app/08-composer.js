@@ -706,7 +706,10 @@ function renderChangesMenu() {
   list.dataset.stamp = String(summary.stamp);
   list.replaceChildren();
   for (const file of summary.files) {
-    list.append(changesRow(file));
+    const row = changesRow(file);
+    // Paths are the repository's: a right-click opens the file's menu (12-files.js).
+    if (repo.root) row.dataset.filePath = `${repo.root}/${file.path}`;
+    list.append(row);
     if (S.gitOpen.has(file.path)) list.append(gitDiffWrap(file.path));
   }
   if (summary.truncated) {

@@ -445,6 +445,9 @@ function renderFiles(item) {
   item.files.forEach((file, index) => {
     const open = item.open.has(index);
     const row = el('button', `file-row${open ? ' open' : ''}`);
+    // A right-click on it opens the file's menu (12-files.js).
+    row.dataset.filePath = file.path;
+    if (item.sessionId) row.dataset.fileSession = item.sessionId;
     const slash = file.path.lastIndexOf('/');
     const name = el('span', 'file-name');
     if (slash >= 0) name.append(el('span', 'file-dir', file.path.slice(0, slash + 1)));

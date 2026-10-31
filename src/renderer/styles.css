@@ -983,6 +983,38 @@ body.panel-resizing * { cursor: ew-resize !important; }
 .tool.agent-tool > .tool-head .tool-verb .icon { width: 14px; height: 14px; }
 .tool-open-panel { margin-left: 6px; flex: none; font-size: 11.5px; color: var(--accent); }
 .waiting-note { color: var(--amber); }
+
+/* ── A file in the side panel (12-files.js) ──────────────── */
+.fv-bar { flex: none; display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 3px 8px 3px 14px; border-bottom: 1px solid var(--line); }
+.fv-path { flex: 1 1 auto; min-width: 0; font: 11.5px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fv-meta { flex: none; font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+.fv-tools { flex: none; display: flex; align-items: center; gap: 2px; }
+.fv-tools .icon-button[aria-pressed="true"] { color: var(--accent); }
+@container (max-width: 360px) {
+  .fv-meta { display: none; }
+}
+.fv-body { flex: 1; min-height: 0; overflow: auto; background: var(--well); }
+.fv-body.preview { background: transparent; padding: 14px 18px 30px; }
+.fv-body.preview .markdown { font-size: 13.5px; }
+.fv-note { margin: 10px 12px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel); font-size: 12px; color: var(--muted); }
+.fv-body.preview .fv-note { margin: 0 0 12px; }
+/* Numbers and code side by side, one line height for both, so they line up. */
+.fv-lines { --fv-lh: 19px; --fv-pad: 10px; position: relative; display: flex; min-width: max-content; min-height: 100%; font: 12.5px/var(--fv-lh) var(--mono); }
+.fv-gutter { position: sticky; left: 0; z-index: 1; flex: none; padding: var(--fv-pad) 10px 30px 14px; text-align: right; white-space: pre; color: var(--faint); background: var(--well); border-right: 1px solid var(--line); user-select: none; }
+.fv-code { flex: 1; margin: 0; padding: var(--fv-pad) 18px 30px 12px; white-space: pre; tab-size: 4; overflow: visible; }
+.fv-code code.hljs { display: block; padding: 0; background: transparent; font: inherit; overflow: visible; }
+/* The line a link named (src/app.js:42). */
+.fv-mark { position: absolute; z-index: 2; left: 0; right: 0; top: calc(var(--fv-pad) + var(--fv-at, 0) * var(--fv-lh)); height: var(--fv-lh); background: color-mix(in srgb, var(--accent) 16%, transparent); pointer-events: none; }
+
+/* ── The right-click menu (12-files.js) ──────────────────── */
+.ctx-menu { position: fixed; bottom: auto; z-index: 120; min-width: 220px; max-width: 340px; }
+.ctx-menu .menu-list { max-height: none; padding: 5px; }
+.ctx-menu .menu-item { padding: 6px 9px; }
+.ctx-menu .menu-item .icon { margin-top: 1px; }
+.ctx-menu .menu-item:disabled { opacity: .5; }
+.ctx-menu .menu-item:disabled:hover { background: none; }
+.ctx-head { padding: 6px 9px 4px; font: 11.5px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-note { padding: 6px 9px; font-size: 12.5px; color: var(--muted); }
 .hint { white-space: nowrap; }
 
 /* ── Attachments ─────────────────────────────────────────── */

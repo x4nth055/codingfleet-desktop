@@ -511,7 +511,8 @@ function agentChanged(sessionId, agentId, { textOnly = false } = {}) {
     const parent = parentToolOf(agent);
     if (parent) refreshItem(sessionId, parent.group);
   }
-  if (sessionId !== S.current || !S.panel.open) return;
+  // A file in the panel is not drawn again for what a sub-agent writes.
+  if (sessionId !== S.current || !S.panel.open || S.panel.view === 'file') return;
   if (!textOnly) panelWhole = true;
   if (panelFrame) return;
   panelFrame = requestAnimationFrame(() => {
@@ -651,7 +652,7 @@ function startPanelDrag(event) {
 }
 
 function openPanel(agentId) {
-  S.panel = { open: true, agentId: agentId || S.panel.agentId };
+  S.panel = { ...S.panel, open: true, view: 'agents', agentId: agentId || S.panel.agentId };
   renderPanel();
   const agent = S.current && agentsOf(S.current).get(S.panel.agentId);
   if (agent && !agent.loaded) loadAgent(agent);
@@ -661,7 +662,7 @@ function openPanel(agentId) {
 const panelAtBottom = (body) => body.scrollHeight - body.scrollTop - body.clientHeight < 80;
 
 function closePanel() {
-  S.panel = { open: false, agentId: S.panel.agentId };
+  S.panel = { ...S.panel, open: false };
   renderPanel();
 }
 
@@ -711,27 +712,10 @@ function renderAgentTool(tool) {
   return node;
 }
 
-function renderPanel() {
-  const panel = $('agentsPanel');
-  const app = document.querySelector('.app');
-  const agents = S.current ? [...agentsOf(S.current).values()] : [];
-  const show = S.panel.open && agents.length > 0;
-  const was = !panel.hidden;
-  panel.hidden = !show;
-  app.classList.toggle('with-panel', show);
-  // The panel takes room from the middle: the sidebar gives some back if it must.
-  if (was !== show) applySidebarWidth(sidebarWidth ?? SIDEBAR_DEFAULT);
-  if (!show) return;
-  if (!agents.some((a) => a.id === S.panel.agentId)) S.panel.agentId = agents[agents.length - 1].id;
-  const agent = agents.find((a) => a.id === S.panel.agentId);
-
-  const keepScroll = panel.querySelector('.ap-body');
-  const wasAtBottom = keepScroll ? panelAtBottom(keepScroll) : true;
-  const oldTop = keepScroll ? keepScroll.scrollTop : 0;
-  const sameAgent = panel.dataset.agent === agent.id;
-
+// The panel's frame: the edge to drag, and a header with a title, `extra`
+// buttons, the width buttons and the close button.
+function panelHeader(panel, { iconName, title, count = null, extra = [] }) {
   panel.replaceChildren();
-  panel.dataset.agent = agent.id;
   const grip = el('div', 'ap-resizer');
   grip.title = 'Drag to resize the panel';
   grip.addEventListener('pointerdown', startPanelDrag);
@@ -751,10 +735,48 @@ function renderPanel() {
   wider.innerHTML = ICON.wider;
   wider.addEventListener('click', () => stepPanelWidth(1));
   widthGroup.append(narrower, wider);
-  head.append(icon('robot', 'icon'), el('span', 'ap-title', 'Sub-agents'),
-    el('span', 'ap-count', String(agents.length)), el('div', 'top-spacer'), widthGroup, close);
-  head.querySelector('.icon').style.cssText = 'width:16px;height:16px;color:var(--accent)';
+  const mark = icon(iconName, 'icon');
+  mark.style.cssText = 'width:16px;height:16px;color:var(--accent)';
+  head.append(mark, el('span', 'ap-title', title));
+  if (count != null) head.append(el('span', 'ap-count', String(count)));
+  head.append(el('div', 'top-spacer'), ...extra, widthGroup, close);
   panel.append(head);
+  return head;
+}
+
+// The panel shows the session's sub-agents, or a file the conversation
+// links to (12-files.js): the file when it was the last asked for, or when
+// there is nothing else to show.
+function renderPanel() {
+  const panel = $('agentsPanel');
+  const app = document.querySelector('.app');
+  const agents = S.current ? [...agentsOf(S.current).values()] : [];
+  const file = panelFile();
+  const showFile = S.panel.open && Boolean(file) && (S.panel.view === 'file' || !agents.length);
+  const show = showFile || (S.panel.open && agents.length > 0);
+  const was = !panel.hidden;
+  panel.hidden = !show;
+  panel.setAttribute('aria-label', showFile ? 'File' : 'Sub-agents');
+  app.classList.toggle('with-panel', show);
+  // The panel takes room from the middle: the sidebar gives some back if it must.
+  if (was !== show) applySidebarWidth(sidebarWidth ?? SIDEBAR_DEFAULT);
+  if (!show) return;
+  if (showFile) {
+    renderFilePanel(panel, file, agents);
+    return;
+  }
+  if (!agents.some((a) => a.id === S.panel.agentId)) S.panel.agentId = agents[agents.length - 1].id;
+  const agent = agents.find((a) => a.id === S.panel.agentId);
+
+  const keepScroll = panel.querySelector('.ap-body');
+  const wasAtBottom = keepScroll ? panelAtBottom(keepScroll) : true;
+  const oldTop = keepScroll ? keepScroll.scrollTop : 0;
+  const sameAgent = panel.dataset.agent === agent.id;
+
+  const extra = file ? [fileBarButton('file', `Show ${file.data ? file.data.name : baseName(file.shown)}`, showFilePanel)] : [];
+  panelHeader(panel, { iconName: 'robot', title: 'Sub-agents', count: agents.length, extra });
+  panel.dataset.agent = agent.id;
+  delete panel.dataset.file;
 
   if (agents.length > 1) {
     const tabs = el('div', 'ap-tabs');
@@ -829,8 +851,10 @@ function onAgentEvent(sessionId, event, data) {
         parent.agentId = agentId;
         refreshItem(sessionId, parent.group);
       }
-      // As in the web chat: the panel opens when a sub-agent starts.
-      if (sessionId === S.current && (opening && (!S.panel.open || !agents.get(S.panel.agentId)))) openPanel(agentId);
+      // As in the web chat: the panel opens when a sub-agent starts, unless
+      // it shows a file the user opened.
+      if (sessionId === S.current && opening
+        && (!S.panel.open || (S.panel.view !== 'file' && !agents.get(S.panel.agentId)))) openPanel(agentId);
       break;
     }
     case 'subagent.text':

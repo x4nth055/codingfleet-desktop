@@ -30,10 +30,11 @@ function normalizeUrl(input) {
   return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
 }
 
+// A file the user opened in the pane from the conversation is on this computer too.
 function isLocalUrl(href) {
   try {
     const url = new URL(href);
-    return url.protocol === 'about:' || isLocalHost(url.hostname);
+    return url.protocol === 'about:' || url.protocol === 'file:' || isLocalHost(url.hostname);
   } catch {
     return false;
   }

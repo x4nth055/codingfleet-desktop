@@ -89,14 +89,19 @@ function imageCard(file) {
 }
 
 // The whole image over the app. Esc, or a click anywhere, closes it.
-// `full` is a promise of a larger copy, shown as soon as it arrives.
-function openViewer({ src, fileId, name, full }) {
+// `full` is a promise of a larger copy, shown as soon as it arrives. `file`:
+// the file on this computer it shows, for the right-click menu (12-files.js).
+function openViewer({ src, fileId, name, full, file }) {
   if (!src && !fileId && !full) return;
   closeViewer();
   const overlay = el('div', 'viewer');
   overlay.id = 'viewer';
   const img = el('img', 'viewer-image');
   img.alt = name || 'Image';
+  if (file) {
+    img.dataset.filePath = file.shown;
+    img.dataset.fileSession = file.sessionId;
+  }
   img.addEventListener('load', () => img.classList.add('ready'));
   if (src) img.src = src;
   overlay.append(img);
@@ -357,6 +362,7 @@ function placeMenu(menu, anchor, { center = false } = {}) {
 
 function closeMenus() {
   $('sessionMenu').hidden = true;
+  hideContextMenu();
   for (const menu of document.querySelectorAll('.pref-menu')) menu.hidden = true;
   for (const open of document.querySelectorAll('.session-more.open')) open.classList.remove('open');
   for (const open of document.querySelectorAll('.session.menu-open')) open.classList.remove('menu-open');

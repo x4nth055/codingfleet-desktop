@@ -11,6 +11,7 @@
 // the user's OK once per site and session (or not at all, when the user let
 // the agent use every site), and typing into one waits every time
 // (approvalReason, used by main.js's approve()).
+const { pathToFileURL } = require('url');
 const { WebContentsView, session: electronSession, shell } = require('electron');
 
 const page = require('../core/browser-page');
@@ -254,6 +255,13 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}) }) {
       const url = page.normalizeUrl(input);
       if (!url) throw new Error('Type a web address, like localhost:3000 or example.com.');
       await load(url);
+      return stateOf();
+    },
+    // A page or a PDF the user opened from a link in the conversation (main.js
+    // checks it is in the session's folder). Links on it stay inside the
+    // web: will-navigate refuses another file.
+    async openFile(file) {
+      await load(pathToFileURL(file).href);
       return stateOf();
     },
     back() { const c = wc(); if (c) c.navigationHistory.goBack(); },

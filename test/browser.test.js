@@ -20,7 +20,8 @@ test('an address gets a scheme, and only http(s) pages load', () => {
 });
 
 test('pages on this computer are local, every other site is not', () => {
-  for (const url of ['http://localhost:3000/', 'http://127.0.0.1:8000/x', 'http://[::1]:4000/', 'http://app.localhost/', 'about:blank']) {
+  for (const url of ['http://localhost:3000/', 'http://127.0.0.1:8000/x', 'http://[::1]:4000/', 'http://app.localhost/', 'about:blank',
+    'file:///C:/work/site/index.html']) {
     assert.ok(page.isLocalUrl(url), url);
   }
   for (const url of ['https://example.com/', 'http://localhost.example.com/', 'http://192.168.1.10/']) {

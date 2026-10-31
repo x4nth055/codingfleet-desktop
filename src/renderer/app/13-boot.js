@@ -20,6 +20,7 @@ function wire() {
   wireFind();
   wireTerminal();
   wireBrowser();
+  wireFiles();
 
   const prompt = $('prompt');
   prompt.addEventListener('input', () => {
@@ -87,6 +88,7 @@ function wire() {
       src: img.currentSrc || img.src,
       name: img.dataset.localPath || img.alt,
       full: img.dataset.local ? fullLocalImage(img) : null,
+      file: img.dataset.local ? fileTargetOf(img) : null,
     });
   });
   document.addEventListener('keydown', (event) => {
@@ -113,12 +115,14 @@ function wire() {
       if (!$('settings').hidden) closeSettings();
     }
   });
-  // Links open in the browser (the main process refuses anything else).
+  // Links open in the browser (the main process refuses anything else), and
+  // a link to a file on this computer opens the file (12-files.js).
   document.addEventListener('click', (event) => {
     const link = event.target.closest('a[href]');
     if (!link) return;
     event.preventDefault();
     if (/^https?:/i.test(link.href)) window.open(link.href);
+    else onFileLinkClick(link, event);
   });
 
   cf.onRunEvent(onRunEvent);
