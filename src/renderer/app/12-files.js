@@ -93,7 +93,8 @@ async function browseFile(target) {
 function viewFileImage(target, info) {
   openViewer({
     name: info.relative || info.path,
-    full: call(cf.localImage, { ...fileArg(target), full: true }).then((data) => data.url),
+    full: call(cf.localImageInfo, fileArg(target))
+      .then((data) => localImageUrl(target.sessionId, target.shown, data.mtime, { full: true })),
     file: target,
   });
 }

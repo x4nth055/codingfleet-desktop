@@ -5,7 +5,10 @@
 // declares, the later ones use. What the event stream of a run does to the conversation.
 
 // ── Run events ─────────────────────────────────────────────────────────────
-function onRunEvent({ sessionId, event, data }) {
+function onRunEvent(payload) {
+  // A session packed in memory is put back first (12-session-memory.js).
+  if (holdRunEvent(payload)) return;
+  const { sessionId, event, data } = payload;
   const run = S.running.get(sessionId);
   if (event.startsWith('subagent.') || (data && data.agent_id && (event === 'tool.call' || event === 'tool.result'))) {
     if (run && data?.agent_id) {
@@ -291,6 +294,8 @@ function finishRun(sessionId) {
     renderComposer();
   }
   renderSidebar();
+  // A session left while it worked can be packed now (12-session-memory.js).
+  scheduleTrim();
   loadCredits();
   loadSessions().then(() => {
     const known = S.sessions.find((x) => x.id === sessionId);

@@ -69,3 +69,23 @@ test('an exported file name is safe on every system', () => {
   assert.equal(tools.exportFileName('   '), 'session.md');
   assert.equal(tools.exportFileName('ends with dots...'), 'ends with dots.md');
 });
+
+test('the newest turns of a long session start at their first prompt; a steer is part of its turn', () => {
+  // ITEMS: prompts at 0 and 7, a steer at 8.
+  assert.equal(tools.recentTurnsStart(ITEMS, 1), 7);
+  assert.equal(tools.recentTurnsStart(ITEMS, 2), 0);
+  // Down to the first turn: what came before it is drawn with it.
+  const noted = [{ type: 'note', text: 'Following AGENTS.md' }, ...ITEMS];
+  assert.equal(tools.recentTurnsStart(noted, 1), 8);
+  assert.equal(tools.recentTurnsStart(noted, 2), 0);
+  assert.equal(tools.recentTurnsStart(ITEMS, 30), 0);
+  assert.equal(tools.recentTurnsStart([], 30), 0);
+  const long = [{ type: 'note', text: 'Following AGENTS.md' }];
+  for (let t = 0; t < 120; t++) long.push({ type: 'user', text: `turn ${t}` }, { type: 'assistant', text: 'ok' });
+  const from = tools.recentTurnsStart(long, 30);
+  assert.equal(long[from].text, 'turn 90');
+  assert.equal(tools.turnsFrom(long, from), 30);
+  assert.equal(tools.turnsFrom(long, 0), 120);
+  assert.equal(tools.turnsFrom(ITEMS, 7), 1);
+  assert.equal(tools.turnsFrom(ITEMS, 100), 0);
+});

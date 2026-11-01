@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https: http:; font-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https: http: cf-local:; font-src 'self'">
 <title>CodingFleet</title>
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="settings.css">
@@ -208,6 +208,7 @@
 <script src="lib/pool-cap.js"></script>
 <script src="lib/mention.js"></script>
 <script src="lib/session-tools.js"></script>
+<script src="lib/transcript-pack.js"></script>
 <script src="lib/sandbox-specs.js"></script>
 <script src="lib/csp-styles.js"></script>
 <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
@@ -234,6 +235,7 @@
 <script src="app/12-browser.js"></script>
 <script src="app/12-coding-agents.js"></script>
 <script src="app/12-files.js"></script>
+<script src="app/12-session-memory.js"></script>
 <script src="app/13-boot.js"></script>
 </body>
 </html>

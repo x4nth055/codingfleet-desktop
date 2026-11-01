@@ -23,11 +23,22 @@ const SETTLE_MS = 350;
 const SHOT_MAX_SIDE = 1280;
 const SHOT_QUALITY = 80;
 const MAX_CONSOLE = 300;
+// A page left this long with the pane closed is closed too: a dev server's app
+// keeps its memory and its timers otherwise, behind a pane nobody sees. Its
+// address and its history are kept, and it is loaded again, back and forward
+// as they were, when the pane opens or the agent uses the browser (parked,
+// revive).
+const PARK_AFTER_MS = 2 * 60_000;
 
-function createBrowser({ getWindow, send, log, onImage, policy = () => ({}) }) {
+function createBrowser({ getWindow, send, log, onImage, policy = () => ({}), parkAfterMs = PARK_AFTER_MS }) {
   let view = null;
   let bounds = null;     // where the pane is, from the window
   let shown = false;     // whether the window shows the pane
+  let paneOpen = false;  // whether the pane is open, even under a dialog
+  let parked = null;     // { url, title, entries, index }: the page closed while the pane was, and its history
+  let parkTimer = null;
+  let reviving = null;   // the parked page loading again
+  let busy = 0;          // the agent's actions running now
   let preset = 'desktop';
   let emulating = false; // a phone or tablet size is applied to the page
   let queue = Promise.resolve();
@@ -59,7 +70,13 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}) }) {
 
   function stateOf() {
     const contents = wc();
-    if (!contents) return { url: '', title: '', loading: false, canGoBack: false, canGoForward: false, preset };
+    if (!contents) {
+      // A parked page still shows its address, and where back and forward go:
+      // opening the pane loads it again.
+      const entries = (parked && parked.entries) || [];
+      return { url: parked ? parked.url : '', title: parked ? parked.title : '', loading: false,
+        canGoBack: Boolean(parked) && parked.index > 0, canGoForward: Boolean(parked) && parked.index < entries.length - 1, preset };
+    }
     const history = contents.navigationHistory;
     return {
       url: contents.getURL() === 'about:blank' ? '' : contents.getURL(),
@@ -141,6 +158,76 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}) }) {
     win.contentView.addChildView(view);
     applyLayout();
     return view;
+  }
+
+  // ── A page nobody sees ────────────────────────────────────────────────────
+  function schedulePark() {
+    clearTimeout(parkTimer);
+    parkTimer = null;
+    if (!view || paneOpen || busy) return;
+    parkTimer = setTimeout(park, parkAfterMs);
+    parkTimer.unref?.();
+  }
+
+  function park() {
+    parkTimer = null;
+    const contents = wc();
+    if (!contents || paneOpen || busy || reviving) return;
+    const url = contents.getURL();
+    const history = contents.navigationHistory;
+    parked = url && url !== 'about:blank'
+      ? { url, title: contents.getTitle(), entries: history.getAllEntries(), index: history.getActiveIndex() }
+      : null;
+    dispose();
+    emulating = false;
+    pushState();
+  }
+
+  // The parked page, loaded again with its history. Shared by everyone who asks meanwhile.
+  function revive() {
+    if (reviving) return reviving;
+    if (!parked) return Promise.resolve();
+    const saved = parked;
+    parked = null;
+    reviving = restore(saved).finally(() => { reviving = null; });
+    return reviving;
+  }
+
+  // A page and its history as they were: back and forward go where they went,
+  // and each page gets its scroll and its form back, where Chromium can.
+  async function restore({ url, entries, index }) {
+    if (!entries || !entries.length) return load(url);
+    const contents = ensure().webContents;
+    const loaded = waitForLoad(contents);
+    try {
+      await contents.navigationHistory.restore({ entries, index });
+    } catch {
+      // A page that did not load (a dev server since stopped) has its history
+      // back all the same, and says why, as any failed load does. History
+      // that could not be put back at all leaves the page alone to load.
+      if (!contents.getURL()) return load(url);
+    }
+    return loaded;
+  }
+
+  // Somewhere new from a parked page: its history is put back first, so that
+  // back still goes where it went. The old page is not waited for: the new
+  // address replaces it as it starts loading.
+  function unpark() {
+    if (!parked) return;
+    const { entries, index } = parked;
+    parked = null;
+    if (!entries || !entries.length) return;
+    ensure().webContents.navigationHistory.restore({ entries, index }).catch(() => {});
+  }
+
+  // Back or forward on a parked page: it is loaded again at that entry.
+  function moveParked(step) {
+    const entries = (parked && parked.entries) || [];
+    const index = parked ? parked.index + step : -1;
+    if (index < 0 || index >= entries.length) return;
+    parked = { ...parked, index, url: entries[index].url, title: entries[index].title };
+    revive().catch(() => {});
   }
 
   // ── Where the pane is ─────────────────────────────────────────────────────
@@ -246,27 +333,50 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}) }) {
 
   // ── The window's controls ─────────────────────────────────────────────────
   const forUser = {
-    setLayout({ visible, rect } = {}) {
+    // `open`: the pane is open, though a dialog may cover it (visible is then
+    // false). A window that does not say counts as open while visible.
+    setLayout({ visible, open, rect } = {}) {
       shown = Boolean(visible);
+      paneOpen = open === undefined ? shown : Boolean(open);
       if (rect && Number.isFinite(rect.width)) bounds = rect;
       if (view) applyLayout();
+      if (paneOpen && parked) {
+        revive().catch((err) => { if (log) log.warn(`browser: could not load the page again: ${err.message}`); });
+      }
+      schedulePark();
     },
     async navigate(input) {
       const url = page.normalizeUrl(input);
       if (!url) throw new Error('Type a web address, like localhost:3000 or example.com.');
+      unpark();
       await load(url);
+      schedulePark();
       return stateOf();
     },
     // A page or a PDF the user opened from a link in the conversation (main.js
     // checks it is in the session's folder). Links on it stay inside the
     // web: will-navigate refuses another file.
     async openFile(file) {
+      unpark();
       await load(pathToFileURL(file).href);
+      schedulePark();
       return stateOf();
     },
-    back() { const c = wc(); if (c) c.navigationHistory.goBack(); },
-    forward() { const c = wc(); if (c) c.navigationHistory.goForward(); },
-    reload() { const c = wc(); if (c) c.reload(); },
+    back() {
+      const c = wc();
+      if (c) c.navigationHistory.goBack();
+      else moveParked(-1);
+    },
+    forward() {
+      const c = wc();
+      if (c) c.navigationHistory.goForward();
+      else moveParked(1);
+    },
+    reload() {
+      const c = wc();
+      if (c) c.reload();
+      else revive().catch(() => {});
+    },
     stop() { const c = wc(); if (c) c.stop(); },
     setPreset(name) {
       preset = Object.hasOwn(page.PRESETS, name) ? name : 'desktop';
@@ -277,7 +387,7 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}) }) {
     devtools() { const c = wc(); if (c) c.openDevTools({ mode: 'detach' }); },
     openExternal() {
       const c = wc();
-      const url = c && page.normalizeUrl(c.getURL());
+      const url = page.normalizeUrl(c ? c.getURL() : (parked && parked.url));
       if (url) shell.openExternal(url);
     },
     async clearData() {
@@ -285,6 +395,8 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}) }) {
       await electronSession.fromPartition(PARTITION).clearCache();
       const c = wc();
       if (c) c.navigationHistory.clear();
+      // A parked page's history goes too, as a page's would: all but where it is.
+      if (!c && parked && parked.entries) parked = { ...parked, entries: [parked.entries[parked.index]], index: 0 };
       return true;
     },
     state: stateOf,
@@ -527,10 +639,16 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}) }) {
   function forAgent(sessionId, args = {}, { call } = {}) {
     // One page: actions run one at a time, in the order they came.
     const job = queue.then(async () => {
+      busy += 1;
+      clearTimeout(parkTimer);
       try {
         // The user sees what the agent does: the pane opens on the browser,
         // and the page gets its size before anything is clicked or captured.
         send('browser:reveal');
+        // A page closed while the pane was is loaded again, unless the agent
+        // is about to leave it anyway.
+        if (String(args.action) === 'navigate') unpark();
+        else await revive();
         ensure();
         // Loading needs no size (and the pane shows only once a page is there).
         if (!['navigate', 'console'].includes(String(args.action))) await laidOut();
@@ -538,6 +656,9 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}) }) {
       } catch (err) {
         if (log) log.error(`browser: ${err.message}`);
         return { output: `The browser could not do that: ${err.message}`, is_error: true };
+      } finally {
+        busy -= 1;
+        schedulePark();
       }
     });
     queue = job.catch(() => {});
@@ -545,6 +666,8 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}) }) {
   }
 
   function dispose() {
+    clearTimeout(parkTimer);
+    parkTimer = null;
     const win = getWindow();
     if (view && win && !win.isDestroyed()) {
       try { win.contentView.removeChildView(view); } catch { /* already gone */ }
@@ -553,7 +676,7 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}) }) {
     view = null;
   }
 
-  return { forUser, forAgent, approvalReason, dispose };
+  return { forUser, forAgent, approvalReason, dispose, isParked: () => Boolean(parked) && !view };
 }
 
-module.exports = { createBrowser, PARTITION };
+module.exports = { createBrowser, PARTITION, PARK_AFTER_MS };

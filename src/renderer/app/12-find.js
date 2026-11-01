@@ -193,6 +193,8 @@ function openFind() {
     $('findCount').textContent = 'Not available here';
     return;
   }
+  // A long session is drawn from its newest turns: the search covers it all.
+  drawEarlier(Infinity);
   runFind();
   // The conversation keeps changing while a run streams: count again, keeping
   // the place, a moment after it settles.

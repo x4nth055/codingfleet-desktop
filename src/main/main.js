@@ -1,7 +1,7 @@
 'use strict';
 const {
-  app, BrowserWindow, ClipboardItem, Menu, Notification, clipboard, dialog, ipcMain, nativeImage, powerSaveBlocker, safeStorage,
-  screen, session, shell,
+  app, BrowserWindow, ClipboardItem, Menu, Notification, clipboard, dialog, ipcMain, nativeImage, powerSaveBlocker, protocol,
+  safeStorage, screen, session, shell,
 } = require('electron');
 const fs = require('fs');
 const os = require('os');
@@ -21,6 +21,7 @@ const capture = require('./capture');
 const { createComputer } = require('./computer');
 const { createBrowser } = require('./browser');
 const { createLinkedFiles } = require('./linked-files');
+const { createLocalImages, SCHEME: LOCAL_IMAGE_SCHEME } = require('./local-images');
 const { createClipboard } = require('./clipboard');
 const browserPage = require('../core/browser-page');
 const { clientMeta } = require('../core/client-meta');
@@ -29,7 +30,6 @@ const config = require('../core/config');
 const git = require('./git');
 const github = require('./github');
 const guard = require('../core/guard');
-const images = require('../core/images');
 const tools = require('../core/tools');
 const { LocalMcp } = require('../core/mcp');
 const { Run } = require('../core/runner');
@@ -78,6 +78,10 @@ function folderArg(args, cwd) {
   return null;
 }
 let startFolder = folderArg(process.argv, process.cwd());
+
+// The window's images from a session's folder (local-images.js). A scheme is
+// made privileged before the app is ready, or not at all.
+protocol.registerSchemesAsPrivileged([{ scheme: LOCAL_IMAGE_SCHEME, privileges: { standard: true, secure: true } }]);
 
 // The app's own log (core/log.js) and crash handling (crash.js), from the very
 // start: a crash while starting up is the one most worth knowing about.
@@ -711,7 +715,7 @@ async function screenshotForAgent(args, { call, sessionId } = {}) {
     // coordinates it reads off this one land where it means.
     const shot = await computer.screenshotFor(sessionId, Number(args.screen) || null);
     if (call && call.id && sessionId) {
-      send('run:event', { sessionId, event: 'client.tool_image', data: { id: call.id, url: previewOf(shot.image), title: shot.label } });
+      send('run:event', { sessionId, event: 'client.tool_image', data: { id: call.id, url: previewOf(shot.image, { screen: true }), title: shot.label } });
     }
     return { output: { data: shot.data, width: shot.frame.width, height: shot.frame.height }, is_error: false };
   } else {
@@ -729,7 +733,7 @@ async function screenshotForAgent(args, { call, sessionId } = {}) {
     send('run:event', {
       sessionId,
       event: 'client.tool_image',
-      data: { id: call.id, url: previewOf(image), title: taken },
+      data: { id: call.id, url: previewOf(image, { screen: true }), title: taken },
     });
   }
   return { output: { data: shrunk.data, width: shrunk.width, height: shrunk.height }, is_error: false };
@@ -761,7 +765,7 @@ const browser = createBrowser({
   // The sites the user trusts, and whether any site may be used without asking (Preferences).
   policy: () => ({ sites: state.browserSites || [], anySite: state.browserAnySite === true }),
   onImage: (sessionId, { id, image, title }) => send('run:event', {
-    sessionId, event: 'client.tool_image', data: { id, url: previewOf(image), title, quiet: true },
+    sessionId, event: 'client.tool_image', data: { id, url: previewOf(image, { screen: true }), title, quiet: true },
   }),
 });
 
@@ -868,7 +872,7 @@ const computer = createComputer({
     if (run) run.cancel().catch((err) => log.warn(`could not cancel the run after Stop: ${err.message}`));
   },
   onImage: (sessionId, { id, image, title }) => send('run:event', {
-    sessionId, event: 'client.tool_image', data: { id, url: previewOf(image), title, quiet: true },
+    sessionId, event: 'client.tool_image', data: { id, url: previewOf(image, { screen: true }), title, quiet: true },
   }),
 });
 
@@ -1012,14 +1016,22 @@ const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
 
 // Sharp enough for the chat's image cards on a high-density screen.
 const PREVIEW_PX = 520;
+const PREVIEW_JPEG_QUALITY = 82;
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
-function previewOf(image) {
+// `screen`: a picture of a screen, a window or a page, which every tool step
+// that took one keeps. It has no transparency to lose, and as a JPEG it is
+// usually a fraction of a PNG's size (a busy screen most of all); the smaller
+// of the two is kept. Anything else stays a PNG.
+function previewOf(image, { screen: ofScreen = false } = {}) {
   if (!image || image.isEmpty()) return null;
   const { width, height } = image.getSize();
   const scale = Math.min(1, PREVIEW_PX / Math.max(width, height));
-  return image.resize({ width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) })
-    .toDataURL();
+  const sized = image.resize({ width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) });
+  const png = sized.toDataURL();
+  if (!ofScreen) return png;
+  const jpeg = `data:image/jpeg;base64,${sized.toJPEG(PREVIEW_JPEG_QUALITY).toString('base64')}`;
+  return jpeg.length < png.length ? jpeg : png;
 }
 
 // Documents only the server can read (it extracts their text); everything
@@ -1090,71 +1102,12 @@ async function uploadedImage(fileId) {
 
 const dataUrl = (image) => `data:${image.type};base64,${image.data.toString('base64')}`;
 
-// ---------------------------------------------------------------------------
-// Images in the session's own folder. The agent writes ![a chart](out/plot.png)
-// for a file it made there, and the window, which has no filesystem, asks for
-// the picture. Only files inside that folder: an answer that names another path
-// is not a reason to read it, and the folder is the one this process holds for
-// the session, never a folder the window names.
-// ---------------------------------------------------------------------------
-const INLINE_MAX_SIDE = 1400;     // shown in the conversation
-const VIEWER_MAX_SIDE = 2600;     // opened over the app
-const INLINE_MAX_BYTES = 4 * 1024 * 1024;
-const VIEWER_MAX_BYTES = 12 * 1024 * 1024;
-const LOCAL_IMAGE_MAX_FILE = 40 * 1024 * 1024;
-
-async function localImage({ sessionId, path: shown, full } = {}) {
-  const src = images.localImageSource(shown);
-  const cwd = (state.sessions[sessionIdOf(sessionId)] || {}).cwd;
-  if (!src) throw new Error('Not an image file.');
-  if (!cwd) throw new Error('This session has no folder on this computer.');
-  const file = tools.resolvePath(cwd, src);
-  if (!tools.isInside(cwd, file)) throw new Error(`${src} is outside the session folder.`);
-  let stat;
-  try {
-    stat = await fs.promises.stat(file);
-  } catch {
-    throw new Error(`${src} is not there.`);
-  }
-  if (!stat.isFile()) throw new Error(`${src} is not a file.`);
-  if (stat.size > LOCAL_IMAGE_MAX_FILE) throw new Error(`${src} is too large to show.`);
-
-  const limit = full ? VIEWER_MAX_BYTES : INLINE_MAX_BYTES;
-  const bytes = await fs.promises.readFile(file);
-  const found = { name: path.basename(file), bytes: stat.size, mtime: stat.mtimeMs };
-  const untouched = () => ({ ...found, url: `data:${images.mimeOf(file)};base64,${bytes.toString('base64')}` });
-  // An animation or a drawing: an image decoder would flatten the one and
-  // rasterize the other, and the window draws both as they are.
-  if (images.keepsAsIs(file)) {
-    if (bytes.length > limit) throw new Error(`${src} is too large to show.`);
-    return untouched();
-  }
-  const image = nativeImage.createFromBuffer(bytes);
-  if (image.isEmpty()) {
-    // A format this decoder does not read. The window's is newer; let it try.
-    if (bytes.length > limit) throw new Error(`${src} could not be read.`);
-    return untouched();
-  }
-  const size = image.getSize();
-  const side = full ? VIEWER_MAX_SIDE : INLINE_MAX_SIDE;
-  const scale = Math.min(1, side / Math.max(size.width, size.height));
-  const sized = scale < 1
-    ? image.resize({
-      width: Math.max(1, Math.round(size.width * scale)),
-      height: Math.max(1, Math.round(size.height * scale)),
-      quality: 'best',
-    })
-    : image;
-  if (scale === 1 && bytes.length <= limit) return { ...untouched(), ...sized.getSize() };
-  let data = sized.toPNG();
-  for (const quality of [92, 80, 65]) {
-    if (data.length <= limit) break;
-    data = sized.toJPEG(quality);
-  }
-  if (data.length > limit) throw new Error(`${src} is too large to show.`);
-  const type = data.length && data[0] === 0x89 ? 'image/png' : 'image/jpeg';
-  return { ...found, ...sized.getSize(), url: `data:${type};base64,${data.toString('base64')}` };
-}
+// Images in the session's own folder, served to the window as cf-local:
+// addresses (local-images.js).
+const localImages = createLocalImages({
+  folderOf: (sessionId) => (state.sessions[sessionIdOf(sessionId)] || {}).cwd || null,
+  nativeImage,
+});
 
 async function uploadBytes(data, name, type, sessionId) {
   if (!data || !data.length) throw new Error(`${name} is empty.`);
@@ -1368,7 +1321,7 @@ function registerIpc() {
       name: `${kind}-${stamp}.png`,
       type: 'image/png',
       data: image.toPNG(),
-      preview: previewOf(image),
+      preview: previewOf(image, { screen: true }),
     };
   });
 
@@ -1469,8 +1422,10 @@ function registerIpc() {
     }
   });
 
-  // An image the agent made in the session's folder, for the conversation.
-  handle('files:localImage', (arg) => localImage(arg));
+  // An image the agent made in the session's folder: what it is, for its
+  // cf-local: address; and the picture itself, for a copy drawn on a canvas.
+  handle('files:localImageInfo', (arg) => localImages.info(arg));
+  handle('files:localImage', (arg) => localImages.dataUrl(arg));
 
   // A file an answer links to: what it is, and the user's click on it.
   handle('files:info', (arg) => linkedFiles.info(arg));
@@ -1932,6 +1887,8 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
     });
     session.defaultSession.setPermissionCheckHandler((_wc, permission, origin, details) =>
       permission === 'media' && (details || {}).mediaType === 'audio' && ownPage(details.securityOrigin || origin));
+    // The window's own session only: the browser pane's has no such scheme.
+    session.defaultSession.protocol.handle(LOCAL_IMAGE_SCHEME, (request) => localImages.respond(request));
     log.info(`CodingFleet ${app.getVersion()} starting on ${process.platform} ${os.release()} `
       + `(${process.arch}), Electron ${process.versions.electron}`);
     loadState();

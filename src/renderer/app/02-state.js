@@ -4,6 +4,48 @@
 // loaded in order by index.html and sharing one global scope: what one
 // declares, the later ones use. What the window knows (S), loading it from the API, and keeping it fresh.
 
+// Previews of uploaded images, by file id, the one used last kept longest:
+// within a total size, so that a long day of screenshots does not pile up.
+// One dropped is asked for again when it is drawn, and the main process keeps
+// the last few images it read.
+function boundedImages({ maxChars = 24_000_000, maxEntries = 300 } = {}) {
+  const map = new Map();
+  let chars = 0;
+  const drop = (id) => {
+    const url = map.get(id);
+    if (url === undefined) return;
+    map.delete(id);
+    chars -= url.length;
+  };
+  return {
+    get(id) {
+      const url = map.get(id);
+      if (url !== undefined) {
+        map.delete(id);
+        map.set(id, url);
+      }
+      return url;
+    },
+    has: (id) => map.has(id),
+    set(id, url) {
+      drop(id);
+      // One alone bigger than a quarter of the room is not kept at all.
+      if (typeof url !== 'string' || url.length > maxChars / 4) return this;
+      map.set(id, url);
+      chars += url.length;
+      while (map.size > maxEntries || chars > maxChars) drop(map.keys().next().value);
+      return this;
+    },
+    delete(id) {
+      const had = map.has(id);
+      drop(id);
+      return had;
+    },
+    get size() { return map.size; },
+    get chars() { return chars; },
+  };
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 const S = {
   init: null,
@@ -27,7 +69,7 @@ const S = {
   agents: new Map(),        // session id -> Map(agent id -> sub-agent)
   // The side panel: the sub-agents, or a file the conversation links to (view: 'agents' | 'file').
   panel: { open: false, agentId: null, view: 'agents', file: null },
-  images: new Map(),        // uploaded file id -> preview data URL
+  images: boundedImages(),  // uploaded file id -> preview data URL
   attachments: [],          // the composer's: { key, name, size, kind, preview, status, fileId, error }
   git: null,                // what is uncommitted in this session's folder
   gitFor: '',               // the session (or draft folder) `git` answers for
@@ -71,7 +113,8 @@ function sessionGroup(session) {
 function sessionLabel(session) {
   if (!session) return 'New session';
   const firstUser = (S.transcripts.get(session.id) || []).find((i) => i.type === 'user');
-  return session.title || local(session.id).label || (firstUser && firstUser.text.slice(0, 80)) || 'Untitled session';
+  return session.title || local(session.id).label || (firstUser && firstUser.text.slice(0, 80))
+    || packedPrompt(session.id) || 'Untitled session';
 }
 
 const findModel = (id) => S.models.find((m) => m.id === id);
@@ -204,6 +247,9 @@ function noticeNewAnswers(session) {
 }
 
 async function reloadTranscript(id) {
+  if (S.loading.has(id)) return;
+  // Packed in memory: put back first, so that the turn this window drew is kept.
+  if (isPacked(id)) await restoreSession(id);
   if (S.loading.has(id)) return;
   S.loading.add(id);
   const box = $('transcript');

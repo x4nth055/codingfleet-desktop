@@ -77,9 +77,9 @@ function imageCard(file) {
     img.src = preview;
   } else {
     img.classList.add('pending');
+    // Kept in S.images, which has a size, rather than on the message for good.
     call(cf.image, { fileId: file.fileId }).then((src) => {
       S.images.set(file.fileId, src);
-      file.preview = src;
       img.src = src;
     }, () => {
       img.replaceWith(attachmentChip({ ...file, status: 'ready' }, { removable: false }));
@@ -111,8 +111,12 @@ function openViewer({ src, fileId, name, full, file }) {
   requestAnimationFrame(() => overlay.classList.add('open'));
   const larger = fileId ? call(cf.image, { fileId, full: true }) : full;
   if (larger) {
+    // Swapped in once it has loaded: one that fails leaves the smaller copy shown.
     Promise.resolve(larger).then((url) => {
-      if (url && overlay.isConnected) img.src = url;
+      if (!url || !overlay.isConnected) return;
+      const next = new Image();
+      next.addEventListener('load', () => { if (overlay.isConnected) img.src = url; }, { once: true });
+      next.src = url;
     }, () => {});
   }
 }
@@ -192,8 +196,9 @@ function fromHistory(sessionId, messages, compactions = []) {
       items.push({
         type: 'user', text, at: message.created_at,
         files: [...refs, ...(message.files || []).map((file) => ({
+          // The preview is looked up when the card is drawn (imageCard), not kept here.
           name: file.filename || file.id, size: file.size, kind: file.kind, deleted: file.deleted,
-          fileId: file.id, preview: S.images.get(file.id) || null,
+          fileId: file.id, preview: null,
         }))],
       });
       for (const steer of message.steers || []) {
@@ -286,6 +291,20 @@ const loadFailures = new Map(); // session id -> { message, attempts, next }
 
 async function loadSessionHistory(id) {
   S.loading.add(id);
+  // A session packed in memory (12-session-memory.js) is read back from there.
+  if (isPacked(id)) {
+    await restoreSession(id);
+    if (S.loaded.has(id)) {
+      S.loading.delete(id);
+      if (S.current === id) renderMain();
+      renderSidebar();
+      // Answers that came from elsewhere while it was packed: read as for any
+      // session kept in memory.
+      const known = S.sessions.find((x) => x.id === id);
+      if (known) noticeNewAnswers(known);
+      return;
+    }
+  }
   const pending = transcriptOf(id).filter((item) => item.type !== 'load-error');
   let failed = null;
   try {

@@ -58,6 +58,7 @@ function setSettingsStatus(text, kind = 'info') {
 function resetAccountView() {
   S.transcripts.clear();
   S.loaded.clear();
+  forgetAllSessions();
   S.sessions = [];
   S.credits = null;
   S.current = null;

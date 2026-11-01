@@ -454,9 +454,9 @@ function flashHint(text, ms = 4000) {
 async function exportSession(session) {
   let items;
   try {
-    if (S.loaded.has(session.id) && !loadFailures.has(session.id)) {
-      items = transcriptOf(session.id);
-    } else {
+    // In memory, or packed there (12-session-memory.js): no need to ask the server.
+    items = await sessionItems(session.id);
+    if (!items) {
       const data = await call(cf.messages, session.id);
       items = fromHistory(session.id, data.messages || [], data.compactions || []);
     }
@@ -501,6 +501,7 @@ async function confirmDelete(session) {
   S.transcripts.delete(session.id);
   S.loaded.delete(session.id);
   S.agents.delete(session.id);
+  dropPacked(session.id);
   delete S.init.state.sessions[session.id];
   forgetDraft(session.id);
   if (S.current === session.id) newSession();

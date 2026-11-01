@@ -8,13 +8,17 @@
 // program?" question and the browser pane are stand-ins that record what they
 // were asked: nothing opens on the desktop.
 // Run with: npx electron test/file-links.cjs [folder for screenshots]
-const { app, BrowserWindow, ClipboardItem, clipboard, ipcMain, nativeImage } = require('electron');
+const { app, BrowserWindow, ClipboardItem, clipboard, ipcMain, nativeImage, protocol, session } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
 const { createLinkedFiles } = require('../src/main/linked-files');
 const { createClipboard } = require('../src/main/clipboard');
+const { createLocalImages, SCHEME } = require('../src/main/local-images');
+
+// The pictures in the folder come through cf-local:, as in the app (main.js).
+protocol.registerSchemesAsPrivileged([{ scheme: SCHEME, privileges: { standard: true, secure: true } }]);
 
 app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'cf-file-links-')));
 const shots = process.argv.slice(2).find((a) => !a.startsWith('-') && !a.endsWith('.cjs') && a !== '.');
@@ -53,7 +57,7 @@ for (let i = 0; i < pixels.length; i += 4) pixels.set([0x40, 0x90, 0xe0, 0xff], 
 fs.writeFileSync(at('out/chart.png'), nativeImage.createFromBitmap(pixels, { width: 64, height: 48 }).toPNG());
 
 // ── The main process ────────────────────────────────────────────────────────
-const calls = { opened: [], revealed: [], asked: [], browsed: [], navigated: [], windows: [] };
+const calls = { opened: [], revealed: [], asked: [], browsed: [], navigated: [], windows: [], images: [] };
 const files = createLinkedFiles({
   folderOf: (id) => (id === 'files' ? cwd : null),
   shell: {
@@ -78,16 +82,24 @@ handle('files:open', files.open);
 handle('files:reveal', files.reveal);
 handle('files:browse', files.browse);
 handle('clipboard:write', copying.writeText);
-handle('clipboard:writeImage', copying.writeImage);
+// What the window hands over is noted too: the picture it drew is checked
+// even when another program holds the system clipboard.
+handle('clipboard:writeImage', (url) => { calls.images.push(url); return copying.writeImage(url); });
 handle('browser:navigate', (url) => { calls.navigated.push(url); return { url, title: '', loading: false }; });
-// As main.js answers it for a small PNG in the folder: the file as it is.
-handle('files:localImage', ({ path: shown } = {}) => {
-  const file = path.resolve(cwd, String(shown));
-  if (!file.startsWith(cwd) || !fs.existsSync(file)) throw new Error(`${shown} is not there.`);
-  return { url: `data:image/png;base64,${fs.readFileSync(file).toString('base64')}`, name: path.basename(file) };
-});
+// The real local-images.js, as main.js wires it.
+const localImages = createLocalImages({ folderOf: (id) => (id === 'files' ? cwd : null), nativeImage });
+handle('files:localImageInfo', localImages.info);
+handle('files:localImage', localImages.dataUrl);
 
 // ── What the clipboard holds ────────────────────────────────────────────────
+// The last picture the window asked to copy, decoded.
+function handedImage() {
+  const url = calls.images.at(-1);
+  if (!url) return null;
+  const image = nativeImage.createFromDataURL(url);
+  return { ...image.getSize(), pixel: [...image.toBitmap().subarray(0, 4)] };
+}
+
 async function clipboardImage() {
   for (const item of await clipboard.read()) {
     if (!item.types.includes('image/png')) continue;
@@ -123,6 +135,7 @@ const ANSWER = [
 ].join('\n');
 
 app.whenReady().then(async () => {
+  session.defaultSession.protocol.handle(SCHEME, (request) => localImages.respond(request));
   const saved = await saveClipboard();
   const win = new BrowserWindow({
     show: false, width: 1400, height: 900,
@@ -215,10 +228,12 @@ app.whenReady().then(async () => {
     // ── Drawn ──
     const drawn = await js(`(() => ({
       absoluteLink: Boolean(document.querySelector('.markdown a[href^=${JSON.stringify(cwd.slice(0, 2))}]')),
-      images: [...document.querySelectorAll('.markdown img[data-local-path]')].map((img) => img.src.slice(0, 22)),
+      images: [...document.querySelectorAll('.markdown img[data-local-path]')]
+        .map((img) => [img.src.slice(0, 26), img.complete && img.naturalWidth, img.naturalHeight]),
     }))()`);
     check('a link that names its drive survives the sanitizer', drawn.absoluteLink);
-    same('both pictures, by relative and by full path, are shown', drawn.images, ['data:image/png;base64,', 'data:image/png;base64,']);
+    same('both pictures, by relative and by full path, are shown through cf-local:', drawn.images,
+      [['cf-local://image/?session=', 64, 48], ['cf-local://image/?session=', 64, 48]]);
 
     // ── A video ──
     let menu = await menuOf('.markdown a[href="out/run.mp4"]');
@@ -245,6 +260,7 @@ app.whenReady().then(async () => {
     same('the picture\'s menu', menu, ['out/chart.png', 'View', 'Open with default app', 'Show in Explorer', 'Copy image', 'Copy path', 'Copy relative path']);
     await clipboard.writeText('before');
     await pick('Copy image');
+    same('Copy image handed over the whole picture', handedImage(), { width: 64, height: 48, pixel: [0x40, 0x90, 0xe0, 0xff] });
     same('Copy image put the picture on the clipboard', await clipboardImage(), { width: 64, height: 48, pixel: [0x40, 0x90, 0xe0, 0xff] });
     check(`and said so: ${await hint()}`, (await hint()) === 'Image copied.');
     await menuOf('.markdown img[data-local-path="out/chart.png"]');
@@ -259,12 +275,18 @@ app.whenReady().then(async () => {
     await menuOf('.markdown img[data-local-path="out/chart.png"]');
     await pick('View');
     check('View opens the viewer', await js(`Boolean(document.querySelector('#viewer .viewer-image[data-file-path="out/chart.png"]'))`));
+    await settle(400);
+    same('the viewer shows the full copy, through cf-local:', await js(`(() => {
+      const img = document.querySelector('#viewer .viewer-image');
+      return [img.src.startsWith('cf-local://image/?') && img.src.includes('full=1'), img.naturalWidth, img.naturalHeight];
+    })()`), [true, 64, 48]);
     await settle(300);
     menu = await menuOf('#viewer .viewer-image');
     await shot('menu-viewer');
     same('the viewer\'s menu: no View, it is open', menu, ['out/chart.png', 'Open with default app', 'Show in Explorer', 'Copy image', 'Copy path', 'Copy relative path']);
     await clipboard.writeText('before');
     await pick('Copy image');
+    same('Copy image from the viewer handed over the whole picture', handedImage(), { width: 64, height: 48, pixel: [0x40, 0x90, 0xe0, 0xff] });
     same('Copy image from the viewer', await clipboardImage(), { width: 64, height: 48, pixel: [0x40, 0x90, 0xe0, 0xff] });
     check('the viewer stays open after a choice', await js(`Boolean(document.getElementById('viewer'))`));
     await js(`closeViewer()`);

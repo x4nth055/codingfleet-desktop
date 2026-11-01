@@ -179,8 +179,19 @@ function gateRemoteImage(img) {
 }
 
 // Natural sizes of images already loaded, so a streamed answer that is drawn
-// again keeps each image's box instead of collapsing and jumping.
+// again keeps each image's box instead of collapsing and jumping. By address,
+// the newest last, so many: a picture written into an answer as a data: URL is
+// not kept by its whole text.
 const imageSizes = new Map();
+const IMAGE_SIZES_MAX = 500;
+const IMAGE_SIZE_KEY_MAX = 4096;
+
+function rememberImageSize(src, size) {
+  if (!src || src.length > IMAGE_SIZE_KEY_MAX) return;
+  imageSizes.delete(src);
+  imageSizes.set(src, size);
+  if (imageSizes.size > IMAGE_SIZES_MAX) imageSizes.delete(imageSizes.keys().next().value);
+}
 
 // Code blocks: colors for the language, its name, and a copy button.
 const HIGHLIGHT_LIMIT = 200_000;   // longer code is shown plain
@@ -352,7 +363,8 @@ function finishMarkdown(node, seen, writing = null) {
   for (const img of node.querySelectorAll('img')) {
     img.decoding = 'async';
     if (img.dataset.local && !img.getAttribute('src')) continue;
-    const known = imageSizes.get(img.src);
+    const src = img.getAttribute('src') || '';
+    const known = src.length <= IMAGE_SIZE_KEY_MAX ? imageSizes.get(src) : null;
     if (known) {
       img.width = known.width;
       img.height = known.height;
@@ -360,7 +372,7 @@ function finishMarkdown(node, seen, writing = null) {
       continue;
     }
     img.addEventListener('load', () => {
-      imageSizes.set(img.src, { width: img.naturalWidth, height: img.naturalHeight });
+      rememberImageSize(img.getAttribute('src') || '', { width: img.naturalWidth, height: img.naturalHeight });
       img.classList.add('ready');
     }, { once: true });
     img.addEventListener('error', () => img.classList.add('ready', 'broken'), { once: true });
@@ -427,21 +439,30 @@ function streamMarkdown(node, text, live) {
 // ── Images in the session's folder ─────────────────────────────────────────
 // The agent writes ![a chart](out/plot.png) for an image it made on this
 // computer. Nothing serves that path and the window has no filesystem, so the
-// main process reads the file and sends the picture back. Each one is fetched
-// once and kept: streamed text redraws its markdown every frame.
+// main process answers a cf-local: address for it (main/local-images.js). The
+// window asks once what the file is (its time names the version) and keeps
+// that: streamed text redraws its markdown every frame. The picture itself is
+// the page's to keep and let go of, like any image it loads.
 const localImages = new Map();        // `${sessionId}\n${path}` -> entry
 const LOCAL_IMAGE_RECHECK_MS = 4000;  // a file written again is picked up this soon
+
+function localImageUrl(sessionId, src, version, { full = false } = {}) {
+  const query = new URLSearchParams({ session: sessionId, path: src, v: String(version || 0) });
+  if (full) query.set('full', '1');
+  return `cf-local://image/?${query}`;
+}
 
 function localImageEntry(sessionId, src) {
   const key = `${sessionId}\n${src}`;
   let entry = localImages.get(key);
   if (!entry) {
-    entry = { key, sessionId, src, url: null, error: null, at: 0, pending: null };
+    entry = { key, sessionId, src, url: null, mtime: 0, error: null, at: 0, pending: null };
     localImages.set(key, entry);
   }
   if (!entry.pending && Date.now() - entry.at > LOCAL_IMAGE_RECHECK_MS) {
-    entry.pending = call(cf.localImage, { sessionId, path: src }).then((data) => {
-      entry.url = data.url;
+    entry.pending = call(cf.localImageInfo, { sessionId, path: src }).then((data) => {
+      entry.mtime = data.mtime;
+      entry.url = localImageUrl(sessionId, src, data.mtime);
       entry.error = null;
     }, (err) => {
       entry.url = null;
@@ -462,6 +483,18 @@ function paintLocalImage(img, entry) {
     img.classList.remove('broken');
     if (img.getAttribute('src') !== entry.url) {
       img.addEventListener('load', () => img.classList.add('ready'), { once: true });
+      // There, but not something the main process could show (too large once
+      // made smaller, or not an image after all).
+      img.addEventListener('error', () => {
+        if (img.getAttribute('src') !== entry.url) return;
+        if (img.classList.contains('tool-image')) {
+          img.remove();
+          return;
+        }
+        img.classList.add('ready', 'broken');
+        img.alt = `${entry.src} — This image could not be shown.`;
+        img.title = img.alt;
+      }, { once: true });
       img.src = entry.url;
     }
   } else if (entry.error) {
@@ -505,10 +538,11 @@ function adoptLocalImage(img, sessionId = S.current) {
   return true;
 }
 
-// The same picture, larger, for the viewer.
+// The same picture, larger, for the viewer: the version the conversation shows.
 function fullLocalImage(img) {
   const [sessionId, src] = String(img.dataset.local || '').split('\n');
-  return call(cf.localImage, { sessionId, path: src, full: true }).then((data) => data.url);
+  const entry = localImages.get(img.dataset.local);
+  return localImageUrl(sessionId, src, entry ? entry.mtime : Date.now(), { full: true });
 }
 
 function originOf(base) {

@@ -87,6 +87,7 @@ contextBridge.exposeInMainWorld('cf', {
   deleteFile: call('files:delete'),
   image: call('files:image'),
   localImage: call('files:localImage'),
+  localImageInfo: call('files:localImageInfo'),
   fileInfo: call('files:info'),
   readTextFile: call('files:readText'),
   openFile: call('files:open'),

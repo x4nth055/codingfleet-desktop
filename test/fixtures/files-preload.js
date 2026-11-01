@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('cf', {
   revealFile: invoke('files:reveal'),
   browseFile: invoke('files:browse'),
   localImage: invoke('files:localImage'),
+  localImageInfo: invoke('files:localImageInfo'),
   copyText: invoke('clipboard:write'),
   copyImage: invoke('clipboard:writeImage'),
   browserNavigate: invoke('browser:navigate'),

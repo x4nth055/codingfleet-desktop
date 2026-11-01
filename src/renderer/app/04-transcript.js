@@ -11,21 +11,62 @@ function renderMain() {
   renderComposer();
 }
 
+// The window holds the DOM of the session on screen only, and of its newest
+// turns only: a long session is drawn from its last TURNS_SHOWN turns, and
+// earlier ones are drawn above them as the conversation is scrolled up
+// (drawEarlier). Every item stays in S.transcripts as data, so drawing more
+// asks nothing of the server.
+const TURNS_SHOWN = 30;
+const TURNS_MORE = 30;
+// The session drawn, the first item drawn of it, and how many turns that is.
+const DRAWN = { session: null, first: null, turns: TURNS_SHOWN };
+
+// An item keeps the node it was drawn as (item.node), for redrawing it in
+// place. A session off screen must let go of its nodes, or its whole drawing
+// stays alive behind the one shown. `agents`: its sub-agents' too, once the
+// session itself is left (the panel reuses those while it is shown).
+function forgetNodes(sessionId, { agents = false } = {}) {
+  if (!sessionId) return;
+  for (const item of S.transcripts.get(sessionId) || []) {
+    delete item.node;
+    delete item.navButton;
+  }
+  if (!agents) return;
+  for (const agent of (S.agents.get(sessionId) || new Map()).values()) {
+    for (const item of agent.items) delete item.node;
+  }
+}
+
 function renderTranscript() {
   const box = $('transcript');
   box.replaceChildren();
+  // The same session drawn again keeps the turns already drawn, even when its
+  // items are new objects (a transcript read again after a run).
+  const same = DRAWN.session === S.current;
+  const keepFrom = same && DRAWN.first ? transcriptOf(S.current).indexOf(DRAWN.first) : -1;
+  forgetNodes(DRAWN.session, { agents: !same });
+  if (!same) DRAWN.turns = TURNS_SHOWN;
+  DRAWN.session = S.current;
+  DRAWN.first = null;
   if (!S.current) {
     box.append(renderEmpty());
     // A new session has no messages: the rail must not keep the last one's.
     renderThreadNav();
     return;
   }
+  noteOpened(S.current);
   const column = el('div', 'column');
   column.id = 'column';
   if (!S.loaded.has(S.current) && !loadFailures.has(S.current)) {
-    column.append(el('div', 'loading', 'Loading session…'));
+    // A packed session is read back from memory in a moment: no message for that.
+    if (!isPacked(S.current)) column.append(el('div', 'loading', 'Loading session…'));
   } else {
-    for (const item of transcriptOf(S.current)) column.append(renderItem(item));
+    const items = transcriptOf(S.current);
+    const from = keepFrom >= 0 ? keepFrom : CF_SESSION_TOOLS.recentTurnsStart(items, DRAWN.turns);
+    if (from > 0) column.append(earlierButton(items, from));
+    for (const item of items.slice(from)) column.append(renderItem(item));
+    DRAWN.first = items[from] || null;
+    DRAWN.turns = Math.max(TURNS_SHOWN, CF_SESSION_TOOLS.turnsFrom(items, from));
     if (S.running.has(S.current)) column.append(renderWorking(S.current));
     else if (S.remoteBusy.has(S.current)) column.append(renderRemoteWorking());
   }
@@ -33,6 +74,58 @@ function renderTranscript() {
   box.scrollTop = box.scrollHeight;
   updateScrollButton();
   renderThreadNav();
+}
+
+// The line above the turns drawn, while earlier ones are not: a click draws
+// them, and so does scrolling up to it (onTranscriptScroll).
+function earlierButton(items, from) {
+  const hidden = CF_SESSION_TOOLS.turnsFrom(items.slice(0, from), 0);
+  const button = el('button', 'earlier',
+    hidden ? `Show ${hidden} earlier ${hidden === 1 ? 'turn' : 'turns'}` : 'Show the start of the session');
+  button.id = 'earlier';
+  button.type = 'button';
+  button.addEventListener('click', () => drawEarlier());
+  return button;
+}
+
+// Draws `more` turns above the ones drawn (Infinity: all of them), keeping
+// what is on screen where it is. False when there is nothing more to draw.
+function drawEarlier(more = TURNS_MORE) {
+  const column = $('column');
+  const marker = $('earlier');
+  if (!column || !marker || !S.current || DRAWN.session !== S.current) return false;
+  const items = transcriptOf(S.current);
+  const end = items.indexOf(DRAWN.first);
+  if (end <= 0) {
+    // The items were replaced since they were drawn: draw them again, with more.
+    DRAWN.first = null;
+    DRAWN.turns = more === Infinity ? Infinity : DRAWN.turns + more;
+    renderTranscript();
+    return true;
+  }
+  const from = more === Infinity ? 0 : CF_SESSION_TOOLS.recentTurnsStart(items.slice(0, end), more);
+  const box = $('transcript');
+  const anchor = marker.nextElementSibling;
+  const before = anchor ? anchor.getBoundingClientRect().top : 0;
+  const drawn = document.createDocumentFragment();
+  for (const item of items.slice(from, end)) drawn.append(renderItem(item));
+  marker.after(drawn);
+  if (from > 0) marker.replaceWith(earlierButton(items, from));
+  else marker.remove();
+  DRAWN.first = items[from];
+  DRAWN.turns = Math.max(TURNS_SHOWN, CF_SESSION_TOOLS.turnsFrom(items, from));
+  if (anchor && anchor.isConnected) box.scrollTop += anchor.getBoundingClientRect().top - before;
+  renderThreadNav();
+  return true;
+}
+
+// Draws the turns down to `item`, so that it can be scrolled to.
+function drawThrough(item) {
+  const items = transcriptOf(S.current);
+  const at = items.indexOf(item);
+  const end = items.indexOf(DRAWN.first);
+  if (at < 0 || end < 0 || at >= end) return;
+  drawEarlier(CF_SESSION_TOOLS.turnsFrom(items.slice(0, end), at));
 }
 
 function renderEmpty() {
@@ -92,10 +185,14 @@ const scrollToBottom = () => {
 // ── Thread navigation ─────────────────────────────────────────────────────
 // One tick per prompt on the right edge; hovering shows the prompts, a click
 // goes to one. The tick of the prompt being read is lit as the page scrolls.
+// Every prompt of the session, drawn or not: one not drawn yet is drawn when
+// its tick is clicked.
 function navItems() {
-  if (!S.current || !S.loaded.has(S.current)) return [];
-  return transcriptOf(S.current).filter((i) => i.type === 'user' && !i.steer && i.node && i.node.isConnected);
+  if (!S.current || !S.loaded.has(S.current) || DRAWN.session !== S.current) return [];
+  return transcriptOf(S.current).filter((i) => i.type === 'user' && !i.steer);
 }
+
+const isDrawn = (item) => Boolean(item.node && item.node.isConnected);
 
 function renderThreadNav() {
   const nav = $('threadNav');
@@ -108,7 +205,10 @@ function renderThreadNav() {
     const button = el('button', 'tn-item');
     button.title = text.length > 240 ? `${text.slice(0, 240)}…` : text;
     button.append(el('span', 'tn-text', text || 'Message'), el('span', 'tn-tick'));
-    button.addEventListener('click', () => item.node.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    button.addEventListener('click', () => {
+      if (!isDrawn(item)) drawThrough(item);
+      if (isDrawn(item)) item.node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
     item.navButton = button;
     nav.append(button);
   }
@@ -123,7 +223,8 @@ function updateThreadNavActive() {
   const prompts = navItems().filter((i) => i.navButton);
   let active = prompts[0];
   for (const item of prompts) {
-    if (item.node.getBoundingClientRect().top <= line) active = item;
+    // A prompt not drawn is above everything drawn.
+    if (!isDrawn(item) || item.node.getBoundingClientRect().top <= line) active = item;
   }
   // At the very bottom the last prompt is the one being read.
   if (nearBottom() && box.scrollHeight > box.clientHeight) active = prompts[prompts.length - 1];
@@ -136,6 +237,9 @@ function onTranscriptScroll() {
   if (navFrame) return;
   navFrame = requestAnimationFrame(() => {
     navFrame = 0;
+    // Within a screen of the top: the turns above are drawn before they are reached.
+    const box = $('transcript');
+    if ($('earlier') && box.scrollTop < box.clientHeight) drawEarlier();
     updateThreadNavActive();
   });
 }
@@ -151,6 +255,7 @@ function addItem(sessionId, item) {
   if (sessionId !== S.current) return;
   const column = $('column');
   if (!column) return;
+  if (item.type === 'user' && !item.steer && DRAWN.session === sessionId) DRAWN.turns += 1;
   const stick = nearBottom();
   const node = renderItem(item);
   const working = column.querySelector('.working');

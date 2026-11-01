@@ -159,12 +159,15 @@ function renderBrowserEmpty() {
 const coveredByDialog = () => Boolean(document.querySelector('.overlay:not([hidden]), #viewer, #dropOverlay:not([hidden])'));
 
 // Tells the main process where the pane is, if that changed. True when it did.
+// `open`: the pane is open, even while a dialog covers it; a page left behind
+// a closed pane is closed after a while (main/browser.js), not one under a dialog.
 function sendBrowserLayout() {
   const host = $('browserHost');
-  const visible = browserShown() && Boolean(BROWSER.state.url) && !coveredByDialog();
+  const open = browserShown();
+  const visible = open && Boolean(BROWSER.state.url) && !coveredByDialog();
   const r = host.getBoundingClientRect();
-  const layout = { visible: visible && r.width > 0 && r.height > 0, rect: { x: r.left, y: r.top, width: r.width, height: r.height } };
-  const key = JSON.stringify([layout.visible, Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]);
+  const layout = { visible: visible && r.width > 0 && r.height > 0, open, rect: { x: r.left, y: r.top, width: r.width, height: r.height } };
+  const key = JSON.stringify([layout.visible, open, Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]);
   if (key === BROWSER.sent) return false;
   BROWSER.sent = key;
   cf.browserLayout(layout);

@@ -56,6 +56,8 @@ Open the app, click **Sign in with your browser**, and approve. That's all.
 | 🖥️ **Terminal** | Your own shells beside the conversation, at the bottom or on the right. Ctrl+\` shows and hides it. |
 | ⌨️ **Keyboard first** | Answer approvals with Alt+Y / Alt+N, search sessions, find in a conversation. Ctrl+/ lists every shortcut. |
 | 📄 **Export** | Copy an answer as Markdown, or save a whole session as a `.md` file. |
+| 📂 **Files in answers** | Click a file the agent links to: code opens in the side panel, pictures in the viewer, pages and PDFs in the browser. Right-click for Show in Explorer, Open with default app, Copy path. |
+| 🪶 **Light on memory** | Only the conversation on screen is drawn, and only its newest turns until you scroll up. Sessions you left are kept compressed, and reopen from memory without asking the server. |
 | 🎨 **Three themes** | Dark, Light and Hacker, and a choice of fonts (Inter and JetBrains Mono unless you pick others). |
 
 ## Tools
@@ -158,6 +160,10 @@ staging server. **Let the agent use any site without asking** skips the per-site
 is less safe (a page can hold instructions meant for the agent), and typing into a site that
 is not on your list still asks every time.
 
+A page left behind a closed panel for two minutes is closed, to free its memory. It comes
+back where it was, back and forward included, when you open the panel or the agent uses the
+browser.
+
 The browser has its own profile: none of your real browser's logins or cookies, no downloads,
 and no camera, location or notifications. **Clear browsing data** in Preferences empties it.
 Turn **Browser for the agent** off in Preferences > Agent tools to keep the agent out of it.
@@ -201,6 +207,8 @@ writes better Bash than PowerShell. Without Git, it uses PowerShell.
 ```bash
 npm test                 # unit tests
 npm run test:layout      # layout checks
+npm run test:memory      # the sessions kept in memory, in the real window
+npm run e2e:memory       # the real app against a scripted API: memory, pictures, a run, the browser
 npm run e2e              # a real run on codingfleet.com (needs CODINGFLEET_API_KEY)
 ```
 

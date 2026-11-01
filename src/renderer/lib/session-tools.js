@@ -55,6 +55,32 @@
     return 0;
   }
 
+  /**
+   * Where the newest `turns` turns begin: the index of their first prompt (a
+   * steer belongs to the turn it was sent in). 0 once that is the session's
+   * first turn: what came before it (a note, a compaction) goes with it.
+   */
+  function recentTurnsStart(items, turns) {
+    let seen = 0;
+    let at = 0;
+    for (let i = (items || []).length - 1; i >= 0; i--) {
+      if (items[i].type !== 'user' || items[i].steer) continue;
+      if (seen >= turns) return at;
+      seen += 1;
+      at = i;
+    }
+    return 0;
+  }
+
+  /** How many turns begin at or after `index`. */
+  function turnsFrom(items, index) {
+    let count = 0;
+    for (let i = Math.max(0, index); i < (items || []).length; i++) {
+      if (items[i].type === 'user' && !items[i].steer) count++;
+    }
+    return count;
+  }
+
   /** The answer of the turn that ends at `index`, as Markdown. */
   function turnText(items, index) {
     return items.slice(turnStart(items, index), index)
@@ -161,7 +187,8 @@
   }
 
   const api = {
-    sessionSpend, sessionMatches, recentFolders, turnStart, turnText, transcriptMarkdown, exportFileName,
+    sessionSpend, sessionMatches, recentFolders, turnStart, recentTurnsStart, turnsFrom, turnText, transcriptMarkdown,
+    exportFileName,
   };
   root.CF_SESSION_TOOLS = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
