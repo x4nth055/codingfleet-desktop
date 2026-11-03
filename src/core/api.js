@@ -254,6 +254,8 @@ module.exports = {
   pollDeviceAuth: (deviceCode) => unauthenticated('POST', '/auth/device/token', { device_code: deviceCode }),
   credits: () => request('GET', '/credits'),
   crashReport: (report) => request('POST', '/diagnostics/crash', report, undefined, 30000),
+  // What the user typed into the feedback box, for the CodingFleet team.
+  sendFeedback: (body) => request('POST', '/feedback', body, undefined, 30000),
   // Connects to one remote MCP server the way a run would: { connected, tools, error }.
   testMcpServer: (server) => request('POST', '/mcp_servers/test', server, undefined, 60000),
   // include: 'provider' adds each model's provider and the web picker's order.

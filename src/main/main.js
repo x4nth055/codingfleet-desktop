@@ -1351,6 +1351,11 @@ function registerIpc() {
     crashes.clear();
     return true;
   });
+  // Feedback: the user's own words, plus which app and system it came from.
+  handle('feedback:send', (message) => api.sendFeedback({
+    message: String(message || '').slice(0, 5000),
+    platform: `${process.platform} ${os.release()} ${process.arch}`,
+  }));
   handle('diagnostics:openLogs', async () => {
     const error = await shell.openPath(log.dir);
     if (error) throw new Error(error);

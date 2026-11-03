@@ -56,10 +56,12 @@ app.whenReady().then(async () => {
                 const r = box(n);
                 if (r.right > sidebar.right - 4 || n.scrollWidth > n.clientWidth + 1) errors.push(n.className + ' overflows sidebar');
               }
-              return { errors, composer, send: box($('send')), hint: box($('hint')) };
+              return { errors, composer, send: box($('send')), hint: box($('hint')), feedback: box($('feedbackLink')) };
             })()`);
             assert.deepEqual(result.errors, [], `${width}/${theme}/panel=${panel}/running=${running}`);
             assert.ok(result.hint.y >= result.composer.bottom - 1, `hint stays below composer: ${JSON.stringify(result)}`);
+            assert.ok(result.feedback.y >= result.composer.bottom - 1 && result.feedback.right <= result.composer.right + 1
+              && result.feedback.width > 0, `the feedback link sits under the composer, inside its width: ${JSON.stringify(result)}`);
             if (!running) idle = result;
             else {
               assert.deepEqual(result.composer, idle.composer, 'starting a run does not resize composer');

@@ -109,6 +109,7 @@ contextBridge.exposeInMainWorld('cf', {
   sendCrashReport: call('diagnostics:send'),
   dismissCrash: call('diagnostics:dismiss'),
   openLogs: call('diagnostics:openLogs'),
+  sendFeedback: call('feedback:send'),
   // Errors in the window, for the app's log. Fire and forget.
   logError: (message) => ipcRenderer.send('log:renderer', { message: String(message || '').slice(0, 4000) }),
   backgroundJobs: call('background:list'),
