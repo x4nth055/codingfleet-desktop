@@ -627,9 +627,13 @@ function includedPill() {
   };
 }
 
+// A family is Unlimited when one of its efforts is: the app picks the lower
+// effort, and the effort menu prices the others.
 function priceLabel(variants) {
-  if (variants.length && variants.every(planIncludes)) return includedPill();
-  return creditRange(variants);
+  if (!variants.some(planIncludes)) return creditRange(variants);
+  const pill = includedPill();
+  if (!variants.every(planIncludes)) pill.title += ' Higher thinking efforts cost credits: the effort menu shows their prices.';
+  return pill;
 }
 
 function creditRange(variants) {
