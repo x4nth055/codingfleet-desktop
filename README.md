@@ -100,6 +100,7 @@ Pick a folder to work on real code. Pick no folder for a safe, empty sandbox.
 | What the agent does | What happens |
 |---|---|
 | Reads files inside the folder | Runs at once |
+| Runs a command that only reads inside the folder (`ls`, `grep`, `git diff`…) | Runs at once |
 | Reads outside the folder | Asks |
 | Runs a command or changes files | Asks |
 | Reads `.env`, keys or passwords | Asks, **even in Auto-approve** |
@@ -107,6 +108,22 @@ Pick a folder to work on real code. Pick no folder for a safe, empty sandbox.
 | Runs a script downloaded from the internet | Asks **every time** |
 
 These checks catch mistakes. They are not a sandbox.
+
+### Commands that only read
+
+These run at once, as long as every path they name is inside the folder:
+
+- `ls`, `pwd`, `cd`, `cat`, `head`, `tail`, `wc`, `echo`, `which`
+- `grep`, `rg`, `find`, `sort`, `uniq`
+- `git status`, `diff`, `log`, `show`, `blame`, `ls-files`, `rev-parse`, and `git branch` or
+  `git remote -v` to list
+- `node`, `npm`, `python`, `python3` and `git` with `--version`
+
+Several can be joined with `|`, `&&`, `||` or `;`, and output can go to `/dev/null`. Anything
+more asks as before: a variable, `$(…)`, a redirection to a file, or a flag that writes or
+runs something (`find -exec`, `sort -o`, `rg --pre`, `git diff --output`). Naming a secret
+such as `.env` still asks. This needs bash, which comes with Git for Windows; with only
+PowerShell, every command asks.
 
 ### Background commands
 

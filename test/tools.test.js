@@ -141,7 +141,13 @@ test('approval: reads inside the folder run; commands, writes and outside reads 
   assert.equal(tools.approvalReason('fs_glob', { pat: '**/..foo/*.js' }, cwd), null);
   assert.equal(tools.approvalReason('view_image', { source: 'out/chart.png' }, cwd), null);
   assert.equal(tools.approvalReason('view_image', { source: '../photos/me.jpg' }, cwd), 'reads outside the project folder');
-  assert.equal(tools.approvalReason('run_command', { command: 'ls' }, cwd), 'runs a command');
+  assert.equal(tools.approvalReason('run_command', { command: 'npm test' }, cwd), 'runs a command');
+  // A command that only reads inside the folder runs like fs_read (bash only),
+  // and the guard still asks about the secrets one names.
+  assert.equal(tools.approvalReason('run_command', { command: 'git diff | head' }, cwd),
+    tools.SHELL.unix ? null : 'runs a command');
+  assert.equal(tools.approvalReason('run_command', { command: 'cat .env' }, cwd), 'reads secrets');
+  assert.equal(tools.approvalReason('run_command', { command: 'cat ../notes.txt' }, cwd), 'runs a command');
   assert.equal(tools.approvalReason('execute_code', { code: 'x', filename: 'a.py', command: 'python a.py' }, cwd), 'runs a command');
   assert.equal(tools.approvalReason('fs_write', { path: 'a.txt', content: '' }, cwd), 'changes files');
   assert.equal(tools.approvalReason('fs_edit', { path: 'a.txt', old: 'a', new: 'b' }, cwd), 'changes files');

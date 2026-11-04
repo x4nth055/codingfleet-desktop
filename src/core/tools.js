@@ -9,6 +9,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const { guardReason } = require('./guard');
+const { readOnlyCommand } = require('./read-only');
 
 const CLIENT_TOOLS = new Set(['execute_code', 'run_command', 'fs_read', 'fs_write', 'fs_edit', 'fs_glob']);
 const MAX_OUTPUT_CHARS = 200_000;
@@ -303,8 +304,9 @@ async function executeTool(name, args, { cwd, signal, callId, adopt } = {}) {
 }
 
 // Why the user must approve this call, or null when it is safe to run: reads
-// inside the project folder run freely; commands, changes and anything outside
-// the folder wait for the user.
+// inside the project folder run freely, and so do commands that only read
+// there (read-only.js); other commands, changes and anything outside the
+// folder wait for the user.
 function approvalReason(name, args, cwd) {
   args = args || {};
   // Secrets and destructive commands first: they replace the ordinary reason.
@@ -326,6 +328,7 @@ function approvalReason(name, args, cwd) {
       ? null
       : 'reads outside the project folder';
   }
+  if (name === 'run_command' && SHELL.unix && readOnlyCommand(args.command, cwd)) return null;
   if (name === 'run_command' || (name === 'execute_code' && args.command)) return 'runs a command';
   return 'changes files';
 }

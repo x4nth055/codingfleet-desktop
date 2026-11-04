@@ -765,7 +765,7 @@ function openPermMenu() {
   const list = $('permList');
   list.replaceChildren();
   const options = [
-    ['ask', 'shield', 'Ask before changes', 'Reads inside the project folder run at once. Commands and file changes wait for you.'],
+    ['ask', 'shield', 'Ask before changes', 'Reading the project folder runs at once, ls, grep and git diff included. Other commands and file changes wait for you.'],
     ['auto', 'bolt', 'Auto-approve', 'Every tool call runs without asking. Use it only in folders you trust.'],
   ];
   for (const [value, iconName, name, sub] of options) {
