@@ -17,7 +17,11 @@ const crypto = require('crypto');
 const MAX_BUFFER_CHARS = 1_000_000;
 // What one read returns at most: the newest part, with a note on the rest.
 const MAX_READ_CHARS = 50_000;
-const MAX_WAIT_S = 30;
+// read_background's longest wait: the server's READ_BACKGROUND_MAX_WAIT_S, the
+// number the model is told. A longer wait means fewer model requests to watch a
+// long build, but not past about four minutes: the turn's messages are on a
+// 5-minute prompt cache, and a cold cache costs far more than another read.
+const MAX_WAIT_S = 240;
 // A session can hold only so many running jobs; a model that starts servers
 // in a loop is stopped here instead of by the operating system.
 const MAX_RUNNING_PER_SESSION = 8;
