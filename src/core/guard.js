@@ -1,7 +1,8 @@
 'use strict';
 // Calls that must reach a person even when the agent may otherwise act alone.
 //
-// Two kinds, both decided from the call's own arguments:
+// Two kinds, both decided from the call's own arguments (and, for a forced
+// delete, the project folder):
 //
 // * Secrets: reading a file that usually holds credentials (.env, private
 //   keys, cloud and registry credentials), or printing the environment. What
@@ -70,13 +71,16 @@ function words(command) {
   return String(command || '').split(/[\s"'`|;&<>()=]+/).filter(Boolean);
 }
 
-// Printing the environment, where tokens and keys usually live.
+// Printing the environment, where tokens and keys usually live. "pwd" is
+// there for names like DB_PWD; $PWD and $OLDPWD (and PowerShell's $pwd) are
+// the working folder, not a password (Nov 2026: 14% of the asks auto mode
+// could not skip were only a $PWD).
 const ENV_DUMP = [
   /(^|[;&|]\s*)(env|printenv|export\s+-p)\s*($|[;&|>])/i,
   /(^|[;&|]\s*)set\s*($|[;&|>])/i,
   /\b(get-childitem|gci|ls|dir)\s+env:/i,
-  /\$env:[a-z_]*(token|key|secret|passw|pwd|credential)/i,
-  /\$\{?[a-z_]*(token|key|secret|passw|pwd|credential)[a-z_]*\}?/i,
+  /\$env:(?!(old)?pwd\b)[a-z_]*(token|key|secret|passw|pwd|credential)/i,
+  /\$\{?(?!(old)?pwd\b)[a-z_]*(token|key|secret|passw|pwd|credential)[a-z_]*\}?/i,
   /%[a-z_]*(token|key|secret|passw|pwd|credential)[a-z_]*%/i,
   // The GitHub CLI prints the token it keeps when asked.
   /\bgh\s+auth\s+token\b/i,
@@ -84,7 +88,8 @@ const ENV_DUMP = [
 ];
 
 const DESTRUCTIVE_COMMANDS = [
-  // Recursive or forced deletion.
+  // Recursive or forced deletion. A forced delete of files inside the folder
+  // is let through by onlyDeletesFiles below.
   /(^|[;&|(]\s*|\bsudo\s+|\bxargs\s+)rm\s+(-[a-z]*[rf][a-z]*\s+|--(recursive|force)\s+)/i,
   /\b(rmdir|rd)\s+\/s\b/i,
   /\b(del|erase)\s+(\/[a-z]\s+)*\/[sq]\b/i,
@@ -115,10 +120,27 @@ const REMOTE_SCRIPTS = [
   /\biex\s*\(\s*(new-object\s+net\.webclient|iwr|irm|invoke-webrequest|invoke-restmethod)/i,
 ];
 
-/** Why a command must be asked about whatever the mode, or null. */
-function commandRisk(command) {
+const destructive = (text) => DESTRUCTIVE_COMMANDS.some((re) => re.test(text));
+
+// Whether a line that looks destructive only deletes files inside the folder
+// (`rm -f tmp/check.py`, `Remove-Item -Force a.log`), which is an ordinary
+// change: read-only.js takes those deletes out, and the rest is tested again.
+// Needs the folder; without it every such delete asks, as before.
+function onlyDeletesFiles(text, { cwd, shell } = {}) {
+  if (!cwd) return false;
+  // Here, not at the top: read-only.js requires this module.
+  const rest = require('./read-only').withoutFileDeletes(text, cwd, shell);
+  return Boolean(rest) && !rest.some((words) => destructive(words.join(' ')));
+}
+
+/**
+ * Why a command must be asked about whatever the mode, or null. `where`
+ * ({ cwd, shell }, the shell as read-only.js names it) lets deletes of files
+ * inside the folder through.
+ */
+function commandRisk(command, where) {
   const text = String(command || '');
-  if (DESTRUCTIVE_COMMANDS.some((re) => re.test(text))) return DESTRUCTIVE;
+  if (destructive(text) && !onlyDeletesFiles(text, where)) return DESTRUCTIVE;
   if (REMOTE_SCRIPTS.some((re) => re.test(text))) return REMOTE_SCRIPT;
   if (ENV_DUMP.some((re) => re.test(text)) || words(text).some(isSecretPath)) return SECRETS;
   return null;
@@ -126,21 +148,24 @@ function commandRisk(command) {
 
 /**
  * The guard's reason for a call, or null when the ordinary rules decide.
- * Runs before them: a guarded reason replaces the ordinary one.
+ * Runs before them: a guarded reason replaces the ordinary one. `where` as in
+ * commandRisk.
  */
-function guardReason(name, args) {
+function guardReason(name, args, where) {
   args = args || {};
   if (name === 'computer') return COMPUTER;
   if (name === 'fs_read' || name === 'view_image') {
     return isSecretPath(name === 'fs_read' ? args.path : args.source) ? SECRETS : null;
   }
-  if (name === 'run_command') return commandRisk(args.command);
+  if (name === 'run_command') return commandRisk(args.command, where);
   if (name === 'execute_code') {
     // The file it writes is the script it runs: look inside it for commands
     // that destroy or fetch-and-run. Not for secrets: a script that loads
     // .env is ordinary, and its values reach the model only if it prints them.
+    // The script may run in another folder than the command line starts in,
+    // so its deletes are judged without one.
     const inScript = args.command ? commandRisk(args.code) : null;
-    return commandRisk(args.command) || (inScript === SECRETS ? null : inScript);
+    return commandRisk(args.command, where) || (inScript === SECRETS ? null : inScript);
   }
   return null;
 }

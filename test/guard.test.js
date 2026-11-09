@@ -1,8 +1,12 @@
 'use strict';
 const assert = require('node:assert/strict');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const guard = require('../src/core/guard');
+
+const cwd = path.join(os.tmpdir(), 'cf-guard', 'project');
 
 test('files that usually hold credentials are secrets; templates and public keys are not', () => {
   for (const p of ['.env', 'app/.env.local', '.env.production', 'C:\\proj\\.env', 'certs/server.key',
@@ -28,6 +32,73 @@ test('reading a secret or printing the environment is asked about', () => {
     'python -m pytest', 'export NODE_ENV=production', 'gh auth status', 'gh pr diff 12 --repo a/b']) {
     assert.equal(guard.commandRisk(command), null, command);
   }
+});
+
+test('$PWD is the working folder, not a password', () => {
+  for (const command of ['cd "$PWD/build"', 'echo ${PWD}', 'docker run -v "$PWD":/w img', 'cd "$OLDPWD"',
+    '$pwd = (Get-Location).Path; "CWD: $pwd"', 'echo $env:PWD', 'NODE_PATH="$PWD/node_modules" node a.js']) {
+    assert.equal(guard.commandRisk(command), null, command);
+  }
+  for (const command of ['echo $DB_PWD', 'mysql -p${MYSQL_PWD}', 'cat $PWD_FILE', 'echo $env:DB_PWD',
+    'echo $OPENAI_API_KEY']) {
+    assert.equal(guard.commandRisk(command), guard.SECRETS, command);
+  }
+});
+
+test('deleting files inside the folder is an ordinary change in bash', () => {
+  const where = { cwd, shell: 'bash' };
+  const here = cwd.replace(/\\/g, '/');
+  for (const command of [
+    'rm -f tmp/labels.py', 'python3 tmp/labels.py 2>&1 | tail -8; rm -f tmp/labels.py',
+    'rm -f smoke1.py smoke2.py && rm -fv out.log', `cd ${here} && rm -f a.txt`, 'cd src && rm -f *.pyc',
+    'rm -f -- -odd-name', 'rm --force a.txt', `rm -f ${here}/build/a.o`,
+  ]) {
+    assert.equal(guard.commandRisk(command, where), null, command);
+    // Without the folder nothing says where the files are: asked as before.
+    assert.equal(guard.commandRisk(command), guard.DESTRUCTIVE, command);
+  }
+  for (const command of [
+    // Folders and their contents.
+    'rm -rf build', 'rm -fr x', 'rm -f -r x', 'rm -f a && rm -rf tmp', 'rm -f -d empty',
+    // Outside the folder, or perhaps outside.
+    'rm -f /etc/hosts', 'rm -f ../other/a.txt', 'rm -f ~/a.txt', 'rm -f src/../../a', 'cd /tmp && rm -f a.txt',
+    'cd .. && rm -f a.txt', 'cd - && rm -f a', 'popd; rm -f a', 'cd && rm -f a', 'rm -f "$TMPDIR/a"',
+    // Something else destructive on the line, or a delete the guard cannot see the files of.
+    'rm -f a.txt && git reset --hard', 'find . -name "*.o" | xargs rm -f -v', 'sudo rm -f a', 'rm -f a; git push -f',
+    // A secret: deleting .env is not cleanup.
+    'rm -f .env',
+  ]) {
+    assert.equal(guard.commandRisk(command, where), guard.DESTRUCTIVE, command);
+  }
+});
+
+test('deleting files inside the folder is an ordinary change in PowerShell', () => {
+  const where = { cwd: 'C:\\work\\app', shell: 'powershell' };
+  for (const command of [
+    'Remove-Item -Force snip_tmp.py,snip3.py', 'Remove-Item -LiteralPath out.log -Force -ErrorAction SilentlyContinue',
+    'cd C:\\work\\app; Remove-Item -Force a.txt', 'rm -Force a.txt', 'Remove-Item -Force -Path:build\\a.txt',
+    'Remove-Item -fo a.txt -EA:SilentlyContinue',
+  ]) {
+    assert.equal(guard.commandRisk(command, where), null, command);
+  }
+  for (const command of [
+    'Remove-Item -Recurse -Force dist', 'Remove-Item -Force -Recurse dist', 'ri -r -fo bin',
+    'Remove-Item -Force C:\\Windows\\a.dll', 'Remove-Item -Force ..\\a.txt', 'Remove-Item -Force HKCU:\\Software\\x',
+    'cd C:\\; Remove-Item -Force a.txt', 'cd env:; Remove-Item -Force TOKEN', 'Remove-Item -Force $p',
+    'Remove-Item -Force a.txt; git reset --hard',
+  ]) {
+    assert.equal(guard.commandRisk(command, where), guard.DESTRUCTIVE, command);
+  }
+});
+
+test('a run_command or execute_code line is judged in its folder; a script it runs is not', () => {
+  const where = { cwd, shell: 'bash' };
+  assert.equal(guard.guardReason('run_command', { command: 'rm -f tmp/a.py' }, where), null);
+  assert.equal(guard.guardReason('execute_code',
+    { code: 'print(1)', filename: 'tmp/a.py', command: 'python3 tmp/a.py && rm -f tmp/a.py' }, where), null);
+  // The script may run in another folder than the line starts in.
+  assert.equal(guard.guardReason('execute_code',
+    { code: 'rm -f out.log\nmake', filename: 'b.sh', command: 'bash b.sh' }, where), guard.DESTRUCTIVE);
 });
 
 test('a script that loads .env is ordinary; one that deletes a tree is not', () => {

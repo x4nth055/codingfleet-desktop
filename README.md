@@ -104,7 +104,8 @@ Pick a folder to work on real code. Pick no folder for a safe, empty sandbox.
 | Reads outside the folder | Asks |
 | Runs a command or changes files | Asks |
 | Reads `.env`, keys or passwords | Asks, **even in Auto-approve** |
-| Deletes a lot, rewrites git history, wipes data | Asks **every time** |
+| Deletes files inside the folder (`rm -f tmp/a.py`, `Remove-Item -Force a.log`) | Same as changing files |
+| Deletes a folder or anything outside the folder, rewrites git history, wipes data | Asks **every time** |
 | Runs a script downloaded from the internet | Asks **every time** |
 
 These checks catch mistakes. They are not a sandbox.

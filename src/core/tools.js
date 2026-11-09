@@ -311,7 +311,7 @@ async function executeTool(name, args, { cwd, signal, callId, adopt } = {}) {
 function approvalReason(name, args, cwd) {
   args = args || {};
   // Secrets and destructive commands first: they replace the ordinary reason.
-  const guarded = guardReason(name, args);
+  const guarded = guardReason(name, args, { cwd, shell: SHELL.kind });
   if (guarded) return guarded;
   // Reading or stopping a command the agent itself started in the background.
   if (name === 'read_background' || name === 'stop_background') return null;

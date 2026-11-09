@@ -442,4 +442,109 @@ function namesSecret(command, shell = 'bash') {
   return Boolean(commands) && commands.some((words) => words.some(secretWord));
 }
 
-module.exports = { readOnlyCommand, commandsOf, namesSecret };
+// ── Deleting files ────────────────────────────────────────────────────────
+// rm without -r, and Remove-Item without -Recurse, delete files, never a
+// folder with what is in it. Inside the project folder that is an ordinary
+// change, as `rm a.txt` already is: guard.js does not count it as destructive,
+// so auto mode runs it. Agents write `rm -f tmp/check.py` to clean up after
+// themselves; asking about every one stopped unattended runs (Nov 2026: 38% of
+// the asks auto mode could not skip, and people said yes to 472 of 474 asks).
+
+// bash: -f and -v only. -r, -R, -d and any other option leave the command to
+// the guard.
+const RM_OPTIONS = /^(-[fv]+|--force|--verbose)$/;
+// Remove-Item and the names Windows PowerShell 5.1 gives it.
+const PS_DELETES = new Set(['remove-item', 'ri', 'rm', 'del', 'erase']);
+const PS_FORCE = /^-fo(r(c(e)?)?)?$/i;
+const PS_VERBOSE = /^-verbose$/i;
+// Parameters whose value is the next word (or comes after a colon).
+const PS_ERROR_ACTION = /^-(ea|erroraction)$/i;
+const PS_PATH = /^-(path|literalpath|lp|pspath)$/i;
+// Commands that move the shell to another folder for the rest of the line.
+const CHANGES_FOLDER = new Set(['cd', 'pushd', 'chdir', 'set-location', 'sl', 'push-location']);
+const RETURNS_FOLDER = new Set(['popd', 'pop-location']);
+
+// A path that stays inside the folder from wherever the line has moved to:
+// the folders a line moves to are such paths themselves, so a relative path
+// without `..` cannot leave. (A `cd` in a pipe runs on its own, so which
+// folder the next command is in cannot always be known.)
+// PowerShell paths also go through psPathInside: a disk only, never env: or
+// HKCU:.
+function insideFromAnywhere(cwd, word, shell) {
+  if (shell === 'powershell' && !psPathInside(cwd, word, false)) return false;
+  const parts = word.split(shell === 'powershell' ? /[\\/]/ : /\//);
+  return !parts.includes('..') && safePath(cwd, word, shell, false);
+}
+
+function bashFileDelete(args, cwd) {
+  let options = true;
+  let files = 0;
+  for (const w of args) {
+    if (options && w === '--') { options = false; continue; }
+    if (options && w.startsWith('-') && w.length > 1) {
+      if (!RM_OPTIONS.test(w)) return false;
+      continue;
+    }
+    if (!insideFromAnywhere(cwd, w, 'bash')) return false;
+    files++;
+  }
+  return files > 0;
+}
+
+function psFileDelete(args, cwd) {
+  let files = 0;
+  const file = (w) => {
+    files++;
+    return insideFromAnywhere(cwd, w, 'powershell');
+  };
+  for (let i = 0; i < args.length; i++) {
+    const w = args[i];
+    if (!(w.length > 1 && w.startsWith('-'))) {
+      if (!file(w)) return false;
+      continue;
+    }
+    const colon = w.indexOf(':');
+    const param = colon > 0 ? w.slice(0, colon) : w;
+    const value = colon > 0 ? w.slice(colon + 1) : null;
+    if (PS_FORCE.test(param) || PS_VERBOSE.test(param)) {
+      if (value !== null) return false;
+    } else if (PS_ERROR_ACTION.test(param)) {
+      if (value === null) i++;
+    } else if (PS_PATH.test(param)) {
+      const target = value === null ? args[++i] : value;
+      if (target === undefined || !file(target)) return false;
+    } else {
+      return false;
+    }
+  }
+  return files > 0;
+}
+
+/**
+ * The commands of a line other than its deletes of files inside `cwd`, each
+ * as its words; or null when the line cannot be read here, or moves to a
+ * folder that may be outside. guard.js tests what is left for anything
+ * destructive.
+ */
+function withoutFileDeletes(command, cwd, shell = 'bash') {
+  if (!cwd) return null;
+  const commands = commandsOf(command, shell);
+  if (!commands) return null;
+  const ps = shell === 'powershell';
+  const rest = [];
+  for (const words of commands) {
+    const name = ps ? words[0].toLowerCase() : words[0];
+    if (RETURNS_FOLDER.has(name)) return null;
+    if (CHANGES_FOLDER.has(name)) {
+      if (words.length !== 2 || words[1].startsWith('-') || !insideFromAnywhere(cwd, words[1], shell)) return null;
+      continue;
+    }
+    const deletesFiles = ps
+      ? PS_DELETES.has(name) && psFileDelete(words.slice(1), cwd)
+      : name === 'rm' && bashFileDelete(words.slice(1), cwd);
+    if (!deletesFiles) rest.push(words);
+  }
+  return rest;
+}
+
+module.exports = { readOnlyCommand, commandsOf, namesSecret, withoutFileDeletes };

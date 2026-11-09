@@ -910,7 +910,8 @@ function approve(sessionId, cwd, call, localTools) {
   else reason = tools.approvalReason(call.name, call.arguments, cwd);
   // A command that starts a coding CLI follows the user's choice for that CLI
   // (Settings > Coding agents), unless the guard has its own reason to ask.
-  const cli = guard.guardReason(call.name, call.arguments) ? null : codingAgents.approval(call);
+  const cli = guard.guardReason(call.name, call.arguments, { cwd, shell: tools.SHELL.kind })
+    ? null : codingAgents.approval(call);
   if (cli && (cli.refuse || cli.allow)) return 'allow'; // an "off" CLI is refused when it runs, with the reason
   if (cli) reason = cli.reason;
   const auto = (PERMISSION_OVERRIDE || state.permissionMode) === 'auto';
