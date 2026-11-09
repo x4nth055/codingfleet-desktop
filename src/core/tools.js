@@ -8,8 +8,8 @@ const fsp = fs.promises;
 const path = require('path');
 const { spawn } = require('child_process');
 
-const { guardReason } = require('./guard');
-const { readOnlyCommand } = require('./read-only');
+const { guardReason, SECRETS } = require('./guard');
+const { readOnlyCommand, namesSecret } = require('./read-only');
 
 const CLIENT_TOOLS = new Set(['execute_code', 'run_command', 'fs_read', 'fs_write', 'fs_edit', 'fs_glob']);
 const MAX_OUTPUT_CHARS = 200_000;
@@ -24,7 +24,7 @@ const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv
 function findShell() {
   if (process.platform !== 'win32') {
     const preferred = process.env.SHELL && /\/(bash|zsh)$/.test(process.env.SHELL) ? process.env.SHELL : '/bin/bash';
-    return { name: path.basename(preferred), file: preferred, args: (c) => ['-c', c], unix: true };
+    return { name: path.basename(preferred), file: preferred, args: (c) => ['-c', c], unix: true, kind: 'bash' };
   }
   const roots = [
     process.env.ProgramFiles,
@@ -34,13 +34,14 @@ function findShell() {
   ].filter(Boolean);
   for (const root of roots) {
     const bash = path.join(root, 'Git', 'bin', 'bash.exe');
-    if (fs.existsSync(bash)) return { name: 'Git Bash', file: bash, args: (c) => ['-c', c], unix: true };
+    if (fs.existsSync(bash)) return { name: 'Git Bash', file: bash, args: (c) => ['-c', c], unix: true, kind: 'bash' };
   }
   return {
     name: 'Windows PowerShell',
     file: 'powershell.exe',
     args: (c) => ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', c],
     unix: false,
+    kind: 'powershell', // how read-only.js reads its command lines
   };
 }
 
@@ -328,8 +329,13 @@ function approvalReason(name, args, cwd) {
       ? null
       : 'reads outside the project folder';
   }
-  if (name === 'run_command' && SHELL.unix && readOnlyCommand(args.command, cwd)) return null;
-  if (name === 'run_command' || (name === 'execute_code' && args.command)) return 'runs a command';
+  if (name === 'run_command' || (name === 'execute_code' && args.command)) {
+    // The guard splits a line on quotes; the shell joins them again, so
+    // `cat .en""v` opens .env. Asked about like any secret.
+    if (namesSecret(args.command, SHELL.kind)) return SECRETS;
+    if (name === 'run_command' && readOnlyCommand(args.command, cwd, SHELL.kind)) return null;
+    return 'runs a command';
+  }
   return 'changes files';
 }
 

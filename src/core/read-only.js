@@ -3,20 +3,27 @@
 // folder, and asking git what changed. They run without asking, like fs_read
 // does, so a run does not stop at every `ls` and `grep`.
 //
-// A command line counts when every command in it is on the list below, every
+// A command line counts when every command in it is on the lists below, every
 // path it names stays inside the folder, and it does nothing else: no
 // variables, substitutions, subshells, braces, background jobs, and no
-// redirection except to /dev/null. Pipes and ; && || between listed commands
-// are fine. Anything else waits for the user as before. The guard (guard.js)
-// still decides first, so `cat .env` asks about secrets whatever this says.
+// redirection except to /dev/null ($null in PowerShell). Pipes and ; between
+// listed commands are fine, and && || in bash. Anything else waits for the user
+// as before. The guard (guard.js) still decides first, so `cat .env` asks
+// about secrets whatever this says, and so does a word the shell turns into a
+// secret's name: `cat .en""v`, or a wildcard such as `cat .env*`.
 //
-// Written for bash and zsh (Git Bash on Windows). PowerShell quotes and
-// expands differently, so there every command still asks.
+// Each shell reads a command line its own way, so each has its own reader here:
+// bash and zsh (Git Bash on Windows), and Windows PowerShell 5.1, which the app
+// uses on Windows when Git for Windows is not installed.
 const path = require('path');
+const { isSecretPath } = require('./guard');
 
+// ── bash ──────────────────────────────────────────────────────────────────
 // Read-only once their paths are checked and the arguments in DENIED are out.
 const READERS = new Set(['ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'grep', 'egrep', 'fgrep', 'rg', 'find',
   'sort', 'uniq']);
+// Of those, the ones that print what is in the files they name.
+const CONTENT = new Set(['cat', 'head', 'tail', 'grep', 'egrep', 'fgrep', 'rg', 'sort', 'uniq']);
 // Print their arguments, or look a program up: nothing they name is opened.
 const NO_PATHS = new Set(['echo', 'which']);
 // The tools whose version an agent checks before it starts.
@@ -43,11 +50,69 @@ const PATTERN_OPTIONS = /^(-e|-f|--regexp|--file|--exclude-from|--ignore-file|--
 const SEPARATORS = new Set([';', '\n', '|', '&&', '||']);
 const WORD_END = /[\s;|&]/;
 
+// ── PowerShell ────────────────────────────────────────────────────────────
+// Names are read whatever their case, as PowerShell does. The aliases are
+// those of Windows PowerShell 5.1, where `ls`, `cat` and `sort` are cmdlets.
+// Cmdlets that print what is in the files they name.
+const PS_READERS = new Set(['get-content', 'gc', 'cat', 'type', 'select-string', 'sls']);
+// Cmdlets that list or test the paths they name without opening them.
+const PS_LISTERS = new Set(['get-childitem', 'gci', 'ls', 'dir', 'get-item', 'gi', 'test-path', 'resolve-path', 'rvpa']);
+// Cmdlets that only shape or print what comes down the pipe: their words are
+// property names or text, never paths. (Not ForEach-Object: `% Delete` calls
+// each file's Delete method.)
+const PS_NO_PATHS = new Set(['write-output', 'echo', 'write', 'write-host', 'sort-object', 'sort', 'select-object',
+  'select', 'measure-object', 'measure', 'group-object', 'group', 'where-object', 'where', 'format-table', 'ft',
+  'format-list', 'fl', 'format-wide', 'fw', 'out-string', 'out-null']);
+const PS_PWD = new Set(['get-location', 'gl', 'pwd']);
+const PS_CD = new Set(['set-location', 'sl', 'cd', 'chdir']);
+// Programs, which take their words as PowerShell hands them over.
+const PS_PROGRAMS = new Set(['git', 'rg']);
+// Select-String's pattern, named: -Pattern, or as much of it as is not also
+// the start of -Path.
+const PS_PATTERN = /^-patt(e(r(n)?)?)?$/i;
+// PowerShell reads curly quotes as quotes, long dashes as -, and odd spaces as
+// spaces. Only plain ASCII, and the letters and digits of any script, are read.
+const PS_ODD_CHARACTER = /[^\t\n\r\x20-\x7e\p{L}\p{N}\p{M}]/u;
+const PS_WORD_END = /[\s;|,]/;
+
+// ── Secrets ───────────────────────────────────────────────────────────────
+// Names guard.js knows hold credentials, to test a wildcard against: a reader
+// given `.env*` or `*.pem` opens them as surely as if they were named.
+const SECRET_SAMPLES = ['.env', '.env.local', '.envrc', 'id_rsa', 'id_ed25519', 'server.pem', 'server.key',
+  'cert.p12', 'cert.pfx', 'release.jks', 'release.keystore', 'vault.kdbx', 'putty.ppk', 'key.asc', 'key.gpg',
+  '.npmrc', '.pypirc', '.netrc', '_netrc', '.pgpass', '.htpasswd', '.git-credentials', '.dockercfg',
+  'credentials.json', 'secrets.yaml', 'secret.toml', 'service-account.json', 'client_secret.json',
+  'prod.tfvars', 'terraform.tfstate'];
+
+// A word naming a secret, on its own or after = or : (`--file=.env`, `HEAD:.env`).
+function secretWord(word) {
+  return [word, word.slice(word.lastIndexOf('=') + 1), word.slice(word.lastIndexOf(':') + 1)].some(isSecretPath);
+}
+
+// A wildcard whose file name could match a secret's. One in a folder's name
+// only (`*/id_rsa`) leaves the file named, which secretWord sees.
+function wildcardMatchesSecret(word) {
+  const name = word.replace(/\\/g, '/').split('/').pop();
+  if (!/[*?[]/.test(name)) return false;
+  let re = '';
+  for (let i = 0; i < name.length; i++) {
+    const c = name[i];
+    const end = c === '[' ? name.indexOf(']', i + 1) : -1;
+    if (c === '*') re += '.*';
+    else if (c === '?') re += '.';
+    else if (end > 0) { re += '.'; i = end; }
+    else re += c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  const pattern = new RegExp(`^${re}$`, 'i');
+  return SECRET_SAMPLES.some((sample) => pattern.test(sample));
+}
+
+// ── Reading a command line ────────────────────────────────────────────────
 /**
- * The commands of a command line, each as its words with quotes removed, or
- * null when the line does more than run commands one after another.
+ * The commands of a bash command line, each as its words with quotes removed,
+ * or null when the line does more than run commands one after another.
  */
-function commandsOf(line) {
+function bashCommandsOf(line) {
   const s = String(line || '');
   const commands = [];
   let words = [];
@@ -140,20 +205,120 @@ function commandsOf(line) {
   return commands.length ? commands : null;
 }
 
-function inside(cwd, word) {
+/**
+ * The commands of a Windows PowerShell command line, as bashCommandsOf does
+ * for bash. PowerShell has no escape in single quotes ('' is one quote), and
+ * its escape character is the backtick, which is refused with everything else
+ * that runs or expands: $ variables and $(…), @ arrays and splatting, ( ) { }
+ * [ ], & (the call operator), < and --% (stop parsing). A quoted command name
+ * is a string, not a command, and is refused too.
+ */
+function psCommandsOf(line) {
+  const s = String(line || '');
+  if (PS_ODD_CHARACTER.test(s)) return null;
+  const commands = [];
+  let words = [];
+  let word = null;
+  const endWord = () => {
+    if (word !== null) words.push(word);
+    word = null;
+  };
+  const endCommand = (emptyIsFine) => {
+    endWord();
+    if (!words.length) return emptyIsFine;
+    commands.push(words);
+    words = [];
+    return true;
+  };
+  // A redirection to $null at `j`: the index of its last character, or -1.
+  const toNull = (j) => {
+    while (s[j] === ' ' || s[j] === '\t') j++;
+    return /^\$null$/i.test(s.slice(j, j + 5)) && (j + 5 === s.length || PS_WORD_END.test(s[j + 5])) ? j + 4 : -1;
+  };
+
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    // A comma makes an array of the words around it: each is still a word.
+    if (c === ' ' || c === '\t' || c === '\r' || c === ',') { endWord(); continue; }
+    if (c === "'" || c === '"') {
+      if (!words.length) return null;
+      let text = '';
+      let j = i + 1;
+      for (; j < s.length; j++) {
+        if (s[j] === c) {
+          if (s[j + 1] !== c) break;
+          j++;
+        } else if (c === '"' && (s[j] === '$' || s[j] === '`')) {
+          return null;
+        }
+        text += s[j];
+      }
+      if (j >= s.length) return null;
+      word = (word || '') + text;
+      i = j;
+      continue;
+    }
+    if (c === '#' && word === null) {
+      while (i + 1 < s.length && s[i + 1] !== '\n') i++;
+      continue;
+    }
+    if (c === '>') {
+      // >$null, 2>$null, *>$null, 2>&1: output thrown away or merged, never a file.
+      if (word !== null && !/^[1-6*]$/.test(word)) return null;
+      word = null;
+      if (s[i + 1] === '&' && s[i + 2] === '1' && (i + 3 === s.length || PS_WORD_END.test(s[i + 3]))) {
+        i += 2;
+        continue;
+      }
+      const end = toNull(i + 1);
+      if (end < 0) return null;
+      i = end;
+      continue;
+    }
+    if (c === ';' || c === '\n' || c === '|') {
+      // Windows PowerShell has no ||.
+      if (c === '|' && s[i + 1] === '|') return null;
+      if (!endCommand(c === '\n')) return null;
+      continue;
+    }
+    if ('$`()[]{}<&'.includes(c) || (c === '@' && word === null)) return null;
+    word = (word || '') + c;
+  }
+  endCommand(true);
+  if (commands.some((words) => words.includes('--%'))) return null;
+  return commands.length ? commands : null;
+}
+
+/** The commands of a command line as `shell` ('bash' or 'powershell') reads it, or null. */
+function commandsOf(line, shell = 'bash') {
+  return shell === 'powershell' ? psCommandsOf(line) : bashCommandsOf(line);
+}
+
+// ── Paths ─────────────────────────────────────────────────────────────────
+// Whether a path stays inside the folder. PowerShell paths are Windows paths
+// (the app uses it on Windows only); Git Bash writes C:\work as /c/work.
+function inside(cwd, word, shell = 'bash') {
   // ~ is the home folder, wherever the folder is; bash expands it after = and : too.
   if (/(^|[=:])~/.test(word)) return false;
-  // Git Bash writes C:\work as /c/work.
-  const p = process.platform === 'win32' ? word.replace(/^\/([a-z])(?=\/|$)/i, '$1:') : word;
-  const rel = path.relative(path.resolve(cwd), path.resolve(cwd, p));
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  const paths = shell === 'powershell' ? path.win32 : path;
+  const p = shell !== 'powershell' && process.platform === 'win32'
+    ? word.replace(/^\/([a-z])(?=\/|$)/i, '$1:') : word;
+  const rel = paths.relative(paths.resolve(cwd), paths.resolve(cwd, p));
+  return rel === '' || (!rel.startsWith('..') && !paths.isAbsolute(rel));
+}
+
+// A path a command opens or lists: inside the folder, no secret's name, and,
+// for a command that prints what is in it, no wildcard that could match one.
+function safePath(cwd, word, shell, reads) {
+  return inside(cwd, word, shell) && !secretWord(word) && !(reads && wildcardMatchesSecret(word));
 }
 
 // Whether every path among a command's arguments stays inside the folder.
 // Any word may be a path, so all of them are checked: a pattern that looks
 // like a path outside only means the command asks, as it did before.
-function pathsInside(name, args, cwd) {
+function pathsInside(name, args, cwd, shell = 'bash') {
   const search = SEARCHES.has(name);
+  const reads = CONTENT.has(name);
   let patternLeft = search && !args.some((w) => PATTERN_OPTIONS.test(w));
   let options = true;
   for (let i = 0; i < args.length; i++) {
@@ -161,7 +326,7 @@ function pathsInside(name, args, cwd) {
     if (options && w === '--') { options = false; continue; }
     if (options && w.startsWith('--')) {
       const eq = w.indexOf('=');
-      if (eq > 0 && !inside(cwd, w.slice(eq + 1))) return false;
+      if (eq > 0 && !safePath(cwd, w.slice(eq + 1), shell, reads)) return false;
       // The pattern after --regexp is not a path.
       if (search && w === '--regexp') i++;
       continue;
@@ -174,9 +339,57 @@ function pathsInside(name, args, cwd) {
       continue;
     }
     if (patternLeft) { patternLeft = false; continue; }
-    if (!inside(cwd, w)) return false;
+    if (!safePath(cwd, w, shell, reads)) return false;
   }
   return true;
+}
+
+// A path a cmdlet is given. Only a disk: no env:, HKLM: or cert: drive, no
+// FileSystem::\\server path and no file:stream, so the only colon allowed is
+// a drive letter's.
+function psPathInside(cwd, word, reads) {
+  const colon = word.indexOf(':');
+  if (colon >= 0 && !(colon === 1 && /^[a-z]$/i.test(word[0]))) return false;
+  return safePath(cwd, word, 'powershell', reads);
+}
+
+// The paths a cmdlet is given, by position or by name (-Path x, -Path:x).
+// Select-String's first word is its pattern unless -Pattern names it; any
+// other word that may be a path is checked, as in bash. `reads`: the files
+// named are opened, by this cmdlet or by a reader further down the pipe
+// (`Get-ChildItem -Filter .env* | Get-Content` reads .env).
+function psPathsInside(name, args, cwd, reads) {
+  const search = name === 'select-string' || name === 'sls';
+  const named = search && args.some((w) => PS_PATTERN.test(w.split(':')[0]));
+  for (let i = 0; i < args.length; i++) {
+    const w = args[i];
+    if (w.length > 1 && w.startsWith('-')) {
+      const colon = w.indexOf(':');
+      const value = colon > 0 ? w.slice(colon + 1) : null;
+      if (search && PS_PATTERN.test(colon > 0 ? w.slice(0, colon) : w)) {
+        if (value === null) i++;
+        continue;
+      }
+      if (value && !psPathInside(cwd, value, reads)) return false;
+      continue;
+    }
+    if (search && !named && i === 0) continue;
+    if (!psPathInside(cwd, w, reads)) return false;
+  }
+  return true;
+}
+
+// ── Commands ──────────────────────────────────────────────────────────────
+// git and rg read their words the same way whichever shell hands them over.
+function programReads(name, args, cwd, shell) {
+  if ((DENIED[name] || []).some((re) => args.some((w) => re.test(w)))) return false;
+  if (name === 'rg') return pathsInside(name, args, cwd, shell);
+  // --no-pager only; -C and -c pick another repository or set config that can run programs.
+  const rest = args[0] === '--no-pager' ? args.slice(1) : args;
+  const [sub, ...subArgs] = rest;
+  if (sub === 'branch') return subArgs.every((w) => GIT_BRANCH_LIST.has(w) || /^--(format|sort)=/.test(w));
+  if (sub === 'remote') return subArgs.every((w) => w === '-v' || w === '--verbose');
+  return GIT_READS.has(sub) && pathsInside(sub, subArgs, cwd, shell);
 }
 
 function commandReads([name, ...args], cwd) {
@@ -187,20 +400,46 @@ function commandReads([name, ...args], cwd) {
   // A second name after uniq's input is a file it writes.
   if (name === 'uniq' && args.filter((w) => !w.startsWith('-')).length > 1) return false;
   if (READERS.has(name)) return pathsInside(name, args, cwd);
-  if (name !== 'git') return false;
-  // --no-pager only; -C and -c pick another repository or set config that can run programs.
-  const rest = args[0] === '--no-pager' ? args.slice(1) : args;
-  const [sub, ...subArgs] = rest;
-  if (sub === 'branch') return subArgs.every((w) => GIT_BRANCH_LIST.has(w) || /^--(format|sort)=/.test(w));
-  if (sub === 'remote') return subArgs.every((w) => w === '-v' || w === '--verbose');
-  return GIT_READS.has(sub) && pathsInside(sub, subArgs, cwd);
+  if (name === 'git') return programReads(name, args, cwd, 'bash');
+  return false;
 }
 
-/** Whether a command line only reads inside `cwd`, so it may run without asking. */
-function readOnlyCommand(command, cwd) {
+// `opens`: a reader is somewhere on the line, so what a lister finds may be
+// piped to it and opened. Text piped to Get-Content is not opened; files are.
+function psCommandReads([word, ...args], cwd, opens) {
+  const name = word.toLowerCase();
+  if (VERSIONED.has(name) && args.length === 1 && VERSION_FLAGS.has(args[0])) return true;
+  if (PS_NO_PATHS.has(name)) return true;
+  if (PS_PWD.has(name)) return args.length === 0;
+  if (PS_CD.has(name)) return args.length === 1 && !args[0].startsWith('-') && psPathInside(cwd, args[0], false);
+  if (PS_READERS.has(name)) return psPathsInside(name, args, cwd, true);
+  if (PS_LISTERS.has(name)) return psPathsInside(name, args, cwd, opens);
+  if (PS_PROGRAMS.has(name)) return programReads(name, args, cwd, 'powershell');
+  return false;
+}
+
+/**
+ * Whether a command line only reads inside `cwd`, so it may run without
+ * asking. `shell` is how it will be run: 'bash' (bash, zsh, Git Bash) or
+ * 'powershell' (Windows PowerShell).
+ */
+function readOnlyCommand(command, cwd, shell = 'bash') {
   if (!cwd) return false;
-  const commands = commandsOf(command);
-  return Boolean(commands) && commands.every((words) => commandReads(words, cwd));
+  const commands = commandsOf(command, shell);
+  if (!commands) return false;
+  if (shell !== 'powershell') return commands.every((words) => commandReads(words, cwd));
+  const opens = commands.some(([name]) => PS_READERS.has(name.toLowerCase()));
+  return commands.every((words) => psCommandReads(words, cwd, opens));
 }
 
-module.exports = { readOnlyCommand, commandsOf };
+/**
+ * Whether the shell would hand a command a secret's name that guard.js, which
+ * splits a line on quotes and the like, does not see: `cat .en""v` is
+ * `cat .env`. False when the line cannot be read here at all.
+ */
+function namesSecret(command, shell = 'bash') {
+  const commands = commandsOf(command, shell);
+  return Boolean(commands) && commands.some((words) => words.some(secretWord));
+}
+
+module.exports = { readOnlyCommand, commandsOf, namesSecret };

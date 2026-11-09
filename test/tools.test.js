@@ -142,15 +142,35 @@ test('approval: reads inside the folder run; commands, writes and outside reads 
   assert.equal(tools.approvalReason('view_image', { source: 'out/chart.png' }, cwd), null);
   assert.equal(tools.approvalReason('view_image', { source: '../photos/me.jpg' }, cwd), 'reads outside the project folder');
   assert.equal(tools.approvalReason('run_command', { command: 'npm test' }, cwd), 'runs a command');
-  // A command that only reads inside the folder runs like fs_read (bash only),
-  // and the guard still asks about the secrets one names.
-  assert.equal(tools.approvalReason('run_command', { command: 'git diff | head' }, cwd),
-    tools.SHELL.unix ? null : 'runs a command');
+  // A command that only reads inside the folder runs like fs_read, in bash
+  // and in PowerShell, and the guard still asks about the secrets one names,
+  // even when the shell has to put the name together.
+  assert.equal(tools.approvalReason('run_command', { command: 'git diff --stat' }, cwd), null);
+  assert.equal(tools.approvalReason('run_command', { command: tools.SHELL.unix ? 'git diff | head' : 'git diff | Select-Object -First 5' }, cwd), null);
   assert.equal(tools.approvalReason('run_command', { command: 'cat .env' }, cwd), 'reads secrets');
+  assert.equal(tools.approvalReason('run_command', { command: 'cat .en""v' }, cwd), 'reads secrets');
+  assert.equal(tools.approvalReason('execute_code', { code: 'x', filename: 'a.sh', command: 'cat .en""v' }, cwd), 'reads secrets');
+  assert.equal(tools.approvalReason('run_command', { command: 'cat .env*' }, cwd), 'runs a command');
   assert.equal(tools.approvalReason('run_command', { command: 'cat ../notes.txt' }, cwd), 'runs a command');
   assert.equal(tools.approvalReason('execute_code', { code: 'x', filename: 'a.py', command: 'python a.py' }, cwd), 'runs a command');
   assert.equal(tools.approvalReason('fs_write', { path: 'a.txt', content: '' }, cwd), 'changes files');
   assert.equal(tools.approvalReason('fs_edit', { path: 'a.txt', old: 'a', new: 'b' }, cwd), 'changes files');
+});
+
+test('without Git Bash, PowerShell commands that only read run without asking too', (t) => {
+  // The shell is picked once, from what is installed; pretend it is PowerShell.
+  const kind = tools.SHELL.kind;
+  tools.SHELL.kind = 'powershell';
+  t.after(() => { tools.SHELL.kind = kind; });
+  const cwd = tmp();
+  assert.equal(tools.approvalReason('run_command', { command: 'Get-ChildItem -Recurse -Filter *.js | Select-String TODO' }, cwd), null);
+  assert.equal(tools.approvalReason('run_command', { command: 'git status; git diff --stat' }, cwd), null);
+  assert.equal(tools.approvalReason('run_command', { command: 'Get-Content ..\\notes.txt' }, cwd), 'runs a command');
+  assert.equal(tools.approvalReason('run_command', { command: 'Get-ChildItem | Remove-Item' }, cwd), 'runs a command');
+  assert.equal(tools.approvalReason('run_command', { command: 'Get-Content .env' }, cwd), 'reads secrets');
+  assert.equal(tools.approvalReason('run_command', { command: "gc .en''v" }, cwd), 'reads secrets');
+  // Bash's escape is only a backslash here: .\env is the file named env.
+  assert.equal(tools.approvalReason('run_command', { command: 'Get-Content .\\env' }, cwd), null);
 });
 
 test('a screenshot always waits for the user, wherever the folder is', () => {

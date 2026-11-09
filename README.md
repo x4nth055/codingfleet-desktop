@@ -122,8 +122,20 @@ These run at once, as long as every path they name is inside the folder:
 Several can be joined with `|`, `&&`, `||` or `;`, and output can go to `/dev/null`. Anything
 more asks as before: a variable, `$(…)`, a redirection to a file, or a flag that writes or
 runs something (`find -exec`, `sort -o`, `rg --pre`, `git diff --output`). Naming a secret
-such as `.env` still asks. This needs bash, which comes with Git for Windows; with only
-PowerShell, every command asks.
+such as `.env` still asks, and so does reading files through a wildcard that could match one
+(`cat .env*`, `cat *.pem`).
+
+On Windows without Git for Windows, commands run in PowerShell, and these run at once:
+
+- `Get-ChildItem` (`ls`, `dir`), `Get-Content` (`cat`, `type`), `Select-String`, `Get-Item`,
+  `Test-Path`, `Resolve-Path`, `Get-Location` and `Set-Location` (`cd`)
+- `Sort-Object`, `Select-Object`, `Where-Object` (without `{ }`), `Measure-Object`,
+  `Group-Object`, `Format-Table`, `Format-List`, `Out-String`, `Out-Null`, `Write-Output`
+- the same `git` commands, `rg`, and the same `--version` checks
+
+They can be joined with `|` or `;`, and output can go to `$null`. A variable, `$(…)`, `{ }`,
+`&`, a redirection to a file, any other drive than a disk (`env:`, `HKLM:`) and anything not
+listed (`ForEach-Object`, `Remove-Item`, `Set-Content`, `Out-File`) asks.
 
 ### Background commands
 
