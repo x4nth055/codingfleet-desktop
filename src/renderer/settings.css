@@ -1,34 +1,39 @@
 /* ── Sidebar session rows ────────────────────────────────── */
 .session {
-  padding: 7px 6px 7px 10px;
+  padding: 4px 6px 4px 10px;
   cursor: pointer;
   outline: 0;
 }
 .session:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
-.session-side { display: flex; align-items: center; gap: 6px; height: 21px; }
+.session-side { display: flex; align-items: center; gap: 6px; height: 22px; }
+/* The menu button takes the time's place while the row is pointed at, open,
+   or has the keyboard's focus (so Tab can still reach it). */
 .session-more {
   width: 24px;
   height: 22px;
-  display: grid;
+  display: none;
   place-items: center;
   border-radius: 6px;
   color: var(--muted);
-  opacity: 0;
-  transition: opacity .12s ease, background .12s ease;
+  transition: background .12s ease;
 }
 .session-more svg { width: 15px; height: 15px; }
 .session:hover .session-more,
 .session.selected .session-more,
 .session.menu-open .session-more,
-.session-more:focus-visible { opacity: 1; }
+.session:focus-within .session-more { display: grid; }
+.session:hover .session-time,
+.session.selected .session-time,
+.session.menu-open .session-time,
+.session:focus-within .session-time { display: none; }
 .session-more:hover, .session-more.open { background: var(--line-2); color: var(--text); }
 .session.renaming { cursor: default; background: var(--panel-2); }
 .session-rename {
   grid-column: 1 / -1;
   width: 100%;
-  height: 26px;
+  height: 22px;
   padding: 0 7px;
-  margin: -2px 0 1px;
+  margin: 0;
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: var(--well);

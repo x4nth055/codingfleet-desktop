@@ -137,15 +137,19 @@ function sessionRow(session) {
     });
     input.addEventListener('blur', () => finish(true));
     row.classList.add('renaming');
-    row.append(input, el('div', 'session-meta', `${groupOf(iso)} · ${relTime(iso)}`));
+    row.append(input);
     setTimeout(() => { input.focus(); input.select(); }, 0);
     return row;
   }
   row.tabIndex = 0;
   row.setAttribute('role', 'button');
-  row.title = sessionLabel(session);
+  // One line, as in Claude Code: the name, then how long ago it was used,
+  // which gives way to the menu button when the pointer is on the row. The
+  // exact time is in the tooltip.
+  row.title = `${sessionLabel(session)}\n${fmtStamp(iso)}`;
   const side = el('span', 'session-side');
   if (S.running.has(session.id) || S.remoteBusy.has(session.id)) side.append(el('span', 'dot running'));
+  side.append(el('span', 'session-time', relTime(iso)));
   const more = el('button', 'session-more');
   more.title = 'Rename, duplicate, pin or delete';
   more.setAttribute('aria-label', 'Session actions');
@@ -156,11 +160,7 @@ function sessionRow(session) {
     else openSessionMenu(session, more);
   });
   side.append(more);
-  row.append(
-    el('div', 'session-title', sessionLabel(session)),
-    side,
-    el('div', 'session-meta', `${groupOf(iso)} · ${relTime(iso)}`),
-  );
+  row.append(el('div', 'session-title', sessionLabel(session)), side);
   row.addEventListener('click', () => selectSession(session.id));
   row.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && event.target === row) selectSession(session.id);
