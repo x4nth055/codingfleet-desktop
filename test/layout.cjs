@@ -256,6 +256,112 @@ app.whenReady().then(async () => {
     assert.equal(squeezed, 380, `a 940px window keeps a ${squeezed}px sidebar`);
     await win.webContents.executeJavaScript(`resetSidebarWidth(); quotaOpen = false; renderAccount();`);
     checks++;
+    // Each session is one row, as in Claude Code: its name, then how long ago
+    // it was used. The time gives way to the menu button on the row that is
+    // pointed at, focused, open or selected; a long name is cut short before
+    // it; renaming keeps the row's height.
+    win.setContentSize(1320, 850);
+    await win.webContents.executeJavaScript('new Promise(resolve => setTimeout(resolve, 100))');
+    const measureRows = `(() => {
+      const box = (n) => n.getBoundingClientRect();
+      const shown = (n) => Boolean(n) && getComputedStyle(n).display !== 'none' && box(n).width > 0;
+      const middle = (n) => (box(n).top + box(n).bottom) / 2;
+      return [...document.querySelectorAll('#sessionList .session')].map((row) => {
+        const title = row.querySelector('.session-title, .session-rename');
+        const time = row.querySelector('.session-time');
+        const more = row.querySelector('.session-more');
+        const dot = row.querySelector('.dot.running');
+        const side = row.querySelector('.session-side');
+        return {
+          id: row.dataset.id, height: Math.round(box(row).height),
+          oneLine: title.getClientRects().length === 1 && box(title).height < 27,
+          cut: title.scrollWidth > title.clientWidth,
+          time: shown(time) ? time.textContent : null,
+          more: shown(more),
+          level: [time, more, dot].filter(shown).every((n) => Math.abs(middle(n) - middle(title)) < 3),
+          fits: !side || (box(side).right <= box(row).right + 0.5 && box(side).left >= box(title).right - 0.5),
+          dotFirst: !dot || !shown(time) || box(dot).right <= box(time).left,
+          tooltip: row.title.split('\\n').length,
+        };
+      });
+    })()`;
+    for (const sidebar of [220, 272, 480]) {
+      for (const theme of ['dark', 'light', 'hacker']) {
+        const at = `${sidebar}/${theme}`;
+        const rows = await win.webContents.executeJavaScript(`(() => {
+          document.documentElement.dataset.theme = ${JSON.stringify(theme)};
+          setSidebarWidth(${sidebar});
+          const ago = (minutes) => new Date(Date.now() - minutes * 60000).toISOString();
+          S.sessions = [
+            { id: 'layout', title: 'Long agent task', executor: 'client', created_at: ago(5), last_used_at: ago(5),
+              context: { tokens: 279100, limit: 800000 } },
+            { id: 'long', title: 'A session with a title long enough to need cutting short in the widest sidebar there is',
+              executor: 'client', created_at: ago(90), last_used_at: ago(90) },
+            { id: 'busy', title: 'Running', executor: 'client', created_at: ago(3000), last_used_at: ago(3000) },
+            { id: 'old', title: 'Old', executor: 'client', created_at: ago(60000), last_used_at: ago(60000) },
+          ];
+          S.running.clear();
+          S.running.set('busy', { started: Date.now() });
+          renderSidebar();
+          return ${measureRows};
+        })()`);
+        assert.equal(rows.length, 4, at);
+        for (const row of rows) {
+          assert.ok(row.height >= 28 && row.height <= 32, `${at}: ${row.id} is one 30px row, not ${row.height}px`);
+          assert.ok(row.oneLine && row.level && row.fits && row.dotFirst, `${at}: ${row.id} on one line ${JSON.stringify(row)}`);
+          assert.equal(row.tooltip, 2, `${at}: ${row.id}'s tooltip has its name and exact time`);
+        }
+        const by = Object.fromEntries(rows.map((row) => [row.id, row]));
+        assert.deepEqual([by.layout.time, by.layout.more], [null, true], `${at}: the selected row shows its menu button`);
+        assert.deepEqual([by.long.time, by.long.more, by.long.cut], ['1h', false, true], `${at}: a long name is cut short before the time`);
+        assert.deepEqual([by.busy.time, by.busy.more], ['2d', false], `${at}: a running row keeps its time after the dot`);
+        assert.ok(by.old.time && !by.old.more, `${at}: an old row shows its date`);
+
+        // Pointed at, focused, or with its menu open: the button replaces the time.
+        const pointAt = await win.webContents.executeJavaScript(`(() => {
+          const r = document.querySelector('#sessionList .session[data-id="old"]').getBoundingClientRect();
+          return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+        })()`);
+        win.webContents.sendInputEvent({ type: 'mouseMove', x: pointAt.x, y: pointAt.y });
+        await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+        const states = await win.webContents.executeJavaScript(`(() => {
+          const measure = () => Object.fromEntries(${measureRows}.map((row) => [row.id, row]));
+          const row = (id) => document.querySelector('#sessionList .session[data-id="' + id + '"]');
+          const hovered = measure().old;
+          row('long').classList.add('menu-open');
+          const open = measure().long;
+          row('long').classList.remove('menu-open');
+          row('busy').focus();
+          const focused = measure().busy;
+          row('busy').blur();
+          return { hovered, open, focused };
+        })()`);
+        win.webContents.sendInputEvent({ type: 'mouseMove', x: 1000, y: 400 });
+        for (const [state, row] of Object.entries(states)) {
+          assert.deepEqual([row.time, row.more, row.height], [null, true, by[row.id].height], `${at}: ${state} row ${JSON.stringify(row)}`);
+          assert.ok(row.level && row.fits, `${at}: the ${state} row's button stays on its line`);
+        }
+
+        // Renaming: the box takes the row's place at the row's height.
+        const renaming = await win.webContents.executeJavaScript(`new Promise((resolve) => {
+          startRename('long');
+          requestAnimationFrame(() => {
+            const row = ${measureRows}.find((r) => r.id === 'long');
+            finishRename('long', '', false);
+            resolve(row);
+          });
+        })`);
+        assert.equal(renaming.height, by.long.height, `${at}: renaming keeps the row ${by.long.height}px high`);
+        checks++;
+      }
+    }
+    await win.webContents.executeJavaScript(`(() => {
+      resetSidebarWidth();
+      S.running.clear();
+      S.sessions = [{ id: 'layout', title: 'Long agent task', executor: 'client', created_at: new Date().toISOString(),
+        context: { tokens: 279100, limit: 800000 } }];
+      renderSidebar();
+    })()`);
     const replay = await win.webContents.executeJavaScript(`(() => {
       S.running.set('layout', { started: Date.now(), turnStart: 0 });
       S.transcripts.set('layout', []);
