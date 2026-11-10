@@ -78,6 +78,14 @@ async function renderMcpPane() {
   });
   pane.scrollTop = scroll;
   applyStatus(pane);
+  // Once per opening: which sign-ins (OAuth) are still good.
+  if (!signInsLoaded && mcpState.remote.some((r) => r.oauth)) {
+    signInsLoaded = true;
+    call(cf.mcpOAuthStatus).then((states) => {
+      for (const [id, state] of Object.entries(states)) signIns.set(id, state);
+      renderMcpPane();
+    }).catch(() => { signInsLoaded = false; });
+  }
   // Once per opening: say at once whether the local servers start.
   if (!localChecked && mcpState.local.some((l) => l.enabled)) {
     localChecked = true;
@@ -170,7 +178,41 @@ function catalogItem(key, info, saved, pane) {
   return item;
 }
 
-const AUTH_LABEL = { bearer: 'Bearer token', basic: 'Username and password', header: 'API key header' };
+const AUTH_LABEL = { bearer: 'Bearer token', basic: 'Username and password', header: 'API key header', oauth: 'OAuth sign-in' };
+
+// Servers the user signs in to in the browser (OAuth). CodingFleet keeps the
+// sign-in; here we only know its state: 'connected', 'reauth' or 'none'.
+const signIns = new Map();
+const signingIn = new Set();
+const openForms = new Set();
+let signInsLoaded = false;
+
+// Opens the sign-in page in the browser and waits for the user to finish.
+// `own` is the user's own OAuth app, for a server that asks for one.
+async function connectRemote(id, pane, own = {}) {
+  if (signingIn.has(id)) return;
+  signingIn.add(id);
+  renderMcpPane();
+  paneStatus(pane, 'The sign-in page opens in your browser. Finish the sign-in there.');
+  try {
+    const result = await call(cf.mcpOAuthConnect, { id, ...own });
+    signingIn.delete(id);
+    if (result.status === 'connected') {
+      signIns.set(id, 'connected');
+      openForms.delete(id);
+      paneStatus(pane, 'Signed in', 'ok');
+      testRemoteServer(id);
+      return;
+    }
+    if (result.status !== 'cancelled') paneStatus(pane, result.error || 'The sign-in did not finish.', 'error');
+  } catch (err) {
+    signingIn.delete(id);
+    // The server wants the user's own OAuth app: show where to enter it.
+    if (err.code === 'client_id_required') openForms.add(id);
+    paneStatus(pane, err.message, 'error');
+  }
+  renderMcpPane();
+}
 
 function customItem(server, pane) {
   const item = el('div', 'mcp-item');
@@ -182,7 +224,15 @@ function customItem(server, pane) {
   text.append(title, el('div', 'mcp-item-desc mono', server.url));
   const state = el('div', 'mcp-state');
   const known = remoteStatus.get(server.id);
-  if (!known) state.textContent = 'Not tested yet';
+  const signIn = server.oauth ? signIns.get(server.id) : null;
+  if (signingIn.has(server.id)) state.textContent = 'Waiting for the sign-in in your browser…';
+  else if (signIn === 'none') {
+    state.textContent = 'Not signed in. Click Connect.';
+    state.classList.add('bad');
+  } else if (signIn === 'reauth') {
+    state.textContent = 'The sign-in has ended. Connect again.';
+    state.classList.add('bad');
+  } else if (!known) state.textContent = signIn === 'connected' ? 'Signed in' : 'Not tested yet';
   else if (known.testing) state.textContent = 'Connecting…';
   else if (!known.connected) {
     state.textContent = known.error || 'Could not connect.';
@@ -205,17 +255,42 @@ function customItem(server, pane) {
   remove.title = 'Remove this server';
   remove.innerHTML = ICON.trash;
   remove.addEventListener('click', async () => {
-    if (await confirmDialog({ title: 'Remove this server?', text: `${server.name} and its token are removed from this computer.`, confirm: 'Remove', danger: true })) {
+    const text = server.oauth
+      ? `${server.name} is removed from this computer, and CodingFleet forgets your sign-in to it.`
+      : `${server.name} and its token are removed from this computer.`;
+    if (await confirmDialog({ title: 'Remove this server?', text, confirm: 'Remove', danger: true })) {
       remoteStatus.delete(server.id);
+      // The sign-in is kept by CodingFleet: forget it there too, unless
+      // another saved server uses the same address.
+      const shared = mcpState.remote.some((r) => r.id !== server.id && r.oauth && r.url === server.url);
+      if (server.oauth && !shared) await call(cf.mcpOAuthDisconnect, server.id).catch(() => {});
+      signIns.delete(server.id);
+      openForms.delete(server.id);
       mcpAction(pane, cf.mcpDeleteRemote, server.id, 'Removed');
     }
   });
   const toggle = mcpSwitch(server.enabled, (on) => mcpAction(pane, cf.mcpSaveRemote, { ...server, enabled: on }));
-  head.append(mcpBadge(null, server.name), text, test, edit, remove, toggle);
+  head.append(mcpBadge(null, server.name), text);
+  if (server.oauth) {
+    const busy = signingIn.has(server.id);
+    const connect = el('button', `btn small${signIn === 'connected' ? '' : ' primary'}`,
+      busy ? 'Cancel' : (signIn === 'connected' ? 'Reconnect' : 'Connect'));
+    connect.title = busy ? 'Stop waiting for the sign-in' : 'Sign in to this server in your browser';
+    connect.addEventListener('click', () => {
+      if (busy) call(cf.mcpOAuthCancel, server.id).catch(() => {});
+      else connectRemote(server.id, pane);
+    });
+    head.append(connect);
+  }
+  head.append(test, edit, remove, toggle);
   item.append(head);
   const form = customForm(pane, server);
-  form.hidden = true;
-  edit.addEventListener('click', () => { form.hidden = !form.hidden; });
+  form.hidden = !openForms.has(server.id);
+  edit.addEventListener('click', () => {
+    form.hidden = !form.hidden;
+    if (form.hidden) openForms.delete(server.id);
+    else openForms.add(server.id);
+  });
   item.append(form);
   return item;
 }
@@ -272,7 +347,8 @@ function customForm(pane, server = null) {
   const url = textInput('https://example.com/mcp', editing ? server.url : '');
   const kind = el('select', 'set-select');
   for (const [value, label] of [['none', 'None'], ['bearer', 'Bearer token'],
-    ['basic', 'Username and password (Basic)'], ['header', 'API key in a header']]) {
+    ['basic', 'Username and password (Basic)'], ['header', 'API key in a header'],
+    ['oauth', 'OAuth (sign in in your browser)']]) {
     const option = el('option', null, label);
     option.value = value;
     kind.append(option);
@@ -283,18 +359,25 @@ function customForm(pane, server = null) {
   const password = textInput(savedKind === 'basic' ? keep : 'Password', '', 'password');
   const header = textInput('X-API-Key', savedKind === 'header' ? server.authHeader || '' : '');
   const apiKey = textInput(savedKind === 'header' ? keep : 'API key', '', 'password');
+  const clientId = textInput('Only when the server asks for your own OAuth app');
+  const clientSecret = textInput('If the app has one', '', 'password');
 
   const fields = {
     bearer: [field('Bearer token', token, 'Sent as "Authorization: Bearer <token>". A value that starts '
       + 'with a scheme ("Token abc") is sent as it is.')],
     basic: [field('Username', username), field('Password', password, 'For WordPress, use an Application Password.')],
     header: [field('Header name', header, 'The header the server reads the key from.'), field('API key', apiKey)],
+    oauth: [field('Client ID (optional)', clientId, 'You sign in on the page of the server. CodingFleet keeps the '
+      + 'sign-in encrypted on its servers; nothing is stored on this computer.'),
+    field('Client secret (optional)', clientSecret)],
     none: [],
   };
   const grid = el('div', 'mcp-grid');
   const showFields = () => {
     grid.replaceChildren(field('Name', name), field('Server URL', url, 'Streamable HTTP or SSE, https only.'),
-      field('Authentication', kind, 'Stored encrypted on this computer.'), ...fields[kind.value]);
+      field('Authentication', kind, kind.value === 'oauth'
+        ? 'Your browser must be signed in to CodingFleet with this account.'
+        : 'Stored encrypted on this computer.'), ...fields[kind.value]);
   };
   kind.addEventListener('change', showFields);
   showFields();
@@ -302,27 +385,28 @@ function customForm(pane, server = null) {
   // The credentials to save: undefined keeps the saved ones, '' removes them.
   const credentials = () => {
     const same = editing && kind.value === savedKind;
-    if (kind.value === 'none') return { token: '', authHeader: null };
+    if (kind.value === 'oauth') return { token: '', authHeader: null, oauth: true };
+    if (kind.value === 'none') return { token: '', authHeader: null, oauth: false };
     if (kind.value === 'bearer') {
       const value = token.value.trim();
       if (!value && !same) throw new Error('Enter the bearer token.');
-      return { token: value || undefined, authHeader: null };
+      return { token: value || undefined, authHeader: null, oauth: false };
     }
     if (kind.value === 'basic') {
       const user = username.value.trim();
       if (!user) throw new Error('Enter the username.');
       if (user.includes(':')) throw new Error('The username cannot contain ":".');
       if (!password.value) {
-        if (same && user === server.auth.username) return { token: undefined, authHeader: null };
+        if (same && user === server.auth.username) return { token: undefined, authHeader: null, oauth: false };
         throw new Error('Enter the password.');
       }
-      return { token: basicCredentials(user, password.value), authHeader: null };
+      return { token: basicCredentials(user, password.value), authHeader: null, oauth: false };
     }
     const headerName = header.value.trim();
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(headerName)) throw new Error('Enter a header name (letters, digits, "-" and "_").');
     const value = apiKey.value.trim();
     if (!value && !same) throw new Error('Enter the API key.');
-    return { token: value || undefined, authHeader: headerName };
+    return { token: value || undefined, authHeader: headerName, oauth: false };
   };
 
   const save = el('button', 'btn primary small', editing ? 'Save' : 'Add server');
@@ -342,7 +426,19 @@ function customForm(pane, server = null) {
     // Say at once whether it connects: a new server is the last one added.
     const custom = mcpState.remote.filter((r) => !r.catalog);
     const saved = editing ? server : custom[custom.length - 1];
-    if (saved) testRemoteServer(saved.id);
+    if (!saved) return;
+    if (auth.oauth) {
+      // A server you sign in to: sign in now, unless that is done and the
+      // address is the same.
+      const own = { clientId: clientId.value.trim(), clientSecret: clientSecret.value };
+      const changed = !editing || url.value.trim() !== server.url || Boolean(own.clientId);
+      if (changed) signIns.delete(saved.id);
+      if (changed || signIns.get(saved.id) !== 'connected') {
+        connectRemote(saved.id, pane, own);
+        return;
+      }
+    }
+    testRemoteServer(saved.id);
   });
   const actions = el('div', 'mcp-actions');
   actions.append(save);

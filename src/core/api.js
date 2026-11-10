@@ -258,6 +258,12 @@ module.exports = {
   sendFeedback: (body) => request('POST', '/feedback', body, undefined, 30000),
   // Connects to one remote MCP server the way a run would: { connected, tools, error }.
   testMcpServer: (server) => request('POST', '/mcp_servers/test', server, undefined, 60000),
+  // OAuth sign-in to a remote MCP server. CodingFleet keeps the tokens: the
+  // app starts the sign-in, opens the page it is given, and asks how it went.
+  mcpOAuthStart: (body) => request('POST', '/mcp_servers/oauth/start', body, undefined, 60000),
+  mcpOAuthFlow: (flowId) => request('GET', `/mcp_servers/oauth/flows/${id(flowId)}`),
+  mcpOAuthConnections: () => request('GET', '/mcp_servers/oauth'),
+  mcpOAuthDisconnect: (url) => request('POST', '/mcp_servers/oauth/disconnect', { url }, undefined, 30000),
   // include: 'provider' adds each model's provider and the web picker's order.
   models: ({ include } = {}) => request('GET', include ? `/models?include=${id(include)}` : '/models'),
   listSessions: (limit = 100) => request('GET', `/sessions?limit=${limit}`),

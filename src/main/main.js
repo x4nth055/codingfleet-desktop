@@ -32,6 +32,7 @@ const github = require('./github');
 const guard = require('../core/guard');
 const tools = require('../core/tools');
 const { LocalMcp } = require('../core/mcp');
+const mcpOAuth = require('../core/mcp-oauth');
 const { Run } = require('../core/runner');
 const { RecoveryStore } = require('../core/recovery-store');
 const { revertRun } = require('../core/undo');
@@ -199,6 +200,8 @@ function saveMcp() {
 // How a remote server's credentials go, read back from what is saved:
 // a full "Basic ..." value, the token in its own header, or a bearer token.
 function remoteAuth(r) {
+  // A sign-in in the browser: CodingFleet holds the tokens, nothing is saved here.
+  if (r.oauth) return { kind: 'oauth' };
   if (!r.token) return { kind: 'none' };
   if (r.authHeader && r.authHeader.toLowerCase() !== 'authorization') return { kind: 'header' };
   if (!/^Basic\s/i.test(r.token)) return { kind: 'bearer' };
@@ -212,7 +215,7 @@ function mcpView() {
     remote: mcp.remote.map((r) => ({
       id: r.id, key: r.key, name: r.name, url: r.url, catalog: r.catalog || null,
       authHeader: r.authHeader || null, tools: r.tools || null, enabled: Boolean(r.enabled),
-      hasToken: Boolean(r.token), auth: remoteAuth(r),
+      hasToken: Boolean(r.token), auth: remoteAuth(r), oauth: Boolean(r.oauth),
     })),
     local: mcp.local.map((l) => ({
       id: l.id, name: l.name, command: l.command, args: l.args || [], enabled: Boolean(l.enabled),
@@ -246,7 +249,13 @@ function saveRemote(input) {
     tools: Array.isArray(entry.tools) ? entry.tools.filter((t) => typeof t === 'string').slice(0, 200) : null,
     enabled: Boolean(entry.enabled),
   });
-  if (typeof entry.token === 'string') {
+  // Unsaid keeps what is saved (a switch flip sends the view back, which has it).
+  if (entry.oauth !== undefined) existing.oauth = Boolean(entry.oauth);
+  if (existing.oauth) {
+    // The sign-in replaces any pasted credentials.
+    existing.token = null;
+    existing.authHeader = null;
+  } else if (typeof entry.token === 'string') {
     const token = entry.token.trim();
     // A line break would start a header of its own; the server refuses these too.
     if (/[^\x20-\x7e\t]/.test(token)) throw new Error('The token can use only printable ASCII characters.');
@@ -304,8 +313,9 @@ function remoteServersForRun() {
   for (const r of mcp.remote) {
     if (!r.enabled) continue;
     const server = { url: r.url };
-    if (r.token) server.token = r.token;
-    if (r.token && r.authHeader) server.auth_header = r.authHeader;
+    if (r.oauth) server.auth = 'oauth';
+    else if (r.token) server.token = r.token;
+    if (!r.oauth && r.token && r.authHeader) server.auth_header = r.authHeader;
     if (r.tools && r.tools.length) server.tools = r.tools;
     servers[r.key] = server;
   }
@@ -1529,9 +1539,49 @@ function registerIpc() {
     const r = mcp.remote.find((x) => x.id === id);
     if (!r) throw new Error('That server is gone.');
     const server = { url: r.url };
-    if (r.token) server.token = r.token;
-    if (r.token && r.authHeader) server.auth_header = r.authHeader;
+    if (r.oauth) server.auth = 'oauth';
+    else if (r.token) server.token = r.token;
+    if (!r.oauth && r.token && r.authHeader) server.auth_header = r.authHeader;
     return api.testMcpServer(server);
+  });
+  // OAuth sign-in to a remote server. CodingFleet starts it and keeps the
+  // tokens; this computer only opens the page in the browser and waits. The
+  // browser must be signed in to CodingFleet as the same account.
+  const oauthWaits = new Map(); // server id -> AbortController of the wait
+  handle('mcp:oauthConnect', async ({ id, clientId, clientSecret } = {}) => {
+    const r = mcp.remote.find((x) => x.id === id);
+    if (!r) throw new Error('That server is gone.');
+    const earlier = oauthWaits.get(id);
+    if (earlier) earlier.abort();
+    const body = { url: r.url };
+    if (clientId) body.client_id = String(clientId).trim();
+    if (clientSecret) body.client_secret = String(clientSecret);
+    const started = await api.mcpOAuthStart(body);
+    await shell.openExternal(mcpOAuth.authorizeUrlFor(started, api.snapshot().apiBase));
+    const controller = new AbortController();
+    oauthWaits.set(id, controller);
+    try {
+      return await mcpOAuth.waitForSignIn(api, started, { signal: controller.signal });
+    } finally {
+      if (oauthWaits.get(id) === controller) oauthWaits.delete(id);
+    }
+  });
+  handle('mcp:oauthCancel', (id) => {
+    const wait = oauthWaits.get(id);
+    if (wait) wait.abort();
+    return true;
+  });
+  handle('mcp:oauthDisconnect', async (id) => {
+    const r = mcp.remote.find((x) => x.id === id);
+    if (!r) throw new Error('That server is gone.');
+    await api.mcpOAuthDisconnect(r.url);
+    return true;
+  });
+  // { server id: 'connected' | 'reauth' | 'none' } for the servers that use a sign-in.
+  handle('mcp:oauthStatus', async () => {
+    if (!mcp.remote.some((r) => r.oauth)) return {};
+    const { connections } = await api.mcpOAuthConnections();
+    return Object.fromEntries(mcpOAuth.signInStates(mcp.remote, connections));
   });
   handle('mcp:saveLocal', (entry) => saveLocal(entry));
   handle('mcp:deleteLocal', (id) => {
