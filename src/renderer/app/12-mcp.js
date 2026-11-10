@@ -127,14 +127,54 @@ function catalogItem(key, info, saved, pane) {
   const head = el('div', 'mcp-item-head');
   const text = el('div', 'mcp-item-text');
   const title = el('div', 'mcp-item-name', info.name);
-  const auth = { none: 'No key needed', optional: 'Key optional', required: 'API key' }[info.authMode] || '';
+  // 'oauth': the user signs in on the server's own page; no token is saved.
+  const oauth = info.authMode === 'oauth';
+  const auth = { none: 'No key needed', optional: 'Key optional', required: 'API key', oauth: 'Sign in' }[info.authMode] || '';
   title.append(el('span', `mcp-pill${info.authMode === 'required' ? '' : ' free'}`, auth));
   text.append(title, el('div', 'mcp-item-desc', info.description));
+  if (oauth && saved) {
+    const state = el('div', 'mcp-state');
+    const signIn = signIns.get(saved.id);
+    const known = remoteStatus.get(saved.id);
+    if (signingIn.has(saved.id)) state.textContent = 'Waiting for the sign-in in your browser…';
+    else if (signIn === 'none') {
+      state.textContent = 'Not signed in. Click Connect.';
+      state.classList.add('bad');
+    } else if (signIn === 'reauth') {
+      state.textContent = 'The sign-in has ended. Connect again.';
+      state.classList.add('bad');
+    } else if (known && known.testing) state.textContent = 'Connecting…';
+    else if (known && known.connected) {
+      state.textContent = `Signed in. ${known.tools.length} tool${known.tools.length === 1 ? '' : 's'}.`;
+      state.classList.add('good');
+    } else if (known && known.error) {
+      state.textContent = known.error;
+      state.classList.add('bad');
+    } else if (signIn === 'connected') {
+      state.textContent = 'Signed in';
+      state.classList.add('good');
+    }
+    if (state.textContent) text.append(state);
+  }
   const base = () => ({
     id: saved && saved.id, catalog: key, key, name: info.name, url: info.url,
     authHeader: info.authHeaderName || null, tools: info.tools && info.tools.length ? info.tools : null,
+    ...(oauth ? { oauth: true } : {}),
   });
   const toggle = mcpSwitch(saved && saved.enabled, async (on, input) => {
+    if (oauth) {
+      // Saved first (the sign-in is for a saved server), then the browser.
+      if (!await mcpAction(pane, cf.mcpSaveRemote, { ...base(), enabled: on }) || !on) return;
+      const now = mcpState.remote.find((r) => r.catalog === key);
+      if (!now) return;
+      if (await signInNow(now.id) === 'connected') {
+        renderMcpPane();
+        testRemoteServer(now.id);
+      } else {
+        connectRemote(now.id, pane);
+      }
+      return;
+    }
     if (on && info.authMode === 'required' && !(saved && saved.hasToken)) {
       input.checked = false;
       tokenBox.hidden = false;
@@ -144,11 +184,13 @@ function catalogItem(key, info, saved, pane) {
     }
     await mcpAction(pane, cf.mcpSaveRemote, { ...base(), enabled: on });
   });
-  head.append(mcpBadge(info.color, info.name), text, toggle);
+  head.append(mcpBadge(info.color, info.name), text);
+  if (oauth && saved) head.append(connectButton(saved.id, pane));
+  head.append(toggle);
   item.append(head);
 
   const tokenBox = el('div', 'mcp-token');
-  tokenBox.hidden = info.authMode === 'none';
+  tokenBox.hidden = info.authMode === 'none' || oauth;
   const tokenInput = el('input');
   tokenInput.type = 'password';
   tokenInput.placeholder = saved && saved.hasToken ? 'Token saved. Paste a new one to replace it.' : (info.tokenPlaceholder || 'Token');
@@ -186,6 +228,30 @@ const signIns = new Map();
 const signingIn = new Set();
 const openForms = new Set();
 let signInsLoaded = false;
+
+// Connect, Reconnect, or Cancel while a sign-in is waited for.
+function connectButton(id, pane) {
+  const busy = signingIn.has(id);
+  const signedIn = signIns.get(id) === 'connected';
+  const button = el('button', `btn small${signedIn || busy ? '' : ' primary'}`,
+    busy ? 'Cancel' : (signedIn ? 'Reconnect' : 'Connect'));
+  button.title = busy ? 'Stop waiting for the sign-in' : 'Sign in to this server in your browser';
+  button.addEventListener('click', () => {
+    if (busy) call(cf.mcpOAuthCancel, id).catch(() => {});
+    else connectRemote(id, pane);
+  });
+  return button;
+}
+
+// The state of one sign-in, asked from CodingFleet now: a sign-in made on the
+// web (or on another computer) counts here too.
+async function signInNow(id) {
+  try {
+    const states = await call(cf.mcpOAuthStatus);
+    for (const [server, state] of Object.entries(states)) signIns.set(server, state);
+  } catch { /* offline: what we knew stays */ }
+  return signIns.get(id);
+}
 
 // Opens the sign-in page in the browser and waits for the user to finish.
 // `own` is the user's own OAuth app, for a server that asks for one.
@@ -271,17 +337,7 @@ function customItem(server, pane) {
   });
   const toggle = mcpSwitch(server.enabled, (on) => mcpAction(pane, cf.mcpSaveRemote, { ...server, enabled: on }));
   head.append(mcpBadge(null, server.name), text);
-  if (server.oauth) {
-    const busy = signingIn.has(server.id);
-    const connect = el('button', `btn small${signIn === 'connected' ? '' : ' primary'}`,
-      busy ? 'Cancel' : (signIn === 'connected' ? 'Reconnect' : 'Connect'));
-    connect.title = busy ? 'Stop waiting for the sign-in' : 'Sign in to this server in your browser';
-    connect.addEventListener('click', () => {
-      if (busy) call(cf.mcpOAuthCancel, server.id).catch(() => {});
-      else connectRemote(server.id, pane);
-    });
-    head.append(connect);
-  }
+  if (server.oauth) head.append(connectButton(server.id, pane));
   head.append(test, edit, remove, toggle);
   item.append(head);
   const form = customForm(pane, server);

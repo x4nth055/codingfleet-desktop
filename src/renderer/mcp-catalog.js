@@ -11,6 +11,14 @@ window.MCP_CATALOG = {
       "name": "Developer Tools"
     },
     {
+      "id": "work",
+      "name": "Work & Project Tools"
+    },
+    {
+      "id": "deploy",
+      "name": "Deploy & Hosting"
+    },
+    {
       "id": "cloud",
       "name": "Cloud, Data & APIs"
     }
@@ -258,6 +266,158 @@ window.MCP_CATALOG = {
       "tokenPlaceholder": "Semgrep app token...",
       "color": "#00c292"
     },
+    "notion": {
+      "name": "Notion",
+      "category": "work",
+      "description": "Search, read and write your pages, docs and databases.",
+      "authMode": "oauth",
+      "authHeaderName": null,
+      "url": "https://mcp.notion.com/mcp",
+      "servers": [
+        {
+          "name": "Notion",
+          "url": "https://mcp.notion.com/mcp"
+        }
+      ],
+      "tools": [],
+      "tokenHelp": "No token: you sign in on Notion.",
+      "tokenPlaceholder": "Not required",
+      "color": "#7b8cff"
+    },
+    "linear": {
+      "name": "Linear",
+      "category": "work",
+      "description": "Find, create and update issues, projects and comments.",
+      "authMode": "oauth",
+      "authHeaderName": null,
+      "url": "https://mcp.linear.app/mcp",
+      "servers": [
+        {
+          "name": "Linear",
+          "url": "https://mcp.linear.app/mcp"
+        }
+      ],
+      "tools": [],
+      "tokenHelp": "No token: you sign in on Linear.",
+      "tokenPlaceholder": "Not required",
+      "color": "#5e6ad2"
+    },
+    "atlassian": {
+      "name": "Atlassian (Jira & Confluence)",
+      "category": "work",
+      "description": "Jira issues and Confluence pages: search, read, create and update.",
+      "authMode": "oauth",
+      "authHeaderName": null,
+      "url": "https://mcp.atlassian.com/v1/mcp",
+      "servers": [
+        {
+          "name": "Atlassian",
+          "url": "https://mcp.atlassian.com/v1/mcp"
+        }
+      ],
+      "tools": [],
+      "tokenHelp": "No token: you sign in on Atlassian (Jira & Confluence).",
+      "tokenPlaceholder": "Not required",
+      "color": "#2684ff"
+    },
+    "netlify": {
+      "name": "Netlify",
+      "category": "deploy",
+      "description": "Create, deploy and manage sites, builds, forms and environment variables.",
+      "authMode": "oauth",
+      "authHeaderName": null,
+      "url": "https://netlify-mcp.netlify.app/mcp",
+      "servers": [
+        {
+          "name": "Netlify",
+          "url": "https://netlify-mcp.netlify.app/mcp"
+        }
+      ],
+      "tools": [],
+      "tokenHelp": "No token: you sign in on Netlify.",
+      "tokenPlaceholder": "Not required",
+      "color": "#32e6e2"
+    },
+    "railway": {
+      "name": "Railway",
+      "category": "deploy",
+      "description": "Deploy services, manage projects and environments, read logs.",
+      "authMode": "oauth",
+      "authHeaderName": null,
+      "url": "https://mcp.railway.com/mcp",
+      "servers": [
+        {
+          "name": "Railway",
+          "url": "https://mcp.railway.com/mcp"
+        }
+      ],
+      "tools": [],
+      "tokenHelp": "No token: you sign in on Railway.",
+      "tokenPlaceholder": "Not required",
+      "color": "#a78bfa"
+    },
+    "cloudflare": {
+      "name": "Cloudflare Workers",
+      "category": "deploy",
+      "description": "Build on Workers with KV, R2 and D1; see builds and logs.",
+      "authMode": "oauth",
+      "authHeaderName": null,
+      "url": "https://bindings.mcp.cloudflare.com/mcp",
+      "servers": [
+        {
+          "name": "Workers, KV, R2, D1 (bindings)",
+          "url": "https://bindings.mcp.cloudflare.com/mcp"
+        },
+        {
+          "name": "Workers Builds",
+          "url": "https://builds.mcp.cloudflare.com/mcp"
+        },
+        {
+          "name": "Workers Observability (logs)",
+          "url": "https://observability.mcp.cloudflare.com/mcp"
+        }
+      ],
+      "tools": [],
+      "tokenHelp": "No token: you sign in on Cloudflare Workers.",
+      "tokenPlaceholder": "Not required",
+      "color": "#f6821f"
+    },
+    "render": {
+      "name": "Render",
+      "category": "deploy",
+      "description": "Create and manage web services, databases and cron jobs; read logs and metrics.",
+      "authMode": "required",
+      "authHeaderName": null,
+      "url": "https://mcp.render.com/mcp",
+      "servers": [
+        {
+          "name": "Render",
+          "url": "https://mcp.render.com/mcp"
+        }
+      ],
+      "tools": [],
+      "tokenHelp": "Create an API key: <a href=\"https://render.com/docs/api#1-create-an-api-key\" target=\"_blank\" rel=\"noopener\">Render Dashboard → Account Settings → API Keys</a>",
+      "tokenPlaceholder": "rnd_...",
+      "color": "#8a5cf6"
+    },
+    "heroku": {
+      "name": "Heroku",
+      "category": "deploy",
+      "description": "Manage apps, dynos, add-ons and logs on Heroku.",
+      "authMode": "required",
+      "authHeaderName": null,
+      "url": "https://mcp.heroku.com/mcp",
+      "servers": [
+        {
+          "name": "Heroku",
+          "url": "https://mcp.heroku.com/mcp"
+        }
+      ],
+      "tools": [],
+      "tokenHelp": "Get your API key from <a href=\"https://dashboard.heroku.com/account\" target=\"_blank\" rel=\"noopener\">Heroku Account Settings</a> or run <code>heroku auth:token</code>",
+      "tokenPlaceholder": "HRKU-...",
+      "color": "#79589f"
+    },
     "supabase": {
       "name": "Supabase",
       "category": "cloud",
@@ -315,24 +475,6 @@ window.MCP_CATALOG = {
       "tokenHelp": "Use a <strong>restricted</strong> or test-mode key: <a href=\"https://dashboard.stripe.com/apikeys\" target=\"_blank\" rel=\"noopener\">Stripe Dashboard → API keys</a>",
       "tokenPlaceholder": "rk_... / sk_test_...",
       "color": "#635bff"
-    },
-    "heroku": {
-      "name": "Heroku",
-      "category": "cloud",
-      "description": "Manage apps, dynos, add-ons and logs on Heroku.",
-      "authMode": "required",
-      "authHeaderName": null,
-      "url": "https://mcp.heroku.com/mcp",
-      "servers": [
-        {
-          "name": "Heroku",
-          "url": "https://mcp.heroku.com/mcp"
-        }
-      ],
-      "tools": [],
-      "tokenHelp": "Get your API key from <a href=\"https://dashboard.heroku.com/account\" target=\"_blank\" rel=\"noopener\">Heroku Account Settings</a> or run <code>heroku auth:token</code>",
-      "tokenPlaceholder": "HRKU-...",
-      "color": "#79589f"
     }
   }
 };
