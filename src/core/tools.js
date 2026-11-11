@@ -195,6 +195,22 @@ async function fsWrite(args, cwd) {
   }
 }
 
+// Two changes to one file at the same moment would each start from the file
+// as it was, and the one that finishes last would undo the other. They take
+// turns instead, in the order they came: the second edits what the first
+// wrote. (The agent sends several calls at once, and the runner starts each
+// without waiting for the one before.)
+const fileTurns = new Map(); // path -> the last change waiting for that file
+function inTurn(cwd, target, change) {
+  const file = resolvePath(cwd, target);
+  const key = process.platform === 'win32' ? file.toLowerCase() : file;
+  const turn = (fileTurns.get(key) || Promise.resolve()).catch(() => {}).then(change);
+  fileTurns.set(key, turn);
+  const done = () => { if (fileTurns.get(key) === turn) fileTurns.delete(key); };
+  turn.then(done, done);
+  return turn;
+}
+
 const count = (text, part) => text.split(part).length - 1;
 
 async function fsEdit(args, cwd) {
@@ -217,6 +233,9 @@ async function fsEdit(args, cwd) {
     found = count(text, before);
   }
   if (found === 0) return 'error: old_string not found';
+  // A Windows file keeps its line endings, also when old_string was one line
+  // and only the new text has line breaks.
+  if (text.includes('\r\n') && !/(^|[^\r])\n/.test(text)) after = after.replace(/\r?\n/g, '\r\n');
   if (!args.all && found > 1) return `error: old_string appears ${found} times, must be unique (use all=true)`;
   const updated = args.all ? text.split(before).join(after) : text.replace(before, () => after);
   try {
@@ -294,9 +313,9 @@ async function executeTool(name, args, { cwd, signal, callId, adopt } = {}) {
     case 'fs_read':
       return asText(await fsRead(args, cwd));
     case 'fs_write':
-      return asText(await fsWrite(args, cwd));
+      return asText(await inTurn(cwd, args.path, () => fsWrite(args, cwd)));
     case 'fs_edit':
-      return asText(await fsEdit(args, cwd));
+      return asText(await inTurn(cwd, args.path, () => fsEdit(args, cwd)));
     case 'fs_glob':
       return asText(await fsGlob(args, cwd));
     default:
@@ -325,7 +344,8 @@ function approvalReason(name, args, cwd) {
     // A pattern can leave the folder by itself: "/etc/*", or "../*", which the
     // glob follows like a path.
     const pat = String(args.pat || '').replace(/\\/g, '/');
-    return isInside(cwd, resolvePath(cwd, args.path)) && !path.isAbsolute(pat) && !/(^|\/)\.\.(\/|$)/.test(pat)
+    // ".." also inside braces: "{..,.}/*" is "../*" and "./*".
+    return isInside(cwd, resolvePath(cwd, args.path)) && !path.isAbsolute(pat) && !/(^|[/{,])\.\.([/},]|$)/.test(pat)
       ? null
       : 'reads outside the project folder';
   }

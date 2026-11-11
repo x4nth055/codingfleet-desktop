@@ -115,6 +115,8 @@ class McpServer {
       if (!line) continue;
       let message;
       try { message = JSON.parse(line); } catch { continue; }
+      // `null`, a number, a string: JSON, but not a message.
+      if (!message || typeof message !== 'object') continue;
       this.onMessage(message);
     }
   }

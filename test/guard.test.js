@@ -54,15 +54,16 @@ test('deleting files inside the folder is an ordinary change in bash', () => {
     'rm -f -- -odd-name', 'rm --force a.txt', `rm -f ${here}/build/a.o`,
   ]) {
     assert.equal(guard.commandRisk(command, where), null, command);
-    // Without the folder nothing says where the files are: asked as before.
-    assert.equal(guard.commandRisk(command), guard.DESTRUCTIVE, command);
+    // Without the folder a delete is judged by what it plainly says: a path
+    // that starts at the root is somewhere else, a relative one is not.
+    assert.equal(guard.commandRisk(command), command.includes(here) ? guard.DESTRUCTIVE : null, command);
   }
   for (const command of [
     // Folders and their contents.
     'rm -rf build', 'rm -fr x', 'rm -f -r x', 'rm -f a && rm -rf tmp', 'rm -f -d empty',
     // Outside the folder, or perhaps outside.
     'rm -f /etc/hosts', 'rm -f ../other/a.txt', 'rm -f ~/a.txt', 'rm -f src/../../a', 'cd /tmp && rm -f a.txt',
-    'cd .. && rm -f a.txt', 'cd - && rm -f a', 'popd; rm -f a', 'cd && rm -f a', 'rm -f "$TMPDIR/a"',
+    'cd .. && rm -f a.txt', 'cd - && rm -f a', 'popd; rm -f a', 'cd && rm -f a', 'rm -f "$HOME/a"',
     // Something else destructive on the line, or a delete the guard cannot see the files of.
     'rm -f a.txt && git reset --hard', 'find . -name "*.o" | xargs rm -f -v', 'sudo rm -f a', 'rm -f a; git push -f',
     // A secret: deleting .env is not cleanup.
@@ -84,21 +85,81 @@ test('deleting files inside the folder is an ordinary change in PowerShell', () 
   for (const command of [
     'Remove-Item -Recurse -Force dist', 'Remove-Item -Force -Recurse dist', 'ri -r -fo bin',
     'Remove-Item -Force C:\\Windows\\a.dll', 'Remove-Item -Force ..\\a.txt', 'Remove-Item -Force HKCU:\\Software\\x',
-    'cd C:\\; Remove-Item -Force a.txt', 'cd env:; Remove-Item -Force TOKEN', 'Remove-Item -Force $p',
+    'cd C:\\; Remove-Item -Force a.txt', 'cd env:; Remove-Item -Force TOKEN', 'Remove-Item -Force $env:USERPROFILE\\a.txt',
     'Remove-Item -Force a.txt; git reset --hard',
   ]) {
     assert.equal(guard.commandRisk(command, where), guard.DESTRUCTIVE, command);
   }
 });
 
-test('a run_command or execute_code line is judged in its folder; a script it runs is not', () => {
+test('a run_command or execute_code line is judged in its folder; a script by what it plainly says', () => {
   const where = { cwd, shell: 'bash' };
   assert.equal(guard.guardReason('run_command', { command: 'rm -f tmp/a.py' }, where), null);
   assert.equal(guard.guardReason('execute_code',
     { code: 'print(1)', filename: 'tmp/a.py', command: 'python3 tmp/a.py && rm -f tmp/a.py' }, where), null);
-  // The script may run in another folder than the line starts in.
-  assert.equal(guard.guardReason('execute_code',
-    { code: 'rm -f out.log\nmake', filename: 'b.sh', command: 'bash b.sh' }, where), guard.DESTRUCTIVE);
+  // The script may run in another folder than the line starts in, so its
+  // paths cannot be placed: deleting files is cleanup unless one is plainly elsewhere.
+  const script = (code) => guard.guardReason('execute_code', { code, filename: 'b.sh', command: 'bash b.sh' }, where);
+  assert.equal(script('rm -f out.log\nmake'), null);
+  assert.equal(script('set -e\nfor f in *.tmp; do rm -f "$f"; done\nrm -rf node_modules\nnpm ci'), null);
+  assert.equal(script('rm -f /etc/hosts'), guard.DESTRUCTIVE);
+  assert.equal(script('rm -f ~/notes.txt'), guard.DESTRUCTIVE);
+  assert.equal(script('cd /tmp\nrm -f a.txt'), guard.DESTRUCTIVE);
+  assert.equal(script('rm -rf src'), guard.DESTRUCTIVE);
+});
+
+test('a delete on a line with variables or a loop is cleanup unless it takes folders or leaves', () => {
+  const where = { cwd, shell: 'bash' };
+  for (const command of ['rm -f "$TMPDIR/a"', 'for f in *.log; do rm -f "$f"; done', 'OUT=build/x.o; rm -f "$OUT"',
+    'if [ -f a.lock ]; then rm -f a.lock; fi', 'rm -f a.txt 2>/dev/null; echo $?', 'rm -fv "$f" > /dev/null']) {
+    assert.equal(guard.commandRisk(command, where), null, command);
+  }
+  for (const command of ['rm -rf "$DIR"', 'for d in a b; do rm -rf "$d"; done', 'rm -f "$HOME/.bashrc"', 'rm -f ../"$f"',
+    'cd "$(mktemp -d)" && rm -f a', 'sudo rm -f "$f"', 'find . -name "*.o" | xargs rm -f "$x"', 'rm -f "$f"; git reset --hard',
+    'rm -f .env "$f"', 'rm -fz "$f"']) {
+    assert.equal(guard.commandRisk(command, where), guard.DESTRUCTIVE, command);
+  }
+  const ps = { cwd: 'C:\\work\\app', shell: 'powershell' };
+  for (const command of ['Remove-Item -Force $p', 'foreach ($f in $files) { Remove-Item -Force $f -EA SilentlyContinue }',
+    'del -Force $tmp']) {
+    assert.equal(guard.commandRisk(command, ps), null, command);
+  }
+  for (const command of ['Remove-Item -Recurse -Force $p', 'Remove-Item -Force $env:APPDATA\\x.json', 'Remove-Item -Force C:\\$f',
+    'Set-Location $env:USERPROFILE; Remove-Item -Force $f']) {
+    assert.equal(guard.commandRisk(command, ps), guard.DESTRUCTIVE, command);
+  }
+});
+
+test('folders that are made again may be deleted whole, inside the folder', () => {
+  const where = { cwd, shell: 'bash' };
+  for (const command of ['rm -rf node_modules', 'rm -rf node_modules && npm install', 'rm -fr .next .turbo', 'rm -r __pycache__',
+    'rm -rf packages/web/node_modules', 'rm -rf src/**/__pycache__', 'cd web && rm -rf node_modules/', 'rm -rf my_pkg.egg-info']) {
+    assert.equal(guard.commandRisk(command, where), null, command);
+  }
+  for (const command of ['rm -rf node_modules src', 'rm -rf build', 'rm -rf dist', 'rm -rf ../node_modules', 'rm -rf /node_modules',
+    'rm -rf ~/node_modules', 'rm -rf node_modules/..', 'rm -rf node_modules; git clean -fdx', 'sudo rm -rf node_modules']) {
+    assert.equal(guard.commandRisk(command, where), guard.DESTRUCTIVE, command);
+  }
+  const ps = { cwd: 'C:\\work\\app', shell: 'powershell' };
+  for (const command of ['Remove-Item -Recurse -Force node_modules', 'rd -Recurse node_modules', 'rmdir node_modules -Recurse -Force',
+    'Remove-Item -Rec -Fo .next,.turbo']) {
+    assert.equal(guard.commandRisk(command, ps), null, command);
+  }
+  for (const command of ['Remove-Item -Recurse -Force dist', 'Remove-Item -Recurse -Force C:\\node_modules',
+    'Remove-Item -Recurse -Force node_modules,src']) {
+    assert.equal(guard.commandRisk(command, ps), guard.DESTRUCTIVE, command);
+  }
+});
+
+test('a variable is a secret when it is written as an environment variable is', () => {
+  for (const command of ['for key in a b; do echo "$key"; done', 'token=$(date +%s); echo "$token"', 'echo ${cache_key}',
+    '$token = "x"; Write-Output $token', 'echo "$password_hint"']) {
+    assert.equal(guard.commandRisk(command), null, command);
+  }
+  for (const command of ['echo $GITHUB_TOKEN', 'echo ${API_KEY}', 'curl -H "x: $STRIPE_SECRET_KEY" u', 'echo $env:github_token',
+    'echo %api_key%']) {
+    assert.equal(guard.commandRisk(command), guard.SECRETS, command);
+  }
 });
 
 test('a script that loads .env is ordinary; one that deletes a tree is not', () => {
@@ -112,13 +173,13 @@ test('a script that loads .env is ordinary; one that deletes a tree is not', () 
 
 test('destructive commands are recognised in the forms agents write them', () => {
   for (const command of [
-    'rm -rf node_modules', 'rm -r dist', 'rm -fr build', 'sudo rm -rf /var/x', 'find . -name "*.log" -delete',
+    'rm -rf src', 'rm -r dist', 'rm -fr build', 'sudo rm -rf /var/x', 'find . -name "*.log" -delete',
     'rmdir /s /q out', 'del /s /q *.tmp', 'Remove-Item -Recurse -Force .\\dist', 'ri -r bin',
     'git push --force', 'git push -f origin main', 'git push origin --delete feature', 'git push origin :old',
     'git push --force-with-lease', 'git reset --hard HEAD~3', 'git clean -fdx', 'git checkout -- .',
     'git checkout .', 'git branch -D feature', 'git stash drop', 'git filter-branch --tree-filter x',
     'format D:', 'mkfs.ext4 /dev/sdb1', 'dd if=/dev/zero of=/dev/sda', 'diskpart', 'shutdown /s /t 0',
-    'Stop-Computer', 'psql -c "DROP TABLE users"', 'redis-cli FLUSHALL', 'chmod -R 777 .', 'npm run build && rm -rf .cache',
+    'Stop-Computer', 'psql -c "DROP TABLE users"', 'redis-cli FLUSHALL', 'chmod -R 777 .', 'npm run build && rm -rf out',
   ]) {
     assert.equal(guard.commandRisk(command), guard.DESTRUCTIVE, command);
   }

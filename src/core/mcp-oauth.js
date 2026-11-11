@@ -48,7 +48,7 @@ async function waitForSignIn(api, started, { signal, sleep = delay, now = Date.n
   return { status: 'failed', error: 'The sign-in took too long. Start it again.' };
 }
 
-// Which of the saved servers the account is signed in to: Map url -> 'connected'
+// Which of the saved servers the account is signed in to: Map server id -> 'connected'
 // | 'reauth' | 'none'. `connections` is GET /mcp_servers/oauth.
 function signInStates(servers, connections) {
   const known = new Map();

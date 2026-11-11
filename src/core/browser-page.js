@@ -65,7 +65,8 @@ function normalizeSite(input) {
 // ("example.com" covers docs.example.com, not notexample.com).
 function onSiteList(href, sites) {
   let host;
-  try { host = new URL(href).hostname.toLowerCase(); } catch { return false; }
+  // An IPv6 address comes in brackets from URL, and without them on the list.
+  try { host = new URL(href).hostname.toLowerCase().replace(/^\[|\]$/g, ''); } catch { return false; }
   return (sites || []).some((site) => host === site || host.endsWith(`.${site}`));
 }
 
@@ -352,9 +353,9 @@ function pageOp(op, arg) {
 
   switch (op) {
     case 'read': {
+      if (!document.body) return { text: `${header()}\n(The page is empty.)` };
       const root = arg && arg.ref ? elOf(arg.ref) : document.body;
       if (!root) return missing(arg.ref);
-      if (!document.body) return { text: `${header()}\n(The page is empty.)` };
       const list = lines(root);
       return {
         text: `${header()}\n${list.length ? cut(list, 'Use find, or read_page with a ref for one part.') : '(Nothing visible on the page.)'}`,

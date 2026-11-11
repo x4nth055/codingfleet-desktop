@@ -19,7 +19,8 @@ const REDACTIONS = [
   [/\b(sk|pk|rk)-[A-Za-z0-9_-]{16,}/g, '$1-[redacted]'],
   [/\b(gh[pousr]_[A-Za-z0-9]{20,})/g, 'gh_[redacted]'],
   [/\bAKIA[0-9A-Z]{16}\b/g, 'AKIA[redacted]'],
-  [/(authorization|bearer)(["'\s:=]+)[^\s"',;}]+/gi, '$1$2[redacted]'],
+  // "Authorization: Bearer <token>": the token goes, not the word before it.
+  [/(authorization["'\s:=]+(?:(?:bearer|basic|token)\s+)?|bearer\s+)[^\s"',;}]+/gi, '$1[redacted]'],
   [/((?:api[_-]?key|access[_-]?token|secret|password|passwd|token)["'\s]*[:=]\s*["']?)[^\s"',;}]+/gi, '$1[redacted]'],
 ];
 

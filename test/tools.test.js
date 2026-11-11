@@ -69,6 +69,31 @@ test('fs_edit matches a CRLF file when the model writes LF', async () => {
   assert.equal(fs.readFileSync(path.join(cwd, 'w.txt'), 'utf8'), 'one\r\ntwo\r\n');
 });
 
+test('changes to one file made at the same moment are all kept', async () => {
+  const cwd = tmp();
+  const lines = Array.from({ length: 20 }, (_, i) => `line ${i}`);
+  fs.writeFileSync(path.join(cwd, 'a.txt'), `${lines.join('\n')}\n`);
+  // Twenty edits started together, as an agent's parallel calls are.
+  const results = await Promise.all(lines.map((line, i) => run('fs_edit', { path: 'a.txt', old: `${line}\n`, new: `LINE ${i}\n` }, cwd)));
+  assert.ok(results.every((r) => r.output === 'File edited.'), JSON.stringify(results));
+  assert.equal(fs.readFileSync(path.join(cwd, 'a.txt'), 'utf8'), `${lines.map((_, i) => `LINE ${i}`).join('\n')}\n`);
+  // In the order they came: the edit sees what the write before it wrote, by
+  // any spelling of the path.
+  const [, edited] = await Promise.all([
+    run('fs_write', { path: 'b.txt', content: 'one\n' }, cwd),
+    run('fs_edit', { path: './b.txt', old: 'one', new: 'two' }, cwd),
+  ]);
+  assert.equal(edited.output, 'File edited.');
+  assert.equal(fs.readFileSync(path.join(cwd, 'b.txt'), 'utf8'), 'two\n');
+  // An edit whose text an earlier one changed says so, and changes nothing.
+  const [first, second] = await Promise.all([
+    run('fs_edit', { path: 'b.txt', old: 'two', new: 'three' }, cwd),
+    run('fs_edit', { path: 'b.txt', old: 'two', new: 'four' }, cwd),
+  ]);
+  assert.deepEqual([first.output, second.is_error, second.output], ['File edited.', true, 'error: old_string not found']);
+  assert.equal(fs.readFileSync(path.join(cwd, 'b.txt'), 'utf8'), 'three\n');
+});
+
 test('fs_glob lists newest first and skips node_modules', async () => {
   const cwd = tmp();
   fs.mkdirSync(path.join(cwd, 'src'));

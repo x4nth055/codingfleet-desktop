@@ -153,7 +153,7 @@ function canonicalKey(name) {
  * 'ctrl+s', 'enter', 'ctrl+a backspace': space-separated combos, each one
  * keys joined by '+'. Returns { combos: [['ctrl','s'], ...], text } or { error }.
  */
-function parseKeys(value) {
+function parseKeys(value, platform = process.platform) {
   const text = Array.isArray(value) ? value.join(' ') : String(value || '').trim();
   if (!text) return { error: "key needs keys, for example 'ctrl+s', 'enter' or 'alt+tab'." };
   const combos = [];
@@ -178,10 +178,12 @@ function parseKeys(value) {
   if (combos.length > 20) return { error: 'At most 20 key combinations at a time.' };
   for (const combo of combos) {
     const set = new Set(combo);
-    if (set.has('ctrl') && set.has('alt') && set.has('escape')) {
+    // Off macOS, cmd is sent as Ctrl (WIN_KEYS), so cmd+alt+esc is the same key.
+    const ctrl = set.has('ctrl') || (platform !== 'darwin' && set.has('cmd'));
+    if (ctrl && set.has('alt') && set.has('escape')) {
       return { error: 'Ctrl+Alt+Esc is the user\'s key to stop you; it cannot be pressed.' };
     }
-    if (set.has('ctrl') && set.has('alt') && set.has('delete')) {
+    if (ctrl && set.has('alt') && set.has('delete')) {
       return { error: 'Ctrl+Alt+Del cannot be sent by an app.' };
     }
   }

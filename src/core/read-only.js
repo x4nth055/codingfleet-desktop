@@ -16,7 +16,7 @@
 // bash and zsh (Git Bash on Windows), and Windows PowerShell 5.1, which the app
 // uses on Windows when Git for Windows is not installed.
 const path = require('path');
-const { isSecretPath } = require('./guard');
+const { isSecretPath, isRegenerable } = require('./guard');
 
 // ── bash ──────────────────────────────────────────────────────────────────
 // Read-only once their paths are checked and the arguments in DENIED are out.
@@ -24,6 +24,8 @@ const READERS = new Set(['ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'grep', 'egre
   'sort', 'uniq']);
 // Of those, the ones that print what is in the files they name.
 const CONTENT = new Set(['cat', 'head', 'tail', 'grep', 'egrep', 'fgrep', 'rg', 'sort', 'uniq']);
+// git subcommands that do the same: `git diff --no-index a .en?` prints .env.
+const GIT_CONTENT = new Set(['diff', 'show', 'blame', 'log']);
 // Print their arguments, or look a program up: nothing they name is opened.
 const NO_PATHS = new Set(['echo', 'which']);
 // The tools whose version an agent checks before it starts.
@@ -37,7 +39,9 @@ const GIT_BRANCH_LIST = new Set(['-a', '-r', '-v', '-vv', '-l', '--all', '--remo
 // Arguments that make a listed command write, delete or run something.
 const DENIED = {
   find: [/^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/],
-  sort: [/^-[^-]*o/, /^--output/, /^--compress-program/],
+  // GNU reads a long option from any start of its name that is its alone:
+  // --o is --output, --co is --compress-program.
+  sort: [/^-[^-]*o/, /^--o/, /^--co/],
   rg: [/^--pre(=|$)/, /^--hostname-bin/],
   git: [/^--output(=|$)/, /^--ext-diff$/],
 };
@@ -45,6 +49,10 @@ const DENIED = {
 // where the pattern is.
 const SEARCHES = new Set(['grep', 'egrep', 'fgrep', 'rg']);
 const PATTERN_OPTIONS = /^(-e|-f|--regexp|--file|--exclude-from|--ignore-file|--files)(=|$)/;
+// --regexp as GNU also reads it: shortened, down to --reg.
+const REGEXP_OPTION = /^--reg(e(x(p)?)?)?$/;
+// The pattern written onto its short option: -e. or -refoo (and -fpatterns.txt).
+const PATTERN_ATTACHED = /^-[A-Za-z]*[ef]./;
 
 // Where a command line ends one command and starts the next.
 const SEPARATORS = new Set([';', '\n', '|', '&&', '||']);
@@ -63,6 +71,8 @@ const PS_LISTERS = new Set(['get-childitem', 'gci', 'ls', 'dir', 'get-item', 'gi
 const PS_NO_PATHS = new Set(['write-output', 'echo', 'write', 'write-host', 'sort-object', 'sort', 'select-object',
   'select', 'measure-object', 'measure', 'group-object', 'group', 'where-object', 'where', 'format-table', 'ft',
   'format-list', 'fl', 'format-wide', 'fw', 'out-string', 'out-null']);
+// Of those, the ones that put their own words into the pipe.
+const PS_EMITTERS = new Set(['write-output', 'echo', 'write']);
 const PS_PWD = new Set(['get-location', 'gl', 'pwd']);
 const PS_CD = new Set(['set-location', 'sl', 'cd', 'chdir']);
 // Programs, which take their words as PowerShell hands them over.
@@ -301,8 +311,10 @@ function inside(cwd, word, shell = 'bash') {
   // ~ is the home folder, wherever the folder is; bash expands it after = and : too.
   if (/(^|[=:])~/.test(word)) return false;
   const paths = shell === 'powershell' ? path.win32 : path;
+  // The slash matters: `c:` alone is "where I am on drive c", which resolves
+  // to the folder itself, and /c is the whole drive.
   const p = shell !== 'powershell' && process.platform === 'win32'
-    ? word.replace(/^\/([a-z])(?=\/|$)/i, '$1:') : word;
+    ? word.replace(/^\/([a-z])(?=\/|$)/i, '$1:/').replace(/^([a-z]):(?![\\/])/i, '$1:/') : word;
   const rel = paths.relative(paths.resolve(cwd), paths.resolve(cwd, p));
   return rel === '' || (!rel.startsWith('..') && !paths.isAbsolute(rel));
 }
@@ -315,11 +327,14 @@ function safePath(cwd, word, shell, reads) {
 
 // Whether every path among a command's arguments stays inside the folder.
 // Any word may be a path, so all of them are checked: a pattern that looks
-// like a path outside only means the command asks, as it did before.
-function pathsInside(name, args, cwd, shell = 'bash') {
+// like a path outside only means the command asks, as it did before. The one
+// word let through is a search's pattern, and only when no option holds it.
+// `prints`: the command prints what is in the files it names (a git subcommand).
+function pathsInside(name, args, cwd, shell = 'bash', prints = false) {
   const search = SEARCHES.has(name);
-  const reads = CONTENT.has(name);
-  let patternLeft = search && !args.some((w) => PATTERN_OPTIONS.test(w));
+  const reads = prints || CONTENT.has(name);
+  const patternIn = (w) => PATTERN_OPTIONS.test(w) || REGEXP_OPTION.test(w.split('=')[0]) || PATTERN_ATTACHED.test(w);
+  let patternLeft = search && !args.some(patternIn);
   let options = true;
   for (let i = 0; i < args.length; i++) {
     const w = args[i];
@@ -328,7 +343,7 @@ function pathsInside(name, args, cwd, shell = 'bash') {
       const eq = w.indexOf('=');
       if (eq > 0 && !safePath(cwd, w.slice(eq + 1), shell, reads)) return false;
       // The pattern after --regexp is not a path.
-      if (search && w === '--regexp') i++;
+      if (search && REGEXP_OPTION.test(w)) i++;
       continue;
     }
     if (options && w.length > 1 && w.startsWith('-')) {
@@ -389,7 +404,7 @@ function programReads(name, args, cwd, shell) {
   const [sub, ...subArgs] = rest;
   if (sub === 'branch') return subArgs.every((w) => GIT_BRANCH_LIST.has(w) || /^--(format|sort)=/.test(w));
   if (sub === 'remote') return subArgs.every((w) => w === '-v' || w === '--verbose');
-  return GIT_READS.has(sub) && pathsInside(sub, subArgs, cwd, shell);
+  return GIT_READS.has(sub) && pathsInside(sub, subArgs, cwd, shell, GIT_CONTENT.has(sub));
 }
 
 function commandReads([name, ...args], cwd) {
@@ -406,9 +421,13 @@ function commandReads([name, ...args], cwd) {
 
 // `opens`: a reader is somewhere on the line, so what a lister finds may be
 // piped to it and opened. Text piped to Get-Content is not opened; files are.
-function psCommandReads([word, ...args], cwd, opens) {
+// `piped`: a lister or reader is on the line, and those take paths from the
+// pipe too: `echo C:\Users | Get-ChildItem` lists C:\Users. So the words
+// Write-Output sends down are then checked as the paths they may become.
+function psCommandReads([word, ...args], cwd, opens, piped) {
   const name = word.toLowerCase();
   if (VERSIONED.has(name) && args.length === 1 && VERSION_FLAGS.has(args[0])) return true;
+  if (piped && PS_EMITTERS.has(name)) return psPathsInside(name, args, cwd, opens);
   if (PS_NO_PATHS.has(name)) return true;
   if (PS_PWD.has(name)) return args.length === 0;
   if (PS_CD.has(name)) return args.length === 1 && !args[0].startsWith('-') && psPathInside(cwd, args[0], false);
@@ -429,7 +448,8 @@ function readOnlyCommand(command, cwd, shell = 'bash') {
   if (!commands) return false;
   if (shell !== 'powershell') return commands.every((words) => commandReads(words, cwd));
   const opens = commands.some(([name]) => PS_READERS.has(name.toLowerCase()));
-  return commands.every((words) => psCommandReads(words, cwd, opens));
+  const piped = opens || commands.some(([name]) => PS_LISTERS.has(name.toLowerCase()));
+  return commands.every((words) => psCommandReads(words, cwd, opens, piped));
 }
 
 /**
@@ -450,12 +470,19 @@ function namesSecret(command, shell = 'bash') {
 // themselves; asking about every one stopped unattended runs (Nov 2026: 38% of
 // the asks auto mode could not skip, and people said yes to 472 of 474 asks).
 
-// bash: -f and -v only. -r, -R, -d and any other option leave the command to
-// the guard.
+//
+// With -r or -Recurse a delete takes folders, and is ordinary only for the
+// folders a build or an install makes again (guard.isRegenerable):
+// `rm -rf node_modules` before `npm install` is cleanup too.
+
+// bash: -f and -v, and -r or -R for folders. -d and any other option leave
+// the command to the guard.
 const RM_OPTIONS = /^(-[fv]+|--force|--verbose)$/;
+const RM_RECURSIVE = /^(-[rRfv]*[rR][rRfv]*|--recursive)$/;
 // Remove-Item and the names Windows PowerShell 5.1 gives it.
-const PS_DELETES = new Set(['remove-item', 'ri', 'rm', 'del', 'erase']);
+const PS_DELETES = new Set(['remove-item', 'ri', 'rm', 'del', 'erase', 'rd', 'rmdir']);
 const PS_FORCE = /^-fo(r(c(e)?)?)?$/i;
+const PS_RECURSE = /^-r(e(c(u(r(se?)?)?)?)?)?$/i;
 const PS_VERBOSE = /^-verbose$/i;
 // Parameters whose value is the next word (or comes after a colon).
 const PS_ERROR_ACTION = /^-(ea|erroraction)$/i;
@@ -463,6 +490,8 @@ const PS_PATH = /^-(path|literalpath|lp|pspath)$/i;
 // Commands that move the shell to another folder for the rest of the line.
 const CHANGES_FOLDER = new Set(['cd', 'pushd', 'chdir', 'set-location', 'sl', 'push-location']);
 const RETURNS_FOLDER = new Set(['popd', 'pop-location']);
+// Words of bash that only say when the command after them runs.
+const BASH_KEYWORDS = new Set(['then', 'do', 'else']);
 
 // A path that stays inside the folder from wherever the line has moved to:
 // the folders a line moves to are such paths themselves, so a relative path
@@ -479,22 +508,29 @@ function insideFromAnywhere(cwd, word, shell) {
 function bashFileDelete(args, cwd) {
   let options = true;
   let files = 0;
+  let recursive = false;
+  let regenerable = true;
   for (const w of args) {
     if (options && w === '--') { options = false; continue; }
     if (options && w.startsWith('-') && w.length > 1) {
-      if (!RM_OPTIONS.test(w)) return false;
+      if (RM_RECURSIVE.test(w)) recursive = true;
+      else if (!RM_OPTIONS.test(w)) return false;
       continue;
     }
     if (!insideFromAnywhere(cwd, w, 'bash')) return false;
+    if (!isRegenerable(w)) regenerable = false;
     files++;
   }
-  return files > 0;
+  return files > 0 && (!recursive || regenerable);
 }
 
 function psFileDelete(args, cwd) {
   let files = 0;
+  let recursive = false;
+  let regenerable = true;
   const file = (w) => {
     files++;
+    if (!isRegenerable(w)) regenerable = false;
     return insideFromAnywhere(cwd, w, 'powershell');
   };
   for (let i = 0; i < args.length; i++) {
@@ -506,7 +542,10 @@ function psFileDelete(args, cwd) {
     const colon = w.indexOf(':');
     const param = colon > 0 ? w.slice(0, colon) : w;
     const value = colon > 0 ? w.slice(colon + 1) : null;
-    if (PS_FORCE.test(param) || PS_VERBOSE.test(param)) {
+    if (PS_RECURSE.test(param)) {
+      if (value !== null) return false;
+      recursive = true;
+    } else if (PS_FORCE.test(param) || PS_VERBOSE.test(param)) {
       if (value !== null) return false;
     } else if (PS_ERROR_ACTION.test(param)) {
       if (value === null) i++;
@@ -517,7 +556,7 @@ function psFileDelete(args, cwd) {
       return false;
     }
   }
-  return files > 0;
+  return files > 0 && (!recursive || regenerable);
 }
 
 /**
@@ -532,7 +571,10 @@ function withoutFileDeletes(command, cwd, shell = 'bash') {
   if (!commands) return null;
   const ps = shell === 'powershell';
   const rest = [];
-  for (const words of commands) {
+  for (const all of commands) {
+    // `then rm -f a.lock`, `do rm -f x`: the command is what follows the keyword.
+    let words = all;
+    while (!ps && words.length > 1 && BASH_KEYWORDS.has(words[0])) words = words.slice(1);
     const name = ps ? words[0].toLowerCase() : words[0];
     if (RETURNS_FOLDER.has(name)) return null;
     if (CHANGES_FOLDER.has(name)) {

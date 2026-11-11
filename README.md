@@ -48,7 +48,7 @@ Open the app, click **Sign in with your browser**, and approve. That's all.
 | ↩️ **Undo** | Puts back every file a run changed, in one click. |
 | 🧭 **Steer a run** | Send a correction while the agent works. |
 | ☁️ **Cloud sandbox** | Or let the agent work on CodingFleet's servers instead of your PC. |
-| 🔌 **MCP** | 13 built-in connectors (GitHub, Context7, Stripe, Sentry…) and your own local MCP servers. |
+| 🔌 **MCP** | 20 built-in connectors (GitHub, Context7, Stripe, Sentry, Notion, Linear…) and your own local MCP servers. |
 | 🖼️ **Images and voice** | Paste images, take screenshots, speak your prompt. |
 | 💳 **Cost before you send** | An estimate next to the Send button, and what the session has cost so far. |
 | @ **Mention files** | Type `@` to pick a file or folder of the project. |
@@ -105,8 +105,17 @@ Pick a folder to work on real code. Pick no folder for a safe, empty sandbox.
 | Runs a command or changes files | Asks |
 | Reads `.env`, keys or passwords | Asks, **even in Auto-approve** |
 | Deletes files inside the folder (`rm -f tmp/a.py`, `Remove-Item -Force a.log`) | Same as changing files |
-| Deletes a folder or anything outside the folder, rewrites git history, wipes data | Asks **every time** |
+| Deletes a folder that is made again (`rm -rf node_modules`, `.next`, `__pycache__`, `coverage`…) inside the folder | Same as changing files |
+| Deletes any other folder or anything outside the folder, rewrites git history, wipes data | Asks **every time** |
 | Runs a script downloaded from the internet | Asks **every time** |
+
+In a script, or on a line with variables or a loop (`for f in *.log; do rm -f "$f"; done`),
+the app cannot tell where each file is. Deleting files there is treated like changing files,
+unless a path is plainly somewhere else (`/`, `~`, `..`, `$HOME`, another drive); deleting
+folders with `-r` still asks every time.
+
+A variable counts as a secret when it is written like an environment variable
+(`$GITHUB_TOKEN`); a script's own `$key` or `$token` does not.
 
 These checks catch mistakes. They are not a sandbox.
 
