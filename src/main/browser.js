@@ -38,6 +38,7 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}), par
   let parked = null;     // { url, title, entries, index }: the page closed while the pane was, and its history
   let parkTimer = null;
   let reviving = null;   // the parked page loading again
+  let revivingUrl = '';  // its address, until the load says it itself
   let busy = 0;          // the agent's actions running now
   let preset = 'desktop';
   let emulating = false; // a phone or tablet size is applied to the page
@@ -189,7 +190,8 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}), par
     if (!parked) return Promise.resolve();
     const saved = parked;
     parked = null;
-    reviving = restore(saved).finally(() => { reviving = null; });
+    revivingUrl = saved.url;
+    reviving = restore(saved).finally(() => { reviving = null; revivingUrl = ''; });
     return reviving;
   }
 
@@ -403,7 +405,12 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}), par
   };
 
   // ── Approvals ─────────────────────────────────────────────────────────────
-  const currentUrl = () => (wc() ? wc().getURL() : '');
+  // A parked page is still the page the agent would act on: it loads again
+  // for the action, so its site is asked about like an open page's.
+  const currentUrl = () => {
+    const contents = wc();
+    return (contents && contents.getURL()) || (parked && parked.url) || revivingUrl || '';
+  };
 
   /**
    * Why a call waits for the user, or null.
@@ -574,7 +581,7 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}), par
           await settle(60);
         }
         // Replaces what the field held: focus selected it.
-        if (args.text) contents.insertText(args.text);
+        if (args.text) await contents.insertText(args.text);
         else sendKey(contents, { keyCode: 'Backspace', modifiers: [] });
         if (args.submit) sendKey(contents, { keyCode: 'Enter', modifiers: [] });
         const before = contents.getURL();
@@ -649,7 +656,12 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}), par
         // is about to leave it anyway.
         if (String(args.action) === 'navigate') unpark();
         else await revive();
-        ensure();
+        // A page takes no click or key until it has been drawn once, and a
+        // page under another window is hidden and never drawn: the agent
+        // would be told "Clicked" while nothing happened. People leave the
+        // app behind the window they work in, so the page counts as shown
+        // while the agent uses it. (A minimized window still draws nothing.)
+        awake(ensure().webContents, true);
         // Loading needs no size (and the pane shows only once a page is there).
         if (!['navigate', 'console'].includes(String(args.action))) await laidOut();
         return await run(sessionId, args, call);
@@ -658,11 +670,18 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}), par
         return { output: `The browser could not do that: ${err.message}`, is_error: true };
       } finally {
         busy -= 1;
+        // Left to itself again, a hidden page rests as any other does.
+        if (!busy && wc()) awake(wc(), false);
         schedulePark();
       }
     });
     queue = job.catch(() => {});
     return job;
+  }
+
+  // Whether the page runs as a shown one whatever the window's state.
+  function awake(contents, on) {
+    try { contents.setBackgroundThrottling(!on); } catch { /* the page is gone */ }
   }
 
   function dispose() {

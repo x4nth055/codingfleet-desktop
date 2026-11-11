@@ -41,7 +41,6 @@ function exec(file, args, { cwd, timeout = TIMEOUT_MS, env = quiet() } = {}) {
       ok: !err,
       out: String(stdout || ''),
       err: String(stderr || '').trim(),
-      missing: Boolean(err && err.code === 'ENOENT'),
     }));
   });
 }
@@ -182,6 +181,8 @@ function signIn(onCode) {
   const child = spawn(ghPath || 'gh', [
     'auth', 'login', '--hostname', HOST, '--git-protocol', 'https', '--web', '--scopes', 'repo,read:org',
   ], { env: quiet(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  // A write to a `gh` that just exited is not a crash of the app.
+  child.stdin.on('error', () => {});
   let text = '';
   let told = false;
   let entered = false;

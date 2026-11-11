@@ -242,6 +242,11 @@ class MacComputer {
       execFile('osascript', ['-l', 'JavaScript', '-e', SCRIPT, JSON.stringify({ ...args, op })],
         { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
           if (err) {
+            // A timeout has no stderr, and its message is the whole script.
+            if (err.killed) {
+              reject(new Error(`${op} took longer than ${Math.round(timeout / 1000)} seconds, so it was stopped.`));
+              return;
+            }
             const said = String(stderr || err.message).trim();
             // -1743: the user has not allowed CodingFleet to control System Events.
             if (/-1743|not allowed to send/i.test(said)) {

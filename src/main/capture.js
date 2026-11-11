@@ -38,7 +38,7 @@ async function captureScreens(displays) {
     return { width: Math.max(big.width, px.width), height: Math.max(big.height, px.height) };
   }, { width: 1, height: 1 });
   const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
-  return displays.map((display, index) => ({ display, image: sourceFor(sources, display, index).thumbnail }))
+  return displays.map((display, index) => ({ display, image: (sourceFor(sources, display, index) || {}).thumbnail }))
     .filter((shot) => shot.image && !shot.image.isEmpty());
 }
 
@@ -86,7 +86,7 @@ async function captureScreen(win, displayId) {
   try {
     await wait(HIDE_SETTLE_MS);
     const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: pixelSize(display) });
-    const source = sourceFor(sources, display, displays.indexOf(display));
+    const source = sourceFor(sources, display, displays.findIndex((d) => d.id === display.id));
     if (!source || source.thumbnail.isEmpty()) throw new Error('The screen could not be captured.');
     return source.thumbnail;
   } finally {

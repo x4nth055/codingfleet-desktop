@@ -418,7 +418,7 @@ function createComputer({ getWindow, enabled, cacheDir, log, onStop, onImage, is
     const focused = info && info.focused !== false;
     return focused
       ? core.actionWords(action, `"${hit.title}"`)
-      : `Asked Windows to bring "${hit.title}" to the front, but another window kept it. Click the window instead.`;
+      : `Asked the system to bring "${hit.title}" to the front, but another window kept it. Click the window instead.`;
   }
 
   async function elementsOf(state, action) {
@@ -540,8 +540,10 @@ function createComputer({ getWindow, enabled, cacheDir, log, onStop, onImage, is
       const onAbort = () => controller.abort();
       if (signal) signal.addEventListener('abort', onAbort, { once: true });
       state.controller = controller;
+      // Cancelled while it waited its turn: 'abort' does not fire a second time.
+      if (signal && signal.aborted) controller.abort();
       try {
-        if (state.stopped) throw new Error('The user stopped computer use for this run.');
+        if (state.stopped || controller.signal.aborted) throw new Error('The user stopped computer use for this run.');
         return await runAction(sessionId, action, call, controller.signal);
       } catch (err) {
         const message = controller.signal.aborted || state.stopped

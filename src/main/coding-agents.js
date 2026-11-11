@@ -30,7 +30,10 @@ function createCodingAgents({ getState, saveState, send, logFile, log, backgroun
   function loadLog() {
     try {
       const list = JSON.parse(fs.readFileSync(logFile, 'utf8'));
-      return Array.isArray(list) ? list.slice(-MAX_LOG) : [];
+      if (!Array.isArray(list)) return [];
+      // A run the app quit in the middle of is over, whatever the file says.
+      return list.slice(-MAX_LOG)
+        .map((entry) => (entry && entry.status === 'running' ? { ...entry, status: 'stopped' } : entry));
     } catch {
       return [];
     }

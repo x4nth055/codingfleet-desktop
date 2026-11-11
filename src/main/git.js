@@ -302,7 +302,8 @@ let watchToken = 0;
 
 // Churn that says nothing about what is uncommitted: git's object database and
 // the logs it appends to while it works.
-const NOISE = /[\\/]\.git[\\/](objects|logs|hooks|lfs)[\\/]/;
+// fs.watch names paths from the root, so the repository's own .git comes first.
+const NOISE = /(^|[\\/])\.git[\\/](objects|logs|hooks|lfs)[\\/]/;
 
 function stopWatch() {
   watchToken++;

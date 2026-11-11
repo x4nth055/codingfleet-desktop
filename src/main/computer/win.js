@@ -80,6 +80,8 @@ class WindowsComputer {
           env: { ...process.env, CF_HELPER_CS: files.cs, CF_HELPER_DLL: files.dll },
         });
       this.child = child;
+      // A write to a helper that just died is not a crash of the app: its exit says the rest.
+      child.stdin.on('error', () => {});
       let stderr = '';
       const timer = setTimeout(() => {
         this.stop();

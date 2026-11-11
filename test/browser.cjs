@@ -164,6 +164,23 @@ app.whenReady().then(async () => {
     check(reason({ action: 'read_page' }) === null, 'reading a local page needs no OK');
     check(reason({ action: 'navigate', url: 'https://example.com/a' }) === 'uses example.com in the browser', 'a site asks');
     // 127.0.0.2 reaches this computer but is not localhost: it stands in for a site.
+    // A page takes no clicks or keys until it has been drawn once, and under
+    // another window, where people leave the app while the agent works, a page
+    // is not drawn at all. The agent's page is drawn all the same, so what it
+    // sends arrives. (This test's own window, behind whatever was on screen,
+    // used to fail now and then for the same reason.)
+    const cover = new BrowserWindow({ x: 0, y: 0, width: 1500, height: 1000, alwaysOnTop: true });
+    await cover.loadURL('data:text/html,<body style="background:#444"></body>');
+    // Windows takes a moment to notice that a window is covered.
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    r = await act({ action: 'navigate', url: `${base}/?covered` });
+    r = await act({ action: 'read_page' });
+    const field = (/\[(ref_\d+)\] textbox "New todo"/.exec(textOf(r)) || [])[1];
+    r = await act({ action: 'type', ref: field, text: 'Under cover', submit: true });
+    r = await act({ action: 'read_page' });
+    check(/text "Under cover"/.test(textOf(r)), `a page loaded under another window still takes keys: ${textOf(r)}`);
+    cover.destroy();
+
     const foreign = http.createServer((_req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end(ABOUT); });
     await new Promise((resolve) => foreign.listen(0, '127.0.0.2', resolve));
     const site = `127.0.0.2:${foreign.address().port}`;

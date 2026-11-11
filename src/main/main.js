@@ -235,6 +235,16 @@ function saveRemote(input) {
   let key = serverKey(entry.key || name) || 'server';
   if (key.startsWith('local')) key = `remote_${key}`.slice(0, 40);
   let existing = mcp.remote.find((r) => r.id === entry.id);
+  // Everything that can refuse the entry comes before the list changes: a
+  // refused save must not leave a half-made server behind.
+  const oauth = entry.oauth !== undefined ? Boolean(entry.oauth) : Boolean(existing && existing.oauth);
+  let token;
+  if (!oauth && typeof entry.token === 'string') {
+    token = entry.token.trim();
+    // A line break would start a header of its own; the server refuses these too.
+    if (/[^\x20-\x7e\t]/.test(token)) throw new Error('The token can use only printable ASCII characters.');
+    if (token.length > 4000) throw new Error('The token is too long (at most 4000 characters).');
+  }
   if (!existing) {
     if (mcp.remote.length >= MAX_REMOTE * 3) throw new Error('That is too many servers.');
     existing = { id: newId() };
@@ -250,16 +260,12 @@ function saveRemote(input) {
     enabled: Boolean(entry.enabled),
   });
   // Unsaid keeps what is saved (a switch flip sends the view back, which has it).
-  if (entry.oauth !== undefined) existing.oauth = Boolean(entry.oauth);
+  if (entry.oauth !== undefined) existing.oauth = oauth;
   if (existing.oauth) {
     // The sign-in replaces any pasted credentials.
     existing.token = null;
     existing.authHeader = null;
-  } else if (typeof entry.token === 'string') {
-    const token = entry.token.trim();
-    // A line break would start a header of its own; the server refuses these too.
-    if (/[^\x20-\x7e\t]/.test(token)) throw new Error('The token can use only printable ASCII characters.');
-    if (token.length > 4000) throw new Error('The token is too long (at most 4000 characters).');
+  } else if (token !== undefined) {
     existing.token = token || null;
   }
   if (existing.enabled && mcp.remote.filter((r) => r.enabled).length > MAX_REMOTE) {
@@ -288,6 +294,8 @@ function saveLocal(input) {
   const command = String(entry.command || '').trim();
   if (!command) throw new Error('Enter the command that starts the server.');
   const name = String(entry.name || '').trim().slice(0, 40) || path.basename(command);
+  // Read before the list changes: a line that is not NAME=value refuses the save.
+  const env = typeof entry.env === 'string' && entry.env.trim() ? parseEnv(entry.env) : null;
   let existing = mcp.local.find((l) => l.id === entry.id);
   if (!existing) {
     if (mcp.local.length >= MAX_LOCAL) throw new Error(`At most ${MAX_LOCAL} local servers.`);
@@ -301,7 +309,7 @@ function saveLocal(input) {
     enabled: Boolean(entry.enabled),
   });
   // An empty box keeps the saved values: the window never saw them.
-  if (typeof entry.env === 'string' && entry.env.trim()) existing.env = parseEnv(entry.env);
+  if (env) existing.env = env;
   if (entry.clearEnv) existing.env = {};
   saveMcp();
   return mcpView();
@@ -749,8 +757,6 @@ async function screenshotForAgent(args, { call, sessionId } = {}) {
   return { output: { data: shrunk.data, width: shrunk.width, height: shrunk.height }, is_error: false };
 }
 
-// The tools this process runs itself, for one session: a decoder for an image
-// file, and the screen for a screenshot.
 // Commands the agent started with background: true. They outlive the run
 // that started them and stop with their session or the app (core/background.js).
 const backgroundJobs = new BackgroundJobs({ shell: tools.SHELL, env: tools.commandEnv, kill: tools.killTree });
@@ -886,6 +892,8 @@ const computer = createComputer({
   }),
 });
 
+// The tools this process runs itself, for one session: a decoder for an image
+// file, the screen for a screenshot, the computer, the browser and commands.
 const handlersFor = (sessionId) => new Map([
   ['view_image', viewLocalImage],
   ['take_screenshot', (args, context) => screenshotForAgent(args, { ...context, sessionId })],
@@ -901,7 +909,10 @@ const handlersFor = (sessionId) => new Map([
   // A command that starts a coding CLI is refused when that CLI is off, and logged.
   ['run_command', (args, context) => codingAgents.runCommand(sessionId, args, context, () => (args.background
     ? backgroundJobs.start(sessionId, String(args.command || ''), context.cwd, { stopAfter: args.stop_after })
-    : tools.executeTool('run_command', args, context)))],
+    // callId and adopt make it movable ("Run in background"), as the runner does for execute_code.
+    : tools.executeTool('run_command', args, {
+      ...context, callId: context.call && context.call.id, adopt: (handoff) => backgroundJobs.adopt(sessionId, handoff),
+    })))],
   ['read_background', (args, context) => backgroundJobs.read(sessionId, args.id, args.wait, context.signal)],
   ['stop_background', (args) => backgroundJobs.stop(sessionId, args.id)],
 ]);
@@ -919,9 +930,11 @@ function approve(sessionId, cwd, call, localTools) {
   else if (call.name === 'browser') reason = browser.approvalReason(call.arguments);
   else reason = tools.approvalReason(call.name, call.arguments, cwd);
   // A command that starts a coding CLI follows the user's choice for that CLI
-  // (Settings > Coding agents), unless the guard has its own reason to ask.
-  const cli = guard.guardReason(call.name, call.arguments, { cwd, shell: tools.SHELL.kind })
-    ? null : codingAgents.approval(call);
+  // (Settings > Coding agents), unless the guard has its own reason to ask:
+  // judged from the reason found above, which also catches a secret the
+  // guard's own split of the line missed (tools.approvalReason).
+  const guarded = guard.alwaysAsk(reason) || guard.ASK_EVEN_IN_AUTO.has(reason);
+  const cli = guarded ? null : codingAgents.approval(call);
   if (cli && (cli.refuse || cli.allow)) return 'allow'; // an "off" CLI is refused when it runs, with the reason
   if (cli) reason = cli.reason;
   const auto = (PERMISSION_OVERRIDE || state.permissionMode) === 'auto';
@@ -1000,7 +1013,13 @@ function runInBackground(sessionId, run, body) {
   stayAwake();
   syncTaskbar();
   run.start(body).finally(() => {
-    rememberUndo(sessionId, run);
+    // A journal that cannot be written (a locked file, a full disk) must not
+    // leave the session "running" for good.
+    try {
+      rememberUndo(sessionId, run);
+    } catch (err) {
+      log.error(`could not save the undo of ${sessionId}: ${err.message}`);
+    }
     runs.delete(sessionId);
     computer.endRun(sessionId);
     stayAwake();
@@ -1222,10 +1241,13 @@ function registerIpc() {
   // Browser sign-in. The app never sees the password: the browser proves who
   // the user is, they approve this computer there, and the server hands back a
   // key of its own for this app.
+  // The window tells this ending from a failure by these words (10-settings.js).
+  const SIGN_IN_CANCELLED = 'Sign-in cancelled.';
   handle('auth:signIn', async () => {
     const base = config.ENV_API_BASE || config.DEFAULT_API_BASE;
     const previous = api.snapshot();
     const attempt = { cancelled: false };
+    let approvedKey = null; // set once the browser approved, in case saving it fails
     signIn = attempt;
     api.configure({ apiBase: base });
     try {
@@ -1234,8 +1256,14 @@ function registerIpc() {
       const every = Math.max(1000, (Number(start.interval) || 3) * 1000);
       const deadline = Date.now() + (Number(start.expires_in) || 600) * 1000;
       while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, every));
-        if (attempt.cancelled) throw new Error('Sign-in cancelled.');
+        // Cancel (auth:cancel) ends the wait at once, not at the next poll.
+        if (!attempt.cancelled) {
+          await new Promise((resolve) => {
+            const timer = setTimeout(resolve, every);
+            attempt.wake = () => { clearTimeout(timer); resolve(); };
+          });
+        }
+        if (attempt.cancelled) throw new Error(SIGN_IN_CANCELLED);
         let answer;
         try {
           answer = await api.pollDeviceAuth(start.device_code);
@@ -1245,8 +1273,11 @@ function registerIpc() {
           if (err.transient) continue;
           throw err;
         }
+        // Cancelled while the answer travelled: an approval that lands now is not taken.
+        if (attempt.cancelled) throw new Error(SIGN_IN_CANCELLED);
         if (answer.status === 'denied') throw new Error('The sign-in was declined in the browser.');
         if (answer.status === 'approved' && answer.api_key) {
+          approvedKey = answer.api_key;
           api.configure({ apiBase: base, apiKey: answer.api_key });
           storeCredentials(base, answer.api_key);
           // Signed in from here on, even if the balance cannot be read right
@@ -1258,7 +1289,10 @@ function registerIpc() {
       }
       throw new Error('The sign-in request expired. Try again.');
     } catch (err) {
-      api.configure({ apiBase: previous.apiBase, apiKey: previous.apiKey });
+      // Back to what was there, unless a key was saved while this one waited
+      // (pasted in Settings): that one is on disk, and stays.
+      const now = api.snapshot().apiKey;
+      if (now === previous.apiKey || now === approvedKey) api.configure({ apiBase: previous.apiBase, apiKey: previous.apiKey });
       throw err;
     } finally {
       if (signIn === attempt) signIn = null;
@@ -1266,7 +1300,9 @@ function registerIpc() {
   });
 
   handle('auth:cancel', () => {
-    if (signIn) signIn.cancelled = true;
+    if (!signIn) return false;
+    signIn.cancelled = true;
+    if (signIn.wake) signIn.wake();
     return true;
   });
 
@@ -1293,9 +1329,13 @@ function registerIpc() {
 
   handle('files:uploadPath', async ({ path: file, sessionId } = {}) => {
     if (typeof file !== 'string' || !file) throw new Error('No file to upload.');
-    const info = describePath(file, null);
-    if (info.size > MAX_UPLOAD_BYTES) throw new Error(`${info.name} is larger than 20 MB.`);
-    return uploadBytes(await fs.promises.readFile(file), info.name, null, sessionId);
+    // Only its size and name are needed here: describePath would also decode
+    // a picture for a preview nobody asked for.
+    const name = path.basename(file);
+    const stat = await fs.promises.stat(file);
+    if (!stat.isFile()) throw new Error(`${name} is not a file.`);
+    if (stat.size > MAX_UPLOAD_BYTES) throw new Error(`${name} is larger than 20 MB.`);
+    return uploadBytes(await fs.promises.readFile(file), name, null, sessionId);
   });
 
   handle('files:uploadData', async ({ name, type, data, sessionId } = {}) => {
@@ -1519,6 +1559,9 @@ function registerIpc() {
     if (runs.has(sessionId)) throw new Error('Stop the run in this session first.');
     const result = await api.deleteSession(sessionId);
     backgroundJobs.stopAll(sessionId);
+    // Its cloud commands are gone with it: nothing left to ask about every minute.
+    cloudJobs.delete(sessionId);
+    for (const key of cloudTails.keys()) if (key.startsWith(`${sessionId} `)) cloudTails.delete(key);
     delete state.sessions[sessionId];
     saveState();
     return result;
@@ -1726,7 +1769,12 @@ function registerIpc() {
   // No folder means a cloud sandbox: the tools run on CodingFleet's servers
   // instead of this computer, and nothing here is read or changed.
   handle('session:create', async ({ cwd, model, label, sandboxSpec }) => {
-    if (cwd && !fs.existsSync(cwd)) throw new Error('Choose a folder that exists.');
+    if (cwd) {
+      // A folder, as session:setFolder asks: not a file, and not something that is not a path.
+      let isDir = false;
+      try { isDir = typeof cwd === 'string' && fs.statSync(cwd).isDirectory(); } catch { /* gone */ }
+      if (!isDir) throw new Error('Choose a folder that exists.');
+    }
     const session = await api.createSession({
       executor: cwd ? 'client' : 'sandbox',
       model: model || 'auto',
@@ -1772,12 +1820,9 @@ function registerIpc() {
     const local = state.sessions[sessionId] || {};
     local.model = model || 'auto';
     state.sessions[sessionId] = local;
+    if (local.cwd && !local.label) local.label = String(message).slice(0, 80);
     saveState();
     if (executor === 'client' && !local.cwd) throw new Error('Choose the folder this session works in first.');
-    if (local.cwd && !local.label) {
-      local.label = String(message).slice(0, 80);
-      saveState();
-    }
     // Local MCP tools run on this computer, so only a folder session has them.
     let localTools = new Map();
     let declared = [];
@@ -1817,7 +1862,14 @@ function registerIpc() {
     return true;
   });
 
-  handle('run:recover', async () => {
+  // One at a time: the window asks at boot, when the network is back and on
+  // every refresh, and two that overlap would attach two Runs to one server run.
+  let recovering = null;
+  handle('run:recover', () => {
+    if (!recovering) recovering = recoverRuns().finally(() => { recovering = null; });
+    return recovering;
+  });
+  async function recoverRuns() {
     const resumed = [];
     for (const saved of Object.values(recoveryStore.data.active)) {
       const sessionId = saved.sessionId;
@@ -1856,7 +1908,7 @@ function registerIpc() {
       }
     }
     return resumed;
-  });
+  }
 
   handle('run:cancel', async (sessionId) => {
     const run = runs.get(sessionId);
@@ -1932,7 +1984,6 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
     if (dir) send('app:openFolder', dir);
   });
   app.whenReady().then(() => {
-    // The window needs no device or browser permission.
     // The app's own page may use the microphone, for voice input. Nothing
     // else: no camera, no screen, no location, no other page.
     const ownPage = (url) => String(url || '').startsWith('file://');
@@ -1961,6 +2012,8 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
     computer.dispose();
     localMcp.stopAll();
     git.stopWatch();
+    // A `gh auth login` still waiting for its code must not outlive the app.
+    github.cancelSignIn();
   });
 
   // Leave the server turn available for recovery. Abort local children on exit;

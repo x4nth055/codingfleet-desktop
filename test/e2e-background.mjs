@@ -18,7 +18,7 @@ const { BackgroundJobs } = require('../src/core/background.js');
 
 const MODEL = process.env.E2E_MODEL || 'deepseek-v4-flash';
 // stop_after is offered from 1.2 on.
-api.configure({ client: 'desktop/1.2.0' });
+api.configure({ client: `desktop/${require('../package.json').version}` });
 const results = [];
 const check = (label, ok, detail = '') => {
   results.push(Boolean(ok));

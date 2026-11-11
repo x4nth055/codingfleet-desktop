@@ -3,7 +3,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('indicator', {
-  onState: (listener) => ipcRenderer.on('indicator:state', (_event, state) => listener(state || {})),
+  onState: (listener) => { ipcRenderer.on('indicator:state', (_event, state) => listener(state || {})); },
   stop: () => ipcRenderer.send('indicator:stop'),
   open: () => ipcRenderer.send('indicator:open'),
 });

@@ -83,6 +83,8 @@ function createUpdater({ log, send, enabled }) {
   function schedule() {
     clearInterval(timer);
     timer = null;
+    // A copy that does not update itself stays "unavailable", whatever the preference.
+    if (why()) return;
     if (!enabled()) {
       tell({ state: status.available ? status.state : 'off' });
       return;
