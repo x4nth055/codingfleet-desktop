@@ -181,6 +181,19 @@ app.whenReady().then(async () => {
     check(/text "Under cover"/.test(textOf(r)), `a page loaded under another window still takes keys: ${textOf(r)}`);
     cover.destroy();
 
+    // A minimized window draws nothing, whatever its pages are told: it comes
+    // back when the agent needs to click or type, not before.
+    win.minimize();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    r = await act({ action: 'navigate', url: `${base}/?minimized` });
+    r = await act({ action: 'read_page' });
+    check(win.isMinimized(), 'loading and reading a page leave a minimized window where it is');
+    const hidden = (/\[(ref_\d+)\] textbox "New todo"/.exec(textOf(r)) || [])[1];
+    r = await act({ action: 'type', ref: hidden, text: 'While minimized', submit: true });
+    check(!win.isMinimized(), 'the window comes back for a click or a key');
+    r = await act({ action: 'read_page' });
+    check(/text "While minimized"/.test(textOf(r)), `a page loaded in a minimized window takes keys: ${textOf(r)}`);
+
     const foreign = http.createServer((_req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end(ABOUT); });
     await new Promise((resolve) => foreign.listen(0, '127.0.0.2', resolve));
     const site = `127.0.0.2:${foreign.address().port}`;

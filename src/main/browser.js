@@ -20,6 +20,11 @@ const PARTITION = 'persist:cf-browser';
 const WORLD = 1717; // the isolated world the page reading runs in
 const LOAD_TIMEOUT_MS = 15000;
 const SETTLE_MS = 350;
+// After a minimized window is shown again, before its page is clicked.
+const RESTORE_SETTLE_MS = 600;
+// Actions that reach the page through what is drawn: clicks, keys, a picture.
+// Loading a page and reading it work in any window.
+const NEEDS_SCREEN = new Set(['click', 'type', 'press', 'scroll', 'screenshot']);
 const SHOT_MAX_SIDE = 1280;
 const SHOT_QUALITY = 80;
 const MAX_CONSOLE = 300;
@@ -662,6 +667,7 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}), par
         // app behind the window they work in, so the page counts as shown
         // while the agent uses it. (A minimized window still draws nothing.)
         awake(ensure().webContents, true);
+        if (NEEDS_SCREEN.has(String(args.action))) await unminimize();
         // Loading needs no size (and the pane shows only once a page is there).
         if (!['navigate', 'console'].includes(String(args.action))) await laidOut();
         return await run(sessionId, args, call);
@@ -677,6 +683,21 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}), par
     });
     queue = job.catch(() => {});
     return job;
+  }
+
+  // A minimized window draws nothing at all, whatever its pages are told, so
+  // a page loaded there takes no click or key, and no Chromium switch changes
+  // that. The window comes back instead, without taking the keyboard: it shows
+  // behind or beside what the person is working in, and they keep typing there.
+  async function unminimize() {
+    const win = getWindow();
+    if (!win || win.isDestroyed() || !win.isMinimized()) return;
+    win.showInactive();
+    // Where showInactive leaves a minimized window as it is.
+    if (win.isMinimized()) win.restore();
+    if (log && log.info) log.info('browser: the window was minimized; shown again for the agent\'s page');
+    // Time for the window to be back and the page to be drawn once.
+    await settle(RESTORE_SETTLE_MS);
   }
 
   // Whether the page runs as a shown one whatever the window's state.

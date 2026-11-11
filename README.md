@@ -199,6 +199,10 @@ staging server. **Let the agent use any site without asking** skips the per-site
 is less safe (a page can hold instructions meant for the agent), and typing into a site that
 is not on your list still asks every time.
 
+The agent can use the browser while the app is behind other windows. If the app is
+minimized when the agent needs to click or type in a page, the window comes back without
+taking the keyboard: a minimized window's page cannot be clicked.
+
 A page left behind a closed panel for two minutes is closed, to free its memory. It comes
 back where it was, back and forward included, when you open the panel or the agent uses the
 browser.
