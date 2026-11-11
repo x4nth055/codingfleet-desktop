@@ -260,6 +260,10 @@ async function reloadTranscript(id) {
     data = await call(cf.messages, id);
     if (S.running.has(id)) return; // this app started a run meanwhile
     S.transcripts.set(id, rebuiltTranscript(id, data));
+    // The whole history is here now: opening the session later must not load
+    // it a second time behind this one.
+    S.loaded.add(id);
+    loadFailures.delete(id);
   } catch {
     return; // keep what is shown; the next tick tries again
   } finally {
@@ -388,8 +392,8 @@ async function loadModelsOnce(quiet) {
   if (!$('settings').hidden && settingsTab === 'preferences' && !document.querySelector('.pref-menu:not([hidden])')) {
     renderPreferencesPane();
   }
-  if (S.current) applySessionModel();
-  renderComposer();
+  if (S.current) applySessionModel(); // draws the composer itself
+  else renderComposer();
 }
 
 const loadAll = () => Promise.allSettled([loadSessions(), loadModels(), loadCredits(), loadAccountSettings()]);

@@ -36,7 +36,7 @@
     const seconds = (until - now) / 1000;
     if (seconds <= 60) return 'Unlimited models are back in under a minute.';
     const minutes = Math.round(seconds / 60);
-    if (minutes < 60) return `Unlimited models are back in about ${minutes} minutes.`;
+    if (minutes < 60) return `Unlimited models are back in about ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`;
     const hours = seconds / 3600;
     const label = hours < 10 ? String(Number(hours.toFixed(1))) : String(Math.round(hours));
     return `Unlimited models are back in about ${label} ${label === '1' ? 'hour' : 'hours'}.`;

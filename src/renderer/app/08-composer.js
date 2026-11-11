@@ -72,6 +72,8 @@ function stopVoice(cancel = false) {
 }
 
 async function finishVoice() {
+  // The recorder can stop by itself (the microphone was unplugged).
+  clearInterval(voice.timer);
   const { chunks, recorder, cancelled } = voice;
   Object.assign(voice, { recorder: null, stream: null, chunks: [], state: cancelled ? 'idle' : 'transcribing' });
   renderMic();
@@ -141,12 +143,10 @@ function insertIntoPrompt(text) {
 //   model    the model's published price times an assumed number of steps
 // Above WARN_CREDITS the composer stops and offers cheaper models instead.
 // The arithmetic lives in cost.js, which has no state and its own tests.
-// Kept behind COST: app.js has its own fromHistory, for transcripts.
+// Kept behind COST: 09-navigation.js has its own fromHistory, for transcripts.
 const COST = window.CF_COST;
 const { WARN_CREDITS, ASSUMED_STEPS } = COST;
 const roundCredits = COST.round;
-
-const modelById = (id) => S.models.find((m) => m.id === id) || null;
 
 // What a model costs here: nothing when the plan covers it or it is free.
 function effectiveRate(model) {
@@ -183,7 +183,7 @@ function estimateRun({ sessionId, modelId, promptText }) {
     const past = historyEstimate(sessionId, null, contextTokensOf(sessionId));
     return past ? { known: true, ...past, model: null } : { known: false, basis: 'auto' };
   }
-  const model = modelById(modelId);
+  const model = findModel(modelId);
   if (!model) return { known: false, basis: 'unknown' };
   const contextNow = contextTokensOf(sessionId);
   if (effectiveRate(model) === 0) {
@@ -229,7 +229,7 @@ function updateCostHint() {
   pill.textContent = n < 1 ? '≈ <1 cr' : `≈ ${fmtNum(n)} cr`;
   pill.title = `${estimate.basis === 'history'
     ? `A rough estimate from this session's last ${estimate.runs === 1 ? 'run' : `${estimate.runs} runs`}`
-    : "A rough estimate from the model's price and a run of about 5 steps"}`
+    : `A rough estimate from the model's price and a run of about ${ASSUMED_STEPS} steps`}`
     + ', scaled to how long the conversation is now. The real cost depends on how much '
     + 'work the agent does.';
 }
@@ -407,8 +407,7 @@ function renderComposer() {
   );
 
   $('hint').textContent = running ? 'Enter to steer' : '';
-  updateCostHint();
-  updateSendButton();
+  updateSendButton(); // and the cost hint with it
   ensureGit();
   if (typeof ensureGithub === 'function') ensureGithub();
   renderBackground();
@@ -487,6 +486,8 @@ function ensureGit() {
   // arrives, rather than sitting there wrong while the answer travels.
   if (S.git) {
     S.git = null;
+    // No folder's count is held now: coming back to the last one asks again.
+    S.gitFor = '';
     S.gitDiffs.clear();
     renderChanges();
   }
@@ -575,7 +576,13 @@ function renderBackground() {
       stop.addEventListener('click', async () => {
         stop.disabled = true;
         stop.textContent = 'Stopping…';
-        try { await call(cf.stopBackground, { sessionId: S.current, id: job.id }); } catch (err) { showBanner(err.message); }
+        try {
+          await call(cf.stopBackground, { sessionId: S.current, id: job.id });
+        } catch (err) {
+          stop.disabled = false;
+          stop.textContent = 'Stop';
+          showBanner(err.message);
+        }
       });
       actions.append(stop);
       row.append(chevron(), text, actions);
@@ -964,8 +971,9 @@ async function sendMessage() {
   updateSendButton();
   let id = S.current;
   let started = false;
+  let created = false; // a session was made for this send
   let sentFiles = [];
-  const sendTarget = attachTarget().key;
+  let sendTarget = attachTarget().key;
   try {
     checkAttachments(sendTarget);
     if (!id) {
@@ -992,6 +1000,12 @@ async function sendMessage() {
       S.loaded.add(session.id);
       id = session.id;
       S.current = id;
+      // What was attached to the draft belongs to the session it became: if an
+      // upload fails now, the others can still be sent with the next try.
+      const createdTarget = attachTarget().key;
+      for (const item of S.attachments) if (item.target === sendTarget) item.target = createdTarget;
+      sendTarget = createdTarget;
+      created = true;
       if (session.agentsFile) {
         transcriptOf(id).push({
           type: 'note',
@@ -1017,10 +1031,7 @@ async function sendMessage() {
     S.running.set(id, { runId: null, started: Date.now(), turnStart: transcriptOf(id).length });
     started = true;
     const session = S.sessions.find((s) => s.id === id);
-    if (session) {
-      session.status = 'active';
-      session.last_used_at = nowIso();
-    }
+    if (session) session.last_used_at = nowIso();
     renderSidebar();
     renderMain();
     await call(cf.startRun, {
@@ -1039,6 +1050,10 @@ async function sendMessage() {
         S.attachments = sentFiles;
         renderAttachments();
       }
+      renderMain();
+    } else if (created) {
+      // The session exists although nothing was sent: show it, with what was typed.
+      renderSidebar();
       renderMain();
     }
     if (!prompt.value) {

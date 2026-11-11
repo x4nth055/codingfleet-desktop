@@ -151,7 +151,8 @@ function forgetMissingDraftSpec() {
 // The composer's button for a cloud session: "Cloud sandbox", or the spec.
 function cloudButtonLabel(session) {
   const specId = session ? session.sandbox_spec : chosenSpecId();
-  if (specId && !sbx.specs && !sbx.specsLoading && !sbx.unsupported) loadSpecs();
+  // Not after a failure: its redraw comes back here, and would ask again without end.
+  if (specId && !sbx.specs && !sbx.specsLoading && !sbx.unsupported && !sbx.specsError) loadSpecs();
   return SBX.cloudLabel(specId, sbx.specs);
 }
 
@@ -203,7 +204,7 @@ function cloudMenuItems(session, option) {
       items.push(option('box', 'Set up a sandbox image…', 'Choose the image, tools and env vars of cloud sessions',
         false, () => openSandboxSettings(true)));
     }
-    if (!sbx.specs && !sbx.specsLoading && !sbx.unsupported) loadSpecs();
+    if (!sbx.specs && !sbx.specsLoading && !sbx.unsupported && !sbx.specsError) loadSpecs();
     return items;
   }
   items.push(el('div', 'menu-group', 'Cloud sandbox'));
@@ -398,7 +399,13 @@ function specRow(pane, spec) {
   build.title = 'Build the image now, so the first sandbox does not wait for it';
   build.addEventListener('click', () => once(`build:${spec.id}`, pane, async () => {
     build.disabled = true;
-    const updated = await call(cf.buildSandboxSpec, spec.id);
+    let updated;
+    try {
+      updated = await call(cf.buildSandboxSpec, spec.id);
+    } catch (err) {
+      build.disabled = false; // refused: nothing redraws the row
+      throw err;
+    }
     replaceSpec(updated);
     paneStatus(pane, `Building "${spec.name}"…`);
     sbx.building.set(spec.id, 'building');
@@ -992,7 +999,8 @@ function openSpecEditor({ spec = null, preset = null } = {}) {
     } else if (form.image_source === 'snapshot') {
       const select = el('select', 'set-select sbx-input');
       const usable = (sbx.snapshots || []).filter((s) => !s.broken);
-      select.append(new Option(sbx.snapshots ? (usable.length ? 'Choose a snapshot' : 'No snapshot to use yet') : 'Loading snapshots…', ''));
+      select.append(new Option(sbx.snapshots ? (usable.length ? 'Choose a snapshot' : 'No snapshot to use yet')
+        : (sbx.snapshotsError || 'Loading snapshots…'), ''));
       for (const snapshot of usable) {
         select.append(new Option(`${snapshot.name} · ${snapshot.manual ? 'saved' : 'automatic'}`, snapshot.id));
       }
@@ -1002,7 +1010,8 @@ function openSpecEditor({ spec = null, preset = null } = {}) {
       select.value = form.snapshot || '';
       select.addEventListener('change', () => { form.snapshot = select.value; });
       body.append(field('Snapshot', select, 'Save a snapshot from a running sandbox in Settings → Cloud sandboxes → Running now.'));
-      if (!sbx.snapshots) loadSnapshots().then(() => { if (document.getElementById('specEditor')) draw(); });
+      // Once per failure: this draw is what a load ends with.
+      if (!sbx.snapshots && !sbx.snapshotsError && !sbx.unsupported) loadSnapshots().then(() => { if (document.getElementById('specEditor')) draw(); });
     }
 
     if (SBX.ESSENTIALS_SOURCES.includes(form.image_source)) {

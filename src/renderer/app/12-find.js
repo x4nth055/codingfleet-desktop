@@ -107,9 +107,13 @@ function runFind({ keepPlace = false } = {}) {
   if (!FIND.ranges.length) FIND.index = -1;
   else if (beforeTop != null) {
     let best = 0;
+    let nearest = Infinity;
     FIND.ranges.forEach((range, i) => {
-      if (Math.abs(range.getBoundingClientRect().top - beforeTop)
-        < Math.abs(FIND.ranges[best].getBoundingClientRect().top - beforeTop)) best = i;
+      const away = Math.abs(range.getBoundingClientRect().top - beforeTop);
+      if (away < nearest) {
+        nearest = away;
+        best = i;
+      }
     });
     FIND.index = best;
   } else {

@@ -80,7 +80,7 @@ function openShortcuts() {
   const done = () => {
     document.removeEventListener('keydown', onKey, true);
     overlay.remove();
-    $('prompt').focus();
+    if ($('settings').hidden) $('prompt').focus();
   };
   const onKey = (event) => {
     if (event.key === 'Escape' || (event.ctrlKey && event.key === '/')) {
@@ -130,7 +130,7 @@ function wireKeys() {
       if (!$('settings').hidden || document.querySelector('.confirm-overlay')) return;
       event.preventDefault();
       cycleSession(event.key === 'PageUp' || (event.key === 'Tab' && event.shiftKey) ? -1 : 1);
-    } else if (event.key === '/' && !event.shiftKey) {
+    } else if (event.key === '/') { // Shift is how some keyboards reach "/"
       event.preventDefault();
       openShortcuts();
     } else if (event.key.toLowerCase() === 'b' && !event.shiftKey) {

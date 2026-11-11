@@ -249,7 +249,17 @@ async function cancelFlow(pane, sub) {
   actions.append(el('div', 'bar-spacer'), keep, confirm);
   modal.append(actions);
   overlay.append(modal);
-  const close = () => overlay.remove();
+  // Esc closes this dialog, not Settings under it.
+  const onKey = (event) => {
+    if (event.key !== 'Escape') return;
+    event.stopPropagation();
+    close();
+  };
+  const close = () => {
+    document.removeEventListener('keydown', onKey, true);
+    overlay.remove();
+  };
+  document.addEventListener('keydown', onKey, true);
   keep.addEventListener('click', close);
   overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) close(); });
   document.body.append(overlay);

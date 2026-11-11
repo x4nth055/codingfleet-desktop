@@ -7,7 +7,7 @@
 // ── Tool calls, grouped ────────────────────────────────────────────────────
 // The words for tools and approvals live in lib/tool-words.js, where they are tested.
 const {
-  VERBS, GROUP_WORDS, alwaysAsked, sessionOnly, siteOfReason, reasonText, allowLabel, toolSummary, groupSummary,
+  alwaysAsked, sessionOnly, siteOfReason, reasonText, allowLabel, toolSummary, groupSummary,
 } = CF_TOOL_WORDS;
 
 const ACTIVE = ['queued', 'running', 'waiting'];

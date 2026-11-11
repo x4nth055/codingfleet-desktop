@@ -198,7 +198,8 @@ function catalogItem(key, info, saved, pane) {
   const saveToken = el('button', 'btn small', 'Save token');
   saveToken.addEventListener('click', async () => {
     const token = tokenInput.value.trim();
-    if (!token && info.authMode === 'required') {
+    // An empty box is not "remove": the saved token stays (Remove is its own button).
+    if (!token && (info.authMode === 'required' || (saved && saved.hasToken))) {
       paneStatus(pane, 'Paste the token first.', 'error');
       return;
     }

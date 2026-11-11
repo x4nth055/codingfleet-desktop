@@ -17,10 +17,6 @@
 .app.with-term-right {
   grid-template-columns: var(--sidebar-width, 272px) minmax(0, 1fr) var(--term-width, 460px);
 }
-.app.with-panel.with-term-right {
-  grid-template-columns: var(--sidebar-width, 272px) minmax(0, 1fr)
-    var(--agents-panel-width, minmax(340px, 30vw)) var(--term-width, 460px);
-}
 /* With the sub-agents panel: the right column is split, agents above. */
 .app.with-panel.with-term-right {
   grid-template-columns: var(--sidebar-width, 272px) minmax(0, 1fr) var(--agents-panel-width, minmax(340px, 30vw));

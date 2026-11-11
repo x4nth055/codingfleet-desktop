@@ -45,6 +45,7 @@ function wire() {
   $('scrollDown').addEventListener('click', scrollToBottom);
   $('transcript').addEventListener('scroll', onTranscriptScroll);
   $('browserSignIn').addEventListener('click', signInWithBrowser);
+  $('browserSignInCancel').addEventListener('click', cancelBrowserSignIn);
   $('modelButton').addEventListener('click', () => ($('modelMenu').hidden ? openModelMenu() : closeMenus()));
   $('permButton').addEventListener('click', () => ($('permMenu').hidden ? openPermMenu() : closeMenus()));
   $('effortButton').addEventListener('click', () => ($('effortMenu').hidden ? openEffortMenu() : closeMenus()));
@@ -65,7 +66,6 @@ function wire() {
   wirePrefsMenu();
   $('settingsCancel').addEventListener('click', closeSettings);
   $('settingsSave').addEventListener('click', saveSettings);
-  $('keyRemove').addEventListener('click', removeKey);
   $('keyShow').addEventListener('click', () => {
     const input = $('keyInput');
     input.type = input.type === 'password' ? 'text' : 'password';
@@ -79,7 +79,7 @@ function wire() {
   });
 
   document.addEventListener('mousedown', (event) => {
-    if (!event.target.closest('.menu, .session-more, .pref-toggle, #modelButton, #effortButton, #permButton, #attachButton, #folderButton, #changesPill, #githubPill')) closeMenus();
+    if (!event.target.closest('.menu, .session-more, .pref-toggle, #modelButton, #effortButton, #permButton, #attachButton, #folderButton, #changesPill, #githubPill, .term-shell-toggle')) closeMenus();
   });
   document.addEventListener('click', (event) => {
     const img = event.target.closest('.markdown img, .tool-image');
@@ -163,6 +163,7 @@ function wire() {
     ensureModels();
     loadCredits({ quiet: true });
     loadSessions({ quiet: true });
+    if (sbx.specsError) loadSpecs(true);
     call(cf.recoverRuns).catch(() => {});
   });
   scheduleLiveRefresh();
@@ -304,9 +305,6 @@ async function boot() {
     openSettings(true);
     return;
   }
-  // A crash report outranks the update question; the question waits a start.
-  if (S.init.crash) offerCrashReport(S.init.crash);
-  else askAboutUpdates();
   await loadAll();
   // What to open: a session asked for, a folder named on the command line,
   // or else the session that was open when the app last closed.
@@ -314,6 +312,10 @@ async function boot() {
   if (S.init.openSession) await selectSession(S.init.openSession);
   else if (S.init.openFolder) newSessionIn(S.init.openFolder);
   else if (restore && S.sessions.some((s) => s.id === restore)) await selectSession(restore);
+  // Asked once the session is open: opening one clears the banner they sit in.
+  // A crash report outranks the update question; the question waits a start.
+  if (S.init.crash) offerCrashReport(S.init.crash);
+  else askAboutUpdates();
   await call(cf.recoverRuns);
   if (S.init.shotScroll === 'top') {
     $('transcript').scrollTop = 0;

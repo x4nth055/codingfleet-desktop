@@ -16,6 +16,7 @@ function openSettings(required = false, tab = lastSettingsTab()) {
   // Without a key there is only the account to set up.
   $('settingsTabs').hidden = required || !settings.hasKey;
   localChecked = false;
+  signInsLoaded = false;
   billingData = null; // billing changes on the website too: read it again
   invoicesOpen.clear();
   for (const pane of document.querySelectorAll('.settings-pane')) pane.statusNote = null;
@@ -35,8 +36,6 @@ function openSettings(required = false, tab = lastSettingsTab()) {
   const link = $('keyLink');
   link.href = `${originOf(settings.apiBase)}/agent-api/`;
   link.textContent = `${originOf(settings.apiBase).replace(/^https?:\/\//, '')}/agent-api`;
-  // Signed in: the card says so and has Sign out; the key field is for switching.
-  $('keyRemove').hidden = true;
   setSettingsStatus(settings.fromEnv
     ? 'An environment variable sets the key or the server. It overrides these settings when the app starts.'
     : '', 'info');
@@ -64,6 +63,18 @@ function resetAccountView() {
   S.current = null;
   // The 5-hour limit belonged to the old account.
   forgetPoolCap();
+  // So did its provider keys, its MCP sign-ins and its sandboxes.
+  byokKeys = null;
+  signIns.clear();
+  signInsLoaded = false;
+  remoteStatus.clear();
+  clearTimeout(sbx.pollTimer);
+  Object.assign(sbx, {
+    specs: null, pinned: null, specsError: '', unsupported: false, sandboxes: null, limits: null,
+    sandboxesError: '', snapshots: null, snapshotsError: '', config: null, configError: '',
+  });
+  sbx.building.clear();
+  sbx.openErrors.clear();
 }
 
 // The account the app works as has changed: forget what the old one loaded.
@@ -85,18 +96,31 @@ async function applyNewAccount(data) {
 // near this app. The main process waits for the approval on codingfleet.com.
 async function signInWithBrowser() {
   const button = $('browserSignIn');
+  const cancel = $('browserSignInCancel');
   const label = button.textContent;
   button.disabled = true;
   button.textContent = 'Waiting for your browser…';
+  // The wait lasts until the browser answers, up to ten minutes: a closed tab
+  // or a second thought needs a way out.
+  cancel.hidden = false;
+  cancel.disabled = false;
   setSettingsStatus('Approve this app in the browser, then come back.', 'info');
   const res = await cf.signIn({});
   button.disabled = false;
   button.textContent = label;
+  cancel.hidden = true;
   if (!res.ok) {
-    setSettingsStatus(res.error.message, 'error');
+    const cancelled = res.error.message === 'Sign-in cancelled.';
+    setSettingsStatus(cancelled ? 'Sign-in cancelled. Nothing was changed.' : res.error.message, cancelled ? 'info' : 'error');
     return;
   }
   await applyNewAccount(res.data);
+}
+
+// Stops waiting for the browser. The sign-in above ends with "cancelled".
+function cancelBrowserSignIn() {
+  $('browserSignInCancel').disabled = true;
+  cf.cancelSignIn();
 }
 
 async function saveSettings() {
@@ -109,15 +133,7 @@ async function saveSettings() {
     setSettingsStatus(res.error.message, 'error');
     return;
   }
-  resetAccountView();
-  S.settings = res.data.settings;
-  S.credits = res.data.credits;
-  settingsRequired = false;
-  $('settings').hidden = true;
-  renderAccount();
-  renderSidebar();
-  renderMain();
-  await loadAll();
+  await applyNewAccount(res.data);
 }
 
 // Who this app is signed in as, and a way to switch or sign out. Shown instead
@@ -838,7 +854,7 @@ function renderAppPrefs(body, pane = $('prefsPane')) {
   }));
   body.append(switchRow({
     title: 'Keep the computer awake while the agent works',
-    desc: 'Stops Windows from putting the computer to sleep on its own during a run, so you can walk '
+    desc: 'Stops the computer from going to sleep on its own during a run, so you can walk '
       + 'away. The screen still turns off. Closing the lid or choosing Sleep still sleeps it.',
     checked: S.init.state.keepAwake !== false,
     onChange: (on) => {

@@ -475,7 +475,8 @@ function renderTerminalPanel() {
     const add = el('div', 'term-add');
     add.append(
       terminalButton('plus', 'New terminal', () => newTerminal()),
-      terminalButton('caret', 'New terminal with another shell', (event) => openShellMenu(event.currentTarget)),
+      terminalButton('caret', 'New terminal with another shell', (event) => openShellMenu(event.currentTarget),
+        'icon-button term-shell-toggle'),
     );
     tabs.append(add);
   }

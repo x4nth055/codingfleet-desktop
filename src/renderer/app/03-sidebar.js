@@ -7,6 +7,9 @@
 // ── Sidebar ────────────────────────────────────────────────────────────────
 function renderSidebar() {
   const list = $('sessionList');
+  // A name being typed is not drawn again under the person typing it: the
+  // list would give the box its old text back. finishRename draws the list.
+  if (renaming && list.querySelector('.session-rename')) return;
   list.replaceChildren();
   if (!S.settings.hasKey) {
     list.append(el('div', 'sidebar-empty', 'Add your API key to see your sessions.'));

@@ -353,6 +353,23 @@ app.whenReady().then(async () => {
         })`);
         assert.equal(renaming.height, by.long.height, `${at}: renaming keeps the row ${by.long.height}px high`);
         checks++;
+
+        // The list is drawn again every minute and whenever a session moves:
+        // not under a name being typed.
+        const typed = await win.webContents.executeJavaScript(`new Promise((resolve) => {
+          startRename('long');
+          requestAnimationFrame(() => {
+            const input = document.querySelector('.session-rename');
+            input.value = 'typed so far';
+            renderSidebar();
+            const after = document.querySelector('.session-rename');
+            const kept = { same: after === input, value: after && after.value };
+            finishRename('long', '', false);
+            resolve({ ...kept, closed: !document.querySelector('.session-rename') });
+          });
+        })`);
+        assert.deepEqual(typed, { same: true, value: 'typed so far', closed: true }, `${at}: a redraw leaves a name being typed alone`);
+        checks++;
       }
     }
     await win.webContents.executeJavaScript(`(() => {
