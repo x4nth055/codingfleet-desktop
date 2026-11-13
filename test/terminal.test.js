@@ -91,6 +91,66 @@ test('there is a limit on open terminals', () => {
   assert.equal(terms.list().length, 0);
 });
 
+test('quitting waits until every shell is gone, and ends by force one that stays', async () => {
+  const alive = new Set([101, 102]);
+  const ended = [];
+  const { terms, spawned } = host({
+    running: (pid) => alive.has(pid),
+    end: (pid) => { ended.push(pid); alive.delete(pid); },
+  });
+  terms.create({});
+  terms.create({});
+  // The first shell goes a moment after its console closes; the second ignores that.
+  Object.assign(spawned[0], { pid: 101, kill() { setTimeout(() => alive.delete(101), 40); } });
+  Object.assign(spawned[1], { pid: 102, kill() {} });
+  let done = false;
+  const closing = terms.shutdown({ patience: 150, settle: 10 }).then(() => { done = true; });
+  await wait(90);
+  assert.equal(done, false, 'one shell is still running');
+  assert.deepEqual(ended, [], 'and it is given its time');
+  await closing;
+  assert.deepEqual(ended, [102]);
+  assert.equal(terms.count(), 0);
+});
+
+test('quitting with no terminal open, or with shells already gone, does not wait', async () => {
+  const { terms, spawned } = host({ running: () => false });
+  const started = Date.now();
+  await terms.shutdown();
+  terms.create({});
+  spawned[0].pid = 7;
+  await terms.shutdown({ settle: 0 });
+  assert.ok(Date.now() - started < 500);
+  assert.equal(spawned[0].killed, true);
+});
+
+test("node-pty's helper process is never started: an installed app would start itself", async () => {
+  let started = 0;
+  const { spawn, spawned } = fakePty();
+  const withAgent = (...args) => Object.assign(spawn(...args), {
+    _agent: { _getConsoleProcessList: () => { started++; return Promise.resolve([1, 2]); } },
+  });
+  const terms = new Terminals({ spawn: withAgent, shells: SHELLS, onData() {}, onExit() {} });
+  terms.create({});
+  assert.deepEqual(await spawned[0]._agent._getConsoleProcessList(), []);
+  assert.equal(started, 0);
+});
+
+test('on Windows, node-pty still has the helper this replaces, and a real shell is closed without it', { skip: process.platform !== 'win32' }, async () => {
+  const pty = require('node-pty');
+  const terms = new Terminals({ spawn: pty.spawn, shells: () => [{ id: 'cmd', name: 'cmd', file: 'cmd.exe', args: [] }], onData() {}, onExit() {} });
+  terms.create({});
+  const [term] = terms.terms.values();
+  const helper = term.pty._agent && term.pty._agent._getConsoleProcessList;
+  assert.equal(typeof helper, 'function', 'a newer node-pty lists processes another way: see withoutListHelper');
+  assert.doesNotMatch(String(helper), /fork/);
+  const pid = term.pty.pid;
+  assert.doesNotThrow(() => process.kill(pid, 0), 'the shell is running');
+  await wait(300); // node-pty acts on a kill only once the shell has printed
+  await terms.shutdown();
+  assert.throws(() => process.kill(pid, 0), 'the shell is gone when the wait is over');
+});
+
 test('this computer has at least one shell', () => {
   const shells = listShells();
   assert.ok(shells.length >= 1);

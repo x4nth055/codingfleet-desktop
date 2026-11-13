@@ -51,18 +51,53 @@ function listShells({ platform = process.platform, env = process.env } = {}) {
   return shells;
 }
 
+// On Windows node-pty ends a terminal by first listing the processes in its
+// console, and it gets that list by forking a helper script. The installed app
+// cannot run a script that way: it has no "run as Node" mode (electronFuses in
+// package.json), so the fork starts a second copy of the app instead — one per
+// terminal closed, and on the way out a copy that can outlive the app it came
+// from. The list is not needed: closing the console ends whatever is still
+// attached to it. So the helper is never started.
+function withoutListHelper(pty) {
+  const agent = pty && pty._agent;
+  if (agent && typeof agent._getConsoleProcessList === 'function') {
+    agent._getConsoleProcessList = () => Promise.resolve([]);
+  }
+  return pty;
+}
+
+function isRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitUntil(done, ms) {
+  const end = Date.now() + ms;
+  while (!done() && Date.now() < end) await sleep(20);
+  return done();
+}
+
 class Terminals {
   /**
    * @param {{ spawn: Function, env?: () => object, onData: (id: number, data: string) => void,
-   *           onExit: (id: number, code: number) => void, shells?: () => object[], home?: string }} o
+   *           onExit: (id: number, code: number) => void, shells?: () => object[], home?: string,
+   *           running?: (pid: number) => boolean, end?: (pid: number) => void }} o
    */
-  constructor({ spawn, env, onData, onExit, shells, home }) {
+  constructor({ spawn, env, onData, onExit, shells, home, running, end }) {
     this.spawn = spawn;
     this.env = env || (() => process.env);
     this.onData = onData;
     this.onExit = onExit;
     this.shells = shells || (() => listShells());
     this.home = home || os.homedir();
+    this.running = running || isRunning;
+    this.end = end || ((pid) => process.kill(pid, 'SIGKILL'));
     this.terms = new Map();
     this.nextId = 1;
   }
@@ -74,14 +109,14 @@ class Terminals {
     let dir = this.home;
     try { if (cwd && fs.statSync(cwd).isDirectory()) dir = cwd; } catch { /* the home folder, then */ }
     const env = { ...this.env(), TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'CodingFleet' };
-    const pty = this.spawn(shell.file, shell.args, {
+    const pty = withoutListHelper(this.spawn(shell.file, shell.args, {
       name: 'xterm-256color',
       cols: clampSize(cols, 80),
       rows: clampSize(rows, 24),
       cwd: dir,
       env,
       useConpty: true,
-    });
+    }));
     const id = this.nextId++;
     const term = { id, pty, shell: shell.name, shellId: shell.id, cwd: dir, kept: '', pending: '', timer: null, exited: null };
     this.terms.set(id, term);
@@ -129,6 +164,34 @@ class Terminals {
 
   killAll() {
     for (const id of [...this.terms.keys()]) this.kill(id);
+  }
+
+  count() {
+    return this.terms.size;
+  }
+
+  /**
+   * Close every terminal and wait until its shell is really gone, for an app
+   * that is about to quit. node-pty tells of a shell's end from a thread of its
+   * own, and it cannot bear that news arriving while the app is already being
+   * taken down: the whole app then dies in native code, leaving a crash dump
+   * and no error. A shell that ignores the closed console is ended by force.
+   * Resolves in a fraction of a second as a rule, and after `patience` twice
+   * over at worst.
+   */
+  async shutdown({ patience = 1000, settle = 100 } = {}) {
+    const pids = [...this.terms.values()].map((term) => term.pty.pid).filter((pid) => Number.isInteger(pid) && pid > 0);
+    this.killAll();
+    const alive = () => pids.filter((pid) => this.running(pid));
+    if (!await waitUntil(() => !alive().length, patience)) {
+      for (const pid of alive()) {
+        try { this.end(pid); } catch { /* gone in the meantime */ }
+      }
+      await waitUntil(() => !alive().length, patience);
+    }
+    // The news of each exit is on its way to this thread: let it land.
+    if (pids.length) await sleep(settle);
+    this.terms.clear();
   }
 
   view(term) {

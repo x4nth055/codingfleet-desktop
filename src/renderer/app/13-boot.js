@@ -276,6 +276,8 @@ function offerCrashReport(crash) {
   showBanner(`${what}${when}. Send a crash report? It holds the error and the app's recent log — `
     + 'never your messages, files or key.', [
     { label: 'Send report', run: async () => {
+      // The button goes at once: a second click would send a second report.
+      showBanner('Sending the report…');
       try {
         await call(cf.sendCrashReport);
         showBanner('Thank you. The report was sent.');

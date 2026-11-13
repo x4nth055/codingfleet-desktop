@@ -7,11 +7,15 @@
 // whole app died — the window asks whether to send a report: the error, the
 // app's version and platform, and the tail of its own log (see core/log.js,
 // which never holds messages, file contents or keys). Native crashes also
-// leave a minidump in the crash dumps folder, kept on this computer only.
+// leave a minidump in the crash dumps folder, kept on this computer only; the
+// report says what the dump is of (core/minidump.js), never what is in it.
 const { app, crashReporter } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { describeDump } = require('../core/minidump');
+
+const MAX_DESCRIBED = 3;
 
 // Before anything else runs: a crash during start-up still leaves a dump.
 function startNativeDumps() {
@@ -41,8 +45,10 @@ function createCrashes({ log }) {
   function record(kind, error) {
     const details = error instanceof Error
       ? { message: `${error.name}: ${error.message}`, stack: error.stack || '' }
-      : { message: String((error && error.message) || error || ''), stack: '' };
-    log.error(`crash (${kind})`, details.stack || details.message);
+      : { message: String((error && error.message) || error || ''), stack: String((error && error.stack) || '') };
+    // An error's stack starts with its message; what a dump says does not.
+    log.error(`crash (${kind})`, error instanceof Error ? details.stack || details.message
+      : [details.message, details.stack].filter(Boolean).join('\n'));
     if (read(marker())) return;
     write(marker(), {
       kind,
@@ -80,7 +86,12 @@ function createCrashes({ log }) {
   function pending() {
     const dumps = newDumps();
     if (dumps.length && !read(marker())) {
-      record('main', { message: `CodingFleet stopped unexpectedly (${dumps.length} crash dump${dumps.length === 1 ? '' : 's'} on this computer).` });
+      record('main', {
+        message: `CodingFleet stopped unexpectedly (${dumps.length} crash dump${dumps.length === 1 ? '' : 's'} on this computer).`,
+        // The dumps stay here. What goes in a report is which process died,
+        // on what exception and where in the code: the only lead there is.
+        stack: dumps.slice(-MAX_DESCRIBED).map(describeDump).filter(Boolean).join('\n'),
+      });
     }
     return read(marker());
   }

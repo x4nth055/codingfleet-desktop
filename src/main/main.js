@@ -1383,7 +1383,10 @@ function registerIpc() {
   handle('update:install', () => updates.install());
 
   // Crash reports: sent only when the user says so, from the window's banner.
-  handle('diagnostics:send', async () => {
+  // One at a time: a second click while the first is on its way would send
+  // the same crash again, since it is only forgotten once it has arrived.
+  let sendingCrash = null;
+  const sendCrash = async () => {
     const crash = crashes.pending();
     if (!crash) return { sent: false };
     const result = await api.crashReport({
@@ -1397,6 +1400,10 @@ function registerIpc() {
     crashes.clear();
     log.info(`crash report ${result && result.id} sent`);
     return { sent: true };
+  };
+  handle('diagnostics:send', () => {
+    if (!sendingCrash) sendingCrash = sendCrash().finally(() => { sendingCrash = null; });
+    return sendingCrash;
   });
   handle('diagnostics:dismiss', () => {
     crashes.clear();
@@ -2009,6 +2016,9 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
   });
   app.on('window-all-closed', () => app.quit());
   app.on('will-quit', () => {
+    // The last line of a start that ended as asked: a crash report whose log
+    // has it just before the next start is about a crash on the way out.
+    log.info('quitting');
     computer.dispose();
     localMcp.stopAll();
     git.stopWatch();
@@ -2018,10 +2028,25 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
 
   // Leave the server turn available for recovery. Abort local children on exit;
   // their persisted 'executing' state requires an explicit retry decision.
-  app.on('before-quit', () => {
+  let closingShells = false;
+  app.on('before-quit', (event) => {
     for (const run of runs.values()) run.suspend();
     // A dev server the agent started must not outlive the app that started it.
     backgroundJobs.stopAll();
-    if (terminals) terminals.killAll();
+    // The terminal panel's shells go first, and the quit waits for them: one
+    // that ends while the app is being taken down crashes it (terminal.js).
+    if (closingShells) {
+      event.preventDefault();
+      return;
+    }
+    if (!terminals || !terminals.count()) return;
+    event.preventDefault();
+    closingShells = true;
+    const windowOpen = Boolean(win && !win.isDestroyed());
+    terminals.shutdown().catch((err) => log.warn('closing the terminals', err)).then(() => {
+      closingShells = false;
+      // Started again during the wait, the app has a window once more: it stays.
+      if (windowOpen || !win || win.isDestroyed()) app.quit();
+    });
   });
 }
