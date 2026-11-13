@@ -211,7 +211,7 @@ function updateText(status) {
 
 function onUpdateStatus(status) {
   updateState = status;
-  // macOS: the app cannot install an update itself, so it points to the download.
+  // A Mac app without a Developer ID signature cannot install an update itself, so it points to the download.
   if (status.state === 'available' && status.manual && updateOffered !== status.version) {
     updateOffered = status.version;
     showBanner(`CodingFleet ${status.version} is out.`, [

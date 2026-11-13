@@ -2,10 +2,19 @@
 # release, which is also the auto-update feed. Start it by pushing a tag that
 # matches package.json:  git tag v1.0.0 && git push origin v1.0.0
 #
-# Windows is signed through SignPath Foundation once its settings exist (see
-# .signpath/README.md); until then the installer is unsigned and Windows
-# shows a SmartScreen warning. macOS builds are unsigned: users open the app
-# once from System Settings > Privacy & Security, and it cannot update itself.
+# Signing is switched on by the repository's settings, not by this file:
+#
+#   Windows  Azure Artifact Signing (formerly Trusted Signing).
+#            Variables: AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT,
+#                       AZURE_SIGNING_PROFILE, AZURE_SIGNING_PUBLISHER
+#            Secrets:   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+#   macOS    An Apple "Developer ID Application" certificate, and notarization.
+#            Secrets:   MAC_CERTIFICATE_P12, MAC_CERTIFICATE_PASSWORD,
+#                       APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
+#
+# Without them the Windows installer is unsigned (a SmartScreen warning) and
+# the macOS app is ad-hoc signed: users open it once from System Settings >
+# Privacy & Security, and it cannot update itself.
 name: Release
 
 on:
@@ -15,7 +24,6 @@ on:
 
 permissions:
   contents: write
-  actions: read
 
 jobs:
   build:
@@ -43,93 +51,41 @@ jobs:
         run: |
           [ "$GITHUB_REF_NAME" = "v$APP_VERSION" ] || { echo "Tag $GITHUB_REF_NAME does not match package.json (v$APP_VERSION)"; exit 1; }
 
-      # ── Windows ─────────────────────────────────────────────────────────
-      # Without SignPath settings: an unsigned installer, published as it is.
-      - name: Windows, unsigned
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID == ''
+      # electron-builder signs the app, the uninstaller and the installer while
+      # it builds, so latest.yml and the blockmap describe the signed installer.
+      - name: Windows
+        if: runner.os == 'Windows'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The app registration that may sign with the certificate profile.
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          # The region's endpoint, e.g. https://eus.codesigning.azure.net
+          SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          # The certificate's subject name (CN), exactly: an installed copy
+          # accepts an update only when it is signed by this name.
+          SIGNING_PUBLISHER: ${{ vars.AZURE_SIGNING_PUBLISHER }}
         run: |
-          echo "::warning::No SignPath settings: the Windows installer is unsigned."
-          npx electron-builder --win nsis --publish always
-
-      # With SignPath (see .signpath/README.md): sign the app, build the
-      # installer around the signed app, sign the installer, then write the
-      # update metadata for the signed file and publish it.
-      # An installer build (not --dir): only it writes resources/app-update.yml,
-      # without which an installed copy cannot find its updates.
-      - name: Windows app, unpacked
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        run: npx electron-builder --win nsis --publish never
-      - name: Upload the app for signing
-        id: unsigned-app
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: unsigned-app
-          path: dist/win-unpacked
-      - name: Sign the app
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: signpath/github-action-submit-signing-request@v3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: app
-          github-artifact-id: ${{ steps.unsigned-app.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: dist/win-unpacked-signed
-          parameters: |
-            version: ${{ toJSON(env.APP_VERSION) }}
-      - name: Installer around the signed app
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        shell: bash
-        run: |
-          rm -rf dist/win-unpacked
-          mv dist/win-unpacked-signed dist/win-unpacked
-          test -f dist/win-unpacked/resources/app-update.yml
-          npx electron-builder --win nsis --prepackaged dist/win-unpacked --publish never
-      - name: Upload the installer for signing
-        id: unsigned-installer
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: unsigned-installer
-          path: dist/CodingFleet-Setup-${{ env.APP_VERSION }}.exe
-      - name: Sign the installer
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: signpath/github-action-submit-signing-request@v3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: installer
-          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: dist/signed
-          parameters: |
-            version: ${{ toJSON(env.APP_VERSION) }}
-      - name: Publish the signed installer
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          file="CodingFleet-Setup-${APP_VERSION}.exe"
-          mv "dist/signed/$file" "dist/$file"
-          # Signing changed the file: its checksum and blockmap are written again.
-          node scripts/installer-metadata.cjs "dist/$file"
-          tag="v${APP_VERSION}"
-          # The macOS and Linux jobs publish into the same release; whichever
-          # job is first creates it.
-          for attempt in 1 2 3; do
-            gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "$tag" --notes "CodingFleet $APP_VERSION" || true
-            gh release upload "$tag" "dist/$file" "dist/$file.blockmap" dist/latest.yml --clobber && break
-            sleep 10
-          done
+          args=(--win nsis --publish always)
+          if [ -z "$SIGNING_ACCOUNT" ]; then
+            unset AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET
+            echo "::warning::No Azure signing settings: the Windows installer is unsigned."
+          else
+            for name in SIGNING_ENDPOINT SIGNING_PROFILE SIGNING_PUBLISHER AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET; do
+              [ -n "${!name}" ] || { echo "::error::Windows signing is on (AZURE_SIGNING_ACCOUNT is set) but ${name#SIGNING_} is missing."; exit 1; }
+            done
+            args+=(
+              "-c.win.azureSignOptions.endpoint=$SIGNING_ENDPOINT"
+              "-c.win.azureSignOptions.codeSigningAccountName=$SIGNING_ACCOUNT"
+              "-c.win.azureSignOptions.certificateProfileName=$SIGNING_PROFILE"
+              "-c.win.azureSignOptions.publisherName=$SIGNING_PUBLISHER"
+            )
+          fi
+          npx electron-builder "${args[@]}"
 
       - name: macOS
         if: runner.os == 'macOS'
@@ -153,8 +109,16 @@ jobs:
             # only signed code, and an unsigned app there is reported "damaged".
             args+=(-c.mac.identity=-)
             echo "::warning::No Apple certificate: the macOS app is ad-hoc signed and cannot update itself."
-          elif [ -n "$APPLE_ID" ]; then
-            args+=(-c.mac.notarize=true)
+          else
+            # macOS installs an update only when the same developer signed it,
+            # so only a build signed here may update itself: the mark lands in
+            # the packaged package.json, where src/main/updater.js reads it.
+            args+=(-c.extraMetadata.macSigned=true)
+            if [ -n "$APPLE_ID" ]; then
+              args+=(-c.mac.notarize=true)
+            else
+              echo "::warning::No Apple ID: the macOS app is signed but not notarized, so Gatekeeper still warns."
+            fi
           fi
           npx electron-builder "${args[@]}"
 

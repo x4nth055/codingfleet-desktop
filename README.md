@@ -294,23 +294,20 @@ updates from these releases.
 
 ### Code signing
 
-- **Windows:** signed for free by SignPath Foundation (see `.signpath/`).
-- **macOS:** not signed by Apple, so the app cannot update itself. It tells you when a new
-  version is out.
+Signing is switched on by the repository's Actions settings. Until they exist, the builds
+are unsigned, as described under the download table.
+
+- **Windows:** [Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/).
+  Variables `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` and
+  `AZURE_SIGNING_PUBLISHER`; secrets `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and
+  `AZURE_CLIENT_SECRET`.
+- **macOS:** an Apple Developer ID certificate, and notarization. Secrets
+  `MAC_CERTIFICATE_P12`, `MAC_CERTIFICATE_PASSWORD`, `APPLE_ID`,
+  `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`. A signed build updates itself; an
+  unsigned one only tells you when a new version is out.
 - **Linux:** no signing needed.
 
----
-
-## Code signing policy
-
-Free code signing provided by [SignPath.io](https://signpath.io), certificate by
-[SignPath Foundation](https://signpath.org).
-
-- Committers and reviewers: [@x4nth055](https://github.com/x4nth055)
-- Approvers: [@x4nth055](https://github.com/x4nth055)
-
-Every signed file is built from this repository by GitHub Actions, and each release is
-approved before it is signed.
+Every signed file is built from this repository by GitHub Actions.
 
 ## Privacy
 

@@ -12,9 +12,11 @@
 // be reached (offline, no release yet, a private repository) is logged, never
 // shown as an error.
 //
-// macOS installs only an update signed by the same Apple developer, and this
-// app is not signed for macOS. There the updater only finds out that a new
-// version exists, and the window offers the download page instead.
+// macOS installs only an update signed by the same Apple developer. The release
+// workflow marks a build it signed with a Developer ID ("macSigned" in the
+// packaged package.json), and that build updates itself like the others. A
+// build without the mark is ad-hoc signed: there the updater only finds out
+// that a new version exists, and the window offers the download page instead.
 const { app, shell } = require('electron');
 
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -28,7 +30,7 @@ const RELEASES_URL = feed.owner && feed.repo
 function createUpdater({ log, send, enabled }) {
   let updater = null;
   let timer = null;
-  const manualOnly = process.platform === 'darwin';
+  const manualOnly = process.platform === 'darwin' && pkg.macSigned !== true;
   let status = { state: 'idle', version: null, percent: null, available: false, manual: manualOnly };
 
   const tell = (next) => {
@@ -102,7 +104,7 @@ function createUpdater({ log, send, enabled }) {
     return status;
   }
 
-  /** Download a version found while automatic updates were off; on macOS, open the download page. */
+  /** Download a version found while automatic updates were off; an ad-hoc signed Mac app opens the download page. */
   function download() {
     if (manualOnly) {
       shell.openExternal(RELEASES_URL);
