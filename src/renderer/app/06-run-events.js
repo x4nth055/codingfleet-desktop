@@ -128,7 +128,8 @@ function onRunEvent(payload) {
       }, MOVE_AFTER_MS + 50);
       break;
     case 'client.tool_denied':
-      updateTool(sessionId, data.id, { status: 'denied' });
+      // unanswered: nobody answered the approval in time, so it was skipped and the agent went on.
+      updateTool(sessionId, data.id, { status: 'denied', unanswered: Boolean(data.unanswered) });
       break;
     // The picture take_screenshot just took, so the step shows what the agent saw.
     case 'client.tool_image':
@@ -191,8 +192,8 @@ function onRunEvent(payload) {
         const remember = (items) => {
           for (const item of items) {
             for (const tool of item.tools || []) {
-              const { status, reason, image, imageTitle } = tool;
-              run.replayTools.set(tool.id, { status, reason, image, imageTitle });
+              const { status, reason, image, imageTitle, unanswered } = tool;
+              run.replayTools.set(tool.id, { status, reason, image, imageTitle, unanswered });
             }
           }
         };

@@ -294,7 +294,7 @@ async function boot() {
   document.body.classList.add(`platform-${S.init.platform}`);
   S.settings = S.init.settings;
   S.model = newSessionModel();
-  S.permission = S.init.state.permissionMode || 'ask';
+  S.permission = S.init.state.permissionMode || 'auto';
   S.draftCwd = S.init.state.lastCwd || null;
   wire();
   restoreDraft();

@@ -134,7 +134,7 @@ function toolMeta(tool) {
     return meta;
   }
   if (tool.status === 'waiting') meta.textContent = 'Needs approval';
-  else if (tool.status === 'denied') meta.textContent = 'Declined';
+  else if (tool.status === 'denied') meta.textContent = tool.unanswered ? 'Not answered' : 'Declined';
   else if (tool.status === 'cancelled') meta.textContent = 'Cancelled';
   else if (tool.name === 'fs_edit' && tool.status !== 'failed') {
     meta.append(el('span', 'add', `+${lineCount(args.new)}`), ' ', el('span', 'del', `−${lineCount(args.old)}`));

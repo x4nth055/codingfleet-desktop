@@ -180,7 +180,8 @@ class Run {
   async handle(call) {
     let result;
     // How the call was let through, for the usage dashboard: 'auto' (no
-    // question), 'allowed' or 'denied' (the user answered one).
+    // question), 'allowed' or 'denied' (the user answered one), or
+    // 'unanswered' (nobody did in time; a server that does not know it ignores it).
     let approval = null;
     try {
       const saved = this.journal?.call(call.id);
@@ -201,8 +202,14 @@ class Run {
           const answer = retryApproved ? 'allow' : this.approve(call);
           const asked = typeof answer?.then === 'function';
           const decision = await Promise.race([answer, this.streamDone.then(() => 'deny')]);
-          if (!retryApproved) approval = decision === 'allow' ? (asked ? 'allowed' : 'auto') : (asked ? 'denied' : null);
-          if (decision === 'allow') {
+          // { unanswered, output }: nobody answered the approval in time (main.js approve).
+          const unanswered = Boolean(decision && typeof decision === 'object' && decision.unanswered);
+          if (unanswered) approval = 'unanswered';
+          else if (!retryApproved) approval = decision === 'allow' ? (asked ? 'allowed' : 'auto') : (asked ? 'denied' : null);
+          if (unanswered) {
+            this.emit('client.tool_denied', { id: call.id, unanswered: true, minutes: decision.minutes });
+            result = { output: String(decision.output || 'Not run: nobody answered the approval in time.'), is_error: true };
+          } else if (decision === 'allow') {
             this.emit('client.tool_running', { id: call.id });
             this.journal?.setCall(call.id, { state: 'executing' });
             const local = this.localTools.get(call.name);

@@ -321,6 +321,30 @@ test('failed result uploads retain exactly the same output until accepted', asyn
   } finally { stub.restore(); }
 });
 
+test('an approval nobody answered is not run, and the agent gets the reason as its result', async () => {
+  const stub = stubbedApi(events([]));
+  const seen = [];
+  const approvals = [];
+  try {
+    api.toolResult = async (_run, callId, output, isError, _signal, approval) => {
+      stub.posted.push({ callId, output, isError });
+      approvals.push(approval);
+    };
+    const output = "Not run: this needed the user's approval (it runs a command) and nobody answered within 10 minutes; they may be away.";
+    const run = new Run({
+      sessionId: 'S', cwd: process.cwd(),
+      approve: () => Promise.resolve({ unanswered: true, minutes: 10, output }),
+      onEvent: (event, data) => seen.push({ event, data }),
+    });
+    await run.handle({ id: 'C', name: 'run_command', arguments: { command: 'echo should-not-run' } });
+    assert.deepEqual(stub.posted, [{ callId: 'C', output, isError: true }]);
+    assert.deepEqual(approvals, ['unanswered']);
+    assert.ok(!seen.some((x) => x.event === 'client.tool_running'));
+    const denied = seen.find((x) => x.event === 'client.tool_denied');
+    assert.deepEqual(denied.data, { id: 'C', unanswered: true, minutes: 10 });
+  } finally { stub.restore(); }
+});
+
 test('a permanent upload rejection is surfaced once without retrying the tool', async () => {
   const stub = stubbedApi(events([]));
   const seen = [];

@@ -30,6 +30,7 @@ const config = require('../core/config');
 const git = require('./git');
 const github = require('./github');
 const guard = require('../core/guard');
+const { createApprovalClock, unansweredOutput } = require('../core/approval-clock');
 const tools = require('../core/tools');
 const { LocalMcp } = require('../core/mcp');
 const mcpOAuth = require('../core/mcp-oauth');
@@ -100,7 +101,7 @@ const PERMISSION_OVERRIDE = flag('shot-permission');
 // ---------------------------------------------------------------------------
 // Local state: the folder each session works in, and a few preferences.
 // ---------------------------------------------------------------------------
-let state = { sessions: {}, lastCwd: null, model: 'auto', permissionMode: 'ask', computerUse: false };
+let state = { sessions: {}, lastCwd: null, model: 'auto', permissionMode: 'auto', computerUse: false };
 // Capabilities the user may add to new sessions, on top of the ones every
 // session has (code execution, web access, sub-agents).
 const OPTIONAL_CAPABILITIES = ['image_generation', 'memory'];
@@ -612,7 +613,9 @@ function rememberUndo(sessionId, run) {
 }
 
 let signIn = null;            // the browser sign-in waiting for approval, if any
-const approvals = new Map();  // tool call id -> { resolve, sessionId, reason }
+const approvals = new Map();  // tool call id -> { resolve, sessionId, reason, clock? }
+// An approval nobody answers gives up after 10, then 5, 3 and 1 minutes (core/approval-clock.js).
+const approvalClock = createApprovalClock();
 
 // "Allow all ... this session" is kept per session and per REASON, not per tool
 // name: a person who allowed file changes means fs_write, fs_edit and a script
@@ -942,10 +945,21 @@ function approve(sessionId, cwd, call, localTools) {
   if (!guard.mustAsk(reason, { auto, allowedThisSession: allowedReasons(sessionId).has(reason) })) return 'allow';
   return new Promise((answer) => {
     const resolve = (decision) => {
+      entry.clock.stop();
       if (cli && decision !== 'allow') codingAgents.declined(sessionId, call, cwd);
       answer(decision);
     };
-    approvals.set(call.id, { resolve, sessionId, reason });
+    const entry = { resolve, sessionId, reason };
+    // Nobody answered in time: the call is not run, and the agent is told so
+    // and goes on with the rest of the work.
+    entry.clock = approvalClock.start(sessionId, (minutes) => {
+      if (approvals.get(call.id) !== entry) return;
+      approvals.delete(call.id);
+      syncTaskbar();
+      computer.approvalAnswered(sessionId);
+      answer({ unanswered: true, minutes, output: unansweredOutput(reason, minutes) });
+    });
+    approvals.set(call.id, entry);
     syncTaskbar();
     send('run:event', { sessionId, event: 'client.approval', data: { id: call.id, reason } });
     notify(sessionId, `Waiting for your approval: the agent ${reason}.`);
@@ -972,7 +986,7 @@ function logRunEvent(sessionId, event, data) {
   else if (event === 'run.ended') log.info(`run ${data.run_id} ended: ${data.reason}${data.error ? ` (${data.error})` : ''}`);
   else if (event === 'tool.call') log.info(`tool ${data.name} ${data.id}${data.executor === 'client' ? ' on this computer' : ''}`);
   else if (event === 'tool.result') log.info(`tool ${data.name} ${data.id} ${data.ok ? 'ok' : 'failed'}`);
-  else if (event === 'client.tool_denied') log.info(`tool ${data.id} declined`);
+  else if (event === 'client.tool_denied') log.info(`tool ${data.id} ${data.unanswered ? 'not answered, skipped' : 'declined'}`);
   else if (event === 'client.reconnecting') log.warn(`session ${sessionId}: stream dropped, reattaching`);
   else if (event === 'client.error') log.error(`session ${sessionId}: ${data.message} (status ${data.status}, ${data.code})`);
   else if (event === 'client.finished') log.info(`session ${sessionId} run finished: ${data.reason}`);
@@ -1024,7 +1038,9 @@ function runInBackground(sessionId, run, body) {
     computer.endRun(sessionId);
     stayAwake();
     for (const [callId, waiting] of approvals) {
-      if (waiting.sessionId === sessionId) approvals.delete(callId);
+      if (waiting.sessionId !== sessionId) continue;
+      if (waiting.clock) waiting.clock.stop();
+      approvals.delete(callId);
     }
     syncTaskbar();
   });
@@ -1824,6 +1840,8 @@ function registerIpc() {
   handle('run:start', async ({ sessionId, message, model, executor, files }) => {
     if (runs.has(sessionId)) throw new Error('This session already has a run going.');
     if (recoveryStore.active(sessionId)) throw new Error('Recover the previous run in this session before starting another.');
+    // The user just wrote: approvals in this run wait the full time again.
+    approvalClock.present(sessionId);
     const local = state.sessions[sessionId] || {};
     local.model = model || 'auto';
     state.sessions[sessionId] = local;
@@ -1951,6 +1969,8 @@ function registerIpc() {
     if (!waiting) return false;
     approvals.delete(callId);
     syncTaskbar();
+    // Someone answered: the next approval in this session waits the full time again.
+    approvalClock.present(waiting.sessionId);
     // A destructive command is never allowed for a whole session, whatever the window sends.
     if (decision === 'allow-session' && !guard.alwaysAsk(waiting.reason)) {
       rememberAllow(waiting.sessionId, waiting.reason);
