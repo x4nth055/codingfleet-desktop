@@ -21,7 +21,37 @@ const moved = [];
 // Answers the window gave to approvals (test/subagent-approval.cjs).
 const decided = [];
 
+// Project memory, as the main process keeps and answers it
+// (test/project-memory-prefs.cjs).
+const memory = { enabled: true, location: 'app', customDir: '' };
+const memoryCalls = [];
+const openedFolders = [];
+const memoryView = () => {
+  const dir = memory.location === 'project' ? 'C:/workspace/webshop/.codingfleet/memory'
+    : memory.location === 'custom' ? `${memory.customDir}/webshop-1a2b3c4d`
+      : 'C:/Users/me/AppData/Roaming/CodingFleet/projects/webshop-1a2b3c4d/memory';
+  return {
+    settings: { ...memory },
+    current: memory.enabled ? { cwd: 'C:/workspace/webshop', dir, entries: [
+      { name: 'deploy', file: 'deploy.md', description: 'How a release is made' },
+      { name: 'test-commands', file: 'test-commands.md', description: 'How to run the tests' },
+    ] } : null,
+    projects: memory.enabled ? [{ cwd: 'C:/workspace/webshop', dir, entries: 2 }] : [],
+  };
+};
+
 contextBridge.exposeInMainWorld('cf', {
+  memory: async () => ({ ok: true, data: memoryView() }),
+  setMemory: async (patch) => {
+    memoryCalls.push(patch);
+    const moved = 'location' in patch && patch.location !== memory.location ? 2 : 0;
+    for (const key of ['enabled', 'location', 'customDir']) if (key in patch) memory[key] = patch[key];
+    return { ok: true, data: { ...memoryView(), moved } };
+  },
+  memoryCalls: async () => [...memoryCalls],
+  pickMemoryFolder: async () => ({ ok: true, data: 'D:/notes' }),
+  openFolder: async (dir) => { openedFolders.push(dir); return { ok: true, data: true }; },
+  openedFolders: async () => [...openedFolders],
   moveToBackground: async ({ callId }) => { moved.push(callId); return { ok: true, data: true }; },
   movedCalls: async () => [...moved],
   decide: async ({ callId, decision }) => { decided.push({ callId, decision }); return { ok: true, data: true }; },

@@ -694,6 +694,89 @@ function renderPreferencesPane() {
   applyStatus(pane);
 }
 
+// Project memory: the notes the agent keeps for each project folder, as files
+// on this computer (main: memory:get and memory:set; core/project-memory.js).
+function renderProjectMemory(body, pane) {
+  const box = el('div', 'memory-prefs');
+  body.append(box);
+  const ask = () => ({ sessionId: S.current || undefined });
+
+  const draw = (view) => {
+    const { settings } = view;
+    box.replaceChildren(switchRow({
+      title: 'Remember each project',
+      desc: 'The agent keeps notes about each project folder — how to build and test it, decisions, known '
+        + 'problems — and reads them in later sessions there. The notes are Markdown files on this computer. '
+        + 'Applies to new sessions.',
+      checked: settings.enabled,
+      onChange: (on) => change({ enabled: on }),
+    }));
+    if (!settings.enabled) return;
+
+    const row = el('div', 'set-row stack');
+    const text = el('div', 'set-text');
+    text.append(el('div', 'set-title', 'Where the notes are kept'),
+      el('div', 'set-desc', 'A change moves the notes of every project to the new place. '
+        + 'A session that is open now keeps the old place until you start a new one.'));
+    const select = el('select', 'set-select');
+    const option = (value, label) => {
+      const item = el('option', null, label);
+      item.value = value;
+      select.append(item);
+    };
+    option('app', `In CodingFleet's own data folder (default)`);
+    option('project', 'In each project folder: .codingfleet/memory, kept out of git');
+    if (settings.customDir) option('custom', `In ${settings.customDir}`);
+    option('pick', settings.customDir ? 'In another folder…' : 'In a folder you choose…');
+    select.value = settings.location;
+    select.addEventListener('change', async () => {
+      if (select.value !== 'pick') {
+        change({ location: select.value });
+        return;
+      }
+      let dir = null;
+      try { dir = await call(cf.pickMemoryFolder); } catch (err) { paneStatus(pane, err.message, 'error'); }
+      if (dir) change({ location: 'custom', customDir: dir });
+      else select.value = settings.location;
+    });
+    row.append(text, select);
+    box.append(row);
+
+    const where = view.current;
+    const info = el('div', 'set-row static');
+    const infoText = el('div', 'set-text');
+    const count = (n) => `${n} ${n === 1 ? 'entry' : 'entries'}`;
+    if (where) {
+      infoText.append(el('div', 'set-title', `This project: ${count(where.entries.length)}`),
+        el('div', 'set-desc', where.dir));
+    } else {
+      const total = view.projects.reduce((sum, project) => sum + project.entries, 0);
+      infoText.append(el('div', 'set-title', `${view.projects.length} ${view.projects.length === 1 ? 'project' : 'projects'}, ${count(total)}`),
+        el('div', 'set-desc', 'Open a session in a folder to see that project\'s notes here.'));
+    }
+    info.append(infoText);
+    if (where) {
+      const open = el('button', 'btn small', 'Open folder');
+      open.addEventListener('click', () => cf.openFolder(where.dir));
+      info.append(open);
+    }
+    box.append(info);
+  };
+
+  const load = () => call(cf.memory, ask()).then(draw, (err) => {
+    box.replaceChildren(el('div', 'set-desc bad', err.message));
+  });
+  const change = (patch) => call(cf.setMemory, { ...patch, ...ask() }).then((view) => {
+    draw(view);
+    paneStatus(pane, view.moved ? `Saved. ${view.moved} ${view.moved === 1 ? 'entry' : 'entries'} moved.`
+      : 'Saved. New sessions use this.', 'ok');
+  }, (err) => {
+    paneStatus(pane, err.message, 'error');
+    load();
+  });
+  load();
+}
+
 // New sessions and spending: the account's settings, the same on the web.
 function renderSessionPrefs(body) {
   const pane = $('prefsPane');
@@ -804,6 +887,9 @@ function renderSessionPrefs(body) {
     checked: caps.memory,
     onChange: (on) => setCapability('memory', on),
   }));
+
+  body.append(el('div', 'pane-section', 'Project memory'));
+  renderProjectMemory(body, pane);
 
   body.append(el('div', 'pane-section', 'Spending control'));
   const capRow = el('div', 'set-row');

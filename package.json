@@ -21,6 +21,7 @@
     "test:browser-pane": "electron test/browser-pane.cjs",
     "test:files": "electron test/file-links.cjs",
     "test:memory": "electron test/session-memory.cjs",
+    "test:project-memory": "electron test/project-memory-prefs.cjs",
     "test:browser-park": "electron test/browser-park.cjs",
     "e2e:memory": "node test/e2e-memory.mjs",
     "shot": "electron . --screenshot=shot.png",

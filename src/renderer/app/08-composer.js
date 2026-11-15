@@ -1012,6 +1012,12 @@ async function sendMessage() {
           text: `Following ${session.agentsFile} from this folder.`,
         });
       }
+      if (session.memoryEntries) {
+        transcriptOf(id).push({
+          type: 'note',
+          text: `Project memory: ${session.memoryEntries} ${session.memoryEntries === 1 ? 'entry' : 'entries'} from earlier sessions here.`,
+        });
+      }
     } else {
       const session = currentSession();
       if (session && session.executor === 'client' && !local(id).cwd) {

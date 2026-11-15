@@ -32,6 +32,7 @@ const github = require('./github');
 const guard = require('../core/guard');
 const { createApprovalClock, unansweredOutput } = require('../core/approval-clock');
 const tools = require('../core/tools');
+const projectMemory = require('../core/project-memory');
 const { LocalMcp } = require('../core/mcp');
 const mcpOAuth = require('../core/mcp-oauth');
 const { Run } = require('../core/runner');
@@ -124,6 +125,80 @@ function saveState() {
   const temporary = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify(state, null, 2));
   fs.renameSync(temporary, file);
+}
+
+// ---------------------------------------------------------------------------
+// Project memory (core/project-memory.js): a folder of Markdown files for each
+// project folder, which the agent reads and writes itself. Kept in this app's
+// data folder unless the user chose another place (Preferences).
+// ---------------------------------------------------------------------------
+function memorySettings() {
+  const saved = state.projectMemory || {};
+  const customDir = typeof saved.customDir === 'string' ? saved.customDir : '';
+  let location = projectMemory.LOCATIONS.includes(saved.location) ? saved.location : 'app';
+  if (location === 'custom' && !customDir) location = 'app';
+  return { enabled: saved.enabled !== false, location, customDir };
+}
+
+const memoryDirOf = (cwd, settings = memorySettings()) =>
+  projectMemory.memoryDir(cwd, { ...settings, appDir: app.getPath('userData') });
+
+// The folder and its index, made if they are not there. An in-project folder
+// is also kept out of git. Null when project memory is off or cannot be made:
+// a session then starts without it, as before.
+function prepareMemory(cwd, settings = memorySettings()) {
+  if (!settings.enabled || !cwd) return null;
+  const dir = memoryDirOf(cwd, settings);
+  try {
+    const index = projectMemory.ensure(dir);
+    if (settings.location === 'project') projectMemory.excludeFromGit(cwd);
+    return { dir, index };
+  } catch (err) {
+    log.warn(`project memory: could not prepare ${dir}: ${err.message}`);
+    return null;
+  }
+}
+
+// The project folders this app knows: each folder a session works in, once.
+function projectFolders() {
+  const seen = new Map();
+  for (const session of Object.values(state.sessions || {})) {
+    const cwd = session && session.cwd;
+    if (typeof cwd !== 'string' || !cwd) continue;
+    const key = process.platform === 'win32' ? path.resolve(cwd).toLowerCase() : path.resolve(cwd);
+    if (seen.has(key)) continue;
+    try { if (fs.statSync(cwd).isDirectory()) seen.set(key, cwd); } catch { /* the folder is gone */ }
+  }
+  return [...seen.values()];
+}
+
+// Every known project has its memory folder and index from the start, not
+// only from its next new session.
+function prepareAllMemory() {
+  const settings = memorySettings();
+  if (!settings.enabled) return;
+  for (const cwd of projectFolders()) prepareMemory(cwd, settings);
+}
+
+// The memory folders a session's file tools may use without approval: the one
+// its system message named, and the folder's current one.
+function memoryDirsFor(sessionId, cwd) {
+  const settings = memorySettings();
+  if (!settings.enabled || !cwd) return [];
+  return [(state.sessions[sessionId] || {}).memoryDir, memoryDirOf(cwd, settings)].filter(Boolean);
+}
+
+function memoryView({ sessionId, cwd } = {}) {
+  const settings = memorySettings();
+  const local = state.sessions[sessionIdOf(sessionId)] || {};
+  const folder = typeof cwd === 'string' && cwd ? cwd : local.cwd || null;
+  const describe = (dir) => ({ cwd: dir, dir: memoryDirOf(dir, settings), entries: projectMemory.listEntries(memoryDirOf(dir, settings)) });
+  return {
+    settings,
+    appDir: path.join(app.getPath('userData'), 'projects'),
+    current: folder && settings.enabled ? describe(folder) : null,
+    projects: settings.enabled ? projectFolders().map(describe).map(({ entries, ...rest }) => ({ ...rest, entries: entries.length })) : [],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -380,7 +455,7 @@ function projectInstructions(cwd) {
   return null;
 }
 
-function systemMessage(cwd) {
+function systemMessage(cwd, memory) {
   const os = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[process.platform] || process.platform;
   const shellNote = tools.SHELL.unix
     ? `${tools.SHELL.name}. Use Unix commands and forward slashes in paths.`
@@ -406,6 +481,8 @@ function systemMessage(cwd) {
       `--- end of ${project.name} ---`,
     );
   }
+  // What earlier sessions in this folder saved (core/project-memory.js).
+  if (memory) lines.push('', projectMemory.instructions(memory.dir, memory.index));
   return lines.join('\n');
 }
 
@@ -932,6 +1009,10 @@ function approve(sessionId, cwd, call, localTools) {
   if (localTools && localTools.has(call.name)) reason = 'uses a local MCP tool';
   else if (call.name === 'browser') reason = browser.approvalReason(call.arguments);
   else reason = tools.approvalReason(call.name, call.arguments, cwd);
+  // The agent's own notes: reading and writing .md files in the project's
+  // memory folder never waits, wherever that folder is.
+  if ((reason === 'changes files' || reason === 'reads outside the project folder')
+    && projectMemory.allows(call.name, call.arguments, cwd, memoryDirsFor(sessionId, cwd))) return 'allow';
   // A command that starts a coding CLI follows the user's choice for that CLI
   // (Settings > Coding agents), unless the guard has its own reason to ask:
   // judged from the reason found above, which also catches a secret the
@@ -1693,6 +1774,48 @@ function registerIpc() {
     return state;
   });
 
+  // Project memory: where it is kept, and what each project has.
+  handle('memory:get', (arg) => memoryView(arg || {}));
+
+  handle('memory:set', (patch) => {
+    patch = patch && typeof patch === 'object' ? patch : {};
+    const before = memorySettings();
+    const next = { ...before };
+    if ('enabled' in patch) next.enabled = patch.enabled !== false;
+    if ('location' in patch && projectMemory.LOCATIONS.includes(patch.location)) next.location = patch.location;
+    if ('customDir' in patch) {
+      let isDir = false;
+      try { isDir = typeof patch.customDir === 'string' && path.isAbsolute(patch.customDir) && fs.statSync(patch.customDir).isDirectory(); } catch { /* gone */ }
+      if (!isDir) throw new Error('Choose a folder that exists.');
+      next.customDir = patch.customDir;
+    }
+    if (next.location === 'custom' && !next.customDir) throw new Error('Choose a folder for the memory first.');
+    // The place changed: each project's memory moves with it.
+    let moved = 0;
+    if (next.enabled && (next.location !== before.location || next.customDir !== before.customDir)) {
+      for (const cwd of projectFolders()) {
+        try {
+          moved += projectMemory.moveMemory(memoryDirOf(cwd, before), memoryDirOf(cwd, next));
+        } catch (err) {
+          log.warn(`project memory: could not move the memory of ${cwd}: ${err.message}`);
+        }
+      }
+    }
+    state.projectMemory = next;
+    saveState();
+    prepareAllMemory();
+    return { ...memoryView(patch), moved };
+  });
+
+  handle('memory:pickFolder', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Choose where CodingFleet keeps project memory',
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: memorySettings().customDir || app.getPath('documents'),
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
   handle('dialog:pickFolder', async () => {
     const result = await dialog.showOpenDialog(win, {
       title: 'Choose the folder CodingFleet works in',
@@ -1798,10 +1921,11 @@ function registerIpc() {
       try { isDir = typeof cwd === 'string' && fs.statSync(cwd).isDirectory(); } catch { /* gone */ }
       if (!isDir) throw new Error('Choose a folder that exists.');
     }
+    const memory = cwd ? prepareMemory(cwd) : null;
     const session = await api.createSession({
       executor: cwd ? 'client' : 'sandbox',
       model: model || 'auto',
-      system_message: cwd ? systemMessage(cwd) : undefined,
+      system_message: cwd ? systemMessage(cwd, memory) : undefined,
       // parallel_agents: the agent may hand tasks to sub-agents. In a folder
       // session their coding tools run here too, through the same approvals.
       capabilities: { code_execution: true, web_access: true, parallel_agents: true, ...optionalCapabilities() },
@@ -1811,12 +1935,19 @@ function registerIpc() {
     });
     state.sessions[session.id] = {
       cwd: cwd || null, label: String(label || '').slice(0, 80), createdAt: Date.now(),
+      // The memory folder this session's system message names, kept because
+      // the user may move memory elsewhere while the session goes on.
+      ...(memory ? { memoryDir: memory.dir } : {}),
     };
     if (cwd) state.lastCwd = cwd;
     saveState();
     // So the window can say the project's own instructions are in use.
     const project = cwd ? projectInstructions(cwd) : null;
-    return { ...session, agentsFile: project ? project.name : null };
+    return {
+      ...session,
+      agentsFile: project ? project.name : null,
+      memoryEntries: memory ? projectMemory.entryFiles(memory.dir).length : null,
+    };
   });
 
   handle('session:setModel', ({ sessionId, model }) => {
@@ -2026,6 +2157,10 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
     log.info(`CodingFleet ${app.getVersion()} starting on ${process.platform} ${os.release()} `
       + `(${process.arch}), Electron ${process.versions.electron}`);
     loadState();
+    // After the window is up: this reads and writes a few small files per project.
+    setTimeout(() => {
+      try { prepareAllMemory(); } catch (err) { log.warn(`project memory: ${err.message}`); }
+    }, 3000);
     loadRecovery();
     loadCredentials();
     loadMcp();
