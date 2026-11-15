@@ -724,7 +724,8 @@ function renderProjectMemory(body, pane) {
       item.value = value;
       select.append(item);
     };
-    option('app', `In CodingFleet's own data folder (default)`);
+    // The real path: "CodingFleet's own data folder" read as if the notes went to our servers.
+    option('app', `In ${view.appDir} (default)`);
     option('project', 'In each project folder: .codingfleet/memory, kept out of git');
     if (settings.customDir) option('custom', `In ${settings.customDir}`);
     option('pick', settings.customDir ? 'In another folder…' : 'In a folder you choose…');

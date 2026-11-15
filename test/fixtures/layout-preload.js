@@ -32,6 +32,7 @@ const memoryView = () => {
       : 'C:/Users/me/AppData/Roaming/CodingFleet/projects/webshop-1a2b3c4d/memory';
   return {
     settings: { ...memory },
+    appDir: 'C:/Users/me/AppData/Roaming/CodingFleet/projects',
     current: memory.enabled ? { cwd: 'C:/workspace/webshop', dir, entries: [
       { name: 'deploy', file: 'deploy.md', description: 'How a release is made' },
       { name: 'test-commands', file: 'test-commands.md', description: 'How to run the tests' },
