@@ -213,3 +213,27 @@ test('destructive commands ask every time; secrets ask even in auto but may be a
   assert.equal(ask('runs a command', false, false), true);
   assert.equal(ask(null, false, false), false);
 });
+
+test('a picture of the screen is asked about in Auto-approve, until allowed for the session', () => {
+  assert.equal(guard.mustAsk(guard.SCREENSHOT, { auto: true, allowedThisSession: false }), true);
+  assert.equal(guard.mustAsk(guard.SCREENSHOT, { auto: false, allowedThisSession: false }), true);
+  assert.equal(guard.mustAsk(guard.SCREENSHOT, { auto: true, allowedThisSession: true }), false);
+  // Not one of the two that can never be allowed for a session.
+  assert.equal(guard.alwaysAsk(guard.SCREENSHOT), false);
+});
+
+test('a forced delete of what a variable holds asks when the line reaches outside the folder', () => {
+  for (const command of ['for f in ~/Documents/*; do rm -f "$f"; done', 'for f in /etc/*; do rm -f "$f"; done',
+    'find ~ -type f | while read f; do rm -f "$f"; done', 'rm -f $(cat list.txt)', 'rm -f `cat list.txt`',
+    'OUT=/etc/hosts; rm -f "$OUT"', 'for f in ../*.log; do rm -f "$f"; done',
+    'Get-ChildItem C:\\Users -Recurse -File | ForEach-Object { Remove-Item -Force $_ }',
+    'gci ~ -r -file | % { ri -fo $_.FullName }']) {
+    assert.equal(guard.commandRisk(command), guard.DESTRUCTIVE, command);
+  }
+  // Inside the folder, as before.
+  for (const command of ['for f in *.log; do rm -f "$f"; done', 'for f in build/*.o; do rm -f "$f"; done',
+    'OUT=build/x.o; rm -f "$OUT"', 'rm -fv "$f" > /dev/null', 'rm -f "$PWD/out.log"',
+    'Get-ChildItem build -File | ForEach-Object { Remove-Item -Force $_ }']) {
+    assert.equal(guard.commandRisk(command), null, command);
+  }
+});

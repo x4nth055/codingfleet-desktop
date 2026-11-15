@@ -145,12 +145,18 @@ test('moving memory takes the entries and their descriptions, and keeps what is 
   write(to, 'same.md', 'new text');
   memory.ensure(to);
 
-  assert.equal(memory.moveMemory(from, to), 1);
+  write(from, 'twin.md', 'the same text');
+  write(to, 'twin.md', 'the same text');
+  memory.syncIndex(from);
+  assert.equal(memory.moveMemory(from, to), 2);
   assert.equal(read(to, 'tests.md'), 'Run npm test.');
   assert.equal(read(to, 'same.md'), 'new text');          // not replaced
-  assert.equal(read(from, 'same.md'), 'old text');        // and not lost
+  assert.equal(read(to, 'same-2.md'), 'old text');        // and not lost: it moved under a new name
+  assert.deepEqual(memory.entryFiles(to).map((e) => e.file), ['same.md', 'same-2.md', 'tests.md', 'twin.md']);
   assert.match(read(to, 'MEMORY.md'), /- \[tests\]\(tests\.md\): How to run the tests/);
-  assert.equal(fs.existsSync(path.join(from, 'tests.md')), false);
+  assert.equal((read(to, 'MEMORY.md').match(/^- \[/gm) || []).length, 4);
+  // Nothing stays behind, so the old folder is gone.
+  assert.equal(fs.existsSync(path.join(cwd, '.codingfleet')), false);
 
   // Nothing left behind when every file moved.
   const from2 = path.join(cwd, 'b', '.codingfleet', 'memory');
@@ -165,4 +171,88 @@ test('the window names the memory tools', () => {
   assert.deepEqual(words.VERBS.read_memory({ scope: 'user', names: ['stack', 'tests'] }), ['Read memory', 'stack, tests']);
   assert.deepEqual(words.VERBS.update_memory({ name: 'stack', content: 'Django' }), ['Update memory', 'stack']);
   assert.deepEqual(words.VERBS.update_memory({ name: 'stack', content: '' }), ['Delete from memory', 'stack']);
+});
+
+test('a file name with brackets keeps one index line and the words the agent wrote for it', () => {
+  const dir = path.join(tmp(), 'memory');
+  for (const file of ['paren (old).md', 'bracket [v2].md', 'UPPER.MD']) write(dir, file, `About ${file}`);
+  memory.ensure(dir);
+  const rewritten = read(dir, 'MEMORY.md').replace(/^(- \[.*\.md\)): .*$/gim, '$1: The agent wrote this');
+  fs.writeFileSync(path.join(dir, 'MEMORY.md'), rewritten);
+  const index = memory.syncIndex(dir);
+  assert.equal(index, rewritten);
+  assert.equal((index.match(/^- \[/gm) || []).length, 3);
+  assert.deepEqual(memory.listEntries(dir).map((e) => e.description), ['The agent wrote this', 'The agent wrote this', 'The agent wrote this']);
+});
+
+test('an emptied entry file is a deleted entry, whatever white space is left in it', () => {
+  const dir = path.join(tmp(), 'memory');
+  write(dir, 'kept.md', 'A fact.');
+  write(dir, 'spaces.md', `${' '.repeat(500)}\r\n\t`);
+  write(dir, 'empty.md', '');
+  // Before the next sync, the list already leaves them out (what Preferences counts).
+  assert.deepEqual(memory.listEntries(dir).map((e) => e.name), ['kept']);
+  memory.ensure(dir);
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['MEMORY.md', 'kept.md']);
+});
+
+test('a project whose .codingfleet is a link keeps its notes in the app folder', (t) => {
+  const appDir = tmp();
+  const elsewhere = tmp();
+  // The link leads out of the project, or back into it: neither is a memory folder.
+  for (const [linkAt, leadsTo] of [['.codingfleet', () => elsewhere], [path.join('.codingfleet', 'memory'), (cwd) => path.join(cwd, 'docs')]]) {
+    const cwd = tmp();
+    write(path.join(cwd, 'docs'), 'private.md', 'not a note');
+    fs.mkdirSync(path.dirname(path.join(cwd, linkAt)), { recursive: true });
+    try {
+      fs.symlinkSync(leadsTo(cwd), path.join(cwd, linkAt), 'junction');
+    } catch {
+      t.skip('this account cannot make links');
+      return;
+    }
+    const dir = memory.memoryDir(cwd, { location: 'project', appDir });
+    assert.equal(dir, path.join(appDir, 'projects', memory.folderKey(cwd), 'memory'), linkAt);
+    // The no-approval rule does not follow the link either.
+    const linked = path.join(cwd, '.codingfleet', 'memory');
+    assert.equal(memory.allows('fs_write', { path: path.join(linked, 'planted.md') }, cwd, [linked]), false, linkAt);
+    assert.equal(memory.allows('fs_read', { path: path.join(linked, 'private.md') }, cwd, [linked]), false, linkAt);
+    assert.equal(memory.allows('fs_write', { path: path.join(dir, 'note.md') }, cwd, [dir]), true);
+  }
+  assert.deepEqual(fs.readdirSync(elsewhere), []);
+  // A plain folder is still the project's own.
+  const plain = tmp();
+  assert.equal(memory.memoryDir(plain, { location: 'project', appDir }), path.join(plain, '.codingfleet', 'memory'));
+});
+
+test('a link among the entry files is not an entry', (t) => {
+  const dir = path.join(tmp(), 'memory');
+  const outside = tmp();
+  write(outside, 'secret.md', 'API_KEY=not-for-the-index');
+  write(dir, 'real.md', 'A fact.');
+  try {
+    fs.symlinkSync(path.join(outside, 'secret.md'), path.join(dir, 'notes.md'), 'file');
+  } catch {
+    t.skip('this account cannot make file links');
+    return;
+  }
+  const index = memory.ensure(dir);
+  assert.doesNotMatch(index, /API_KEY|notes\.md/);
+  assert.deepEqual(memory.listEntries(dir).map((e) => e.name), ['real']);
+});
+
+test('moving a folder onto itself under another spelling keeps its index', (t) => {
+  const dir = path.join(tmp(), 'Memory');
+  write(dir, 'build.md', 'how to build');
+  write(dir, 'MEMORY.md', '# Project memory\n\n- [build](build.md): THE AGENT WROTE THIS\n');
+  const before = read(dir, 'MEMORY.md');
+  const link = path.join(tmp(), 'link');
+  let spellings = memory.FOLDS_CASE ? [path.join(path.dirname(dir), 'mEMORY')] : [];
+  try { fs.symlinkSync(dir, link, 'junction'); spellings.push(link); } catch { /* no links for this account */ }
+  if (!spellings.length) { t.skip('no second spelling on this system'); return; }
+  for (const other of spellings) {
+    assert.equal(memory.moveMemory(dir, other), 0, other);
+    assert.equal(memory.moveMemory(other, dir), 0, other);
+    assert.equal(read(dir, 'MEMORY.md'), before, other);
+    assert.equal(read(dir, 'build.md'), 'how to build');
+  }
 });

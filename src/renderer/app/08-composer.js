@@ -1059,6 +1059,8 @@ async function sendMessage() {
       renderMain();
     } else if (created) {
       // The session exists although nothing was sent: show it, with what was typed.
+      // The text now belongs to it, not to the next new session.
+      forgetDraft(typedIn);
       renderSidebar();
       renderMain();
     }

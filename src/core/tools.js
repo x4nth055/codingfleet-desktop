@@ -8,7 +8,7 @@ const fsp = fs.promises;
 const path = require('path');
 const { spawn } = require('child_process');
 
-const { guardReason, SECRETS } = require('./guard');
+const { guardReason, SECRETS, SCREENSHOT } = require('./guard');
 const { readOnlyCommand, namesSecret } = require('./read-only');
 
 const CLIENT_TOOLS = new Set(['execute_code', 'run_command', 'fs_read', 'fs_write', 'fs_edit', 'fs_glob']);
@@ -203,7 +203,8 @@ async function fsWrite(args, cwd) {
 const fileTurns = new Map(); // path -> the last change waiting for that file
 function inTurn(cwd, target, change) {
   const file = resolvePath(cwd, target);
-  const key = process.platform === 'win32' ? file.toLowerCase() : file;
+  // Windows and macOS take README.md and readme.md for one file.
+  const key = process.platform === 'win32' || process.platform === 'darwin' ? file.toLowerCase() : file;
   const turn = (fileTurns.get(key) || Promise.resolve()).catch(() => {}).then(change);
   fileTurns.set(key, turn);
   const done = () => { if (fileTurns.get(key) === turn) fileTurns.delete(key); };
@@ -339,7 +340,7 @@ function approvalReason(name, args, cwd) {
   }
   // A picture of the screen can hold anything that is open on it, project or
   // not, so it always waits for the user.
-  if (name === 'take_screenshot') return 'takes a picture of your screen';
+  if (name === 'take_screenshot') return SCREENSHOT;
   if (name === 'fs_read' || name === 'fs_glob') {
     // A pattern can leave the folder by itself: "/etc/*", or "../*", which the
     // glob follows like a path.

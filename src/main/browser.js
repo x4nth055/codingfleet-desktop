@@ -428,7 +428,18 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}), par
    *
    * Trusted, so never asked: this computer's pages and the user's own sites.
    */
-  function approvalReason(args = {}) {
+  // What each call's approval was asked about, until the call runs.
+  const judged = new Map();
+  function approvalReason(args = {}, callId) {
+    const reason = reasonFor(args);
+    if (callId) {
+      judged.set(callId, reason);
+      if (judged.size > 500) judged.delete(judged.keys().next().value);
+    }
+    return reason;
+  }
+
+  function reasonFor(args = {}) {
     const { sites = [], anySite = false } = policy() || {};
     const trusted = (href) => page.isLocalUrl(href) || page.onSiteList(href, sites);
     const action = String(args.action || '');
@@ -670,6 +681,21 @@ function createBrowser({ getWindow, send, log, onImage, policy = () => ({}), par
         if (NEEDS_SCREEN.has(String(args.action))) await unminimize();
         // Loading needs no size (and the pane shows only once a page is there).
         if (!['navigate', 'console'].includes(String(args.action))) await laidOut();
+        // Calls sent together are all asked about when they arrive, on the
+        // page of that moment. A navigation before this one may have changed
+        // the page since: typing is never done on a site nobody was asked about.
+        if (call && call.id && judged.has(call.id)) {
+          const asked = judged.get(call.id);
+          judged.delete(call.id);
+          const now = reasonFor(args);
+          if (now && now !== asked && /^types into /.test(now)) {
+            return {
+              output: `Nothing was typed: the page changed after this action was sent, and it is now on ${page.siteOf(currentUrl())}. `
+                + 'Send this action again, by itself, if you still want it.',
+              is_error: true,
+            };
+          }
+        }
         return await run(sessionId, args, call);
       } catch (err) {
         if (log) log.error(`browser: ${err.message}`);

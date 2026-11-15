@@ -16,7 +16,7 @@ const { Run } = require('../src/core/runner.js');
 const tools = require('../src/core/tools.js');
 const { BackgroundJobs } = require('../src/core/background.js');
 
-const MODEL = process.env.E2E_MODEL || 'deepseek-v4-flash';
+const MODEL = process.env.E2E_MODEL || 'deepseek-v4.1-flash-low';
 // stop_after is offered from 1.2 on.
 api.configure({ client: `desktop/${require('../package.json').version}` });
 const results = [];

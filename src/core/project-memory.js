@@ -33,7 +33,10 @@ const INDEX_HEADER = [
   '',
 ].join('\n');
 
-const ENTRY_LINE = /^\s*[-*]\s*\[([^\]]+)\]\(([^)]+)\)\s*(?:[:—-]\s*(.*))?$/;
+// The link's target ends at ".md)": a file name may hold brackets itself.
+const ENTRY_LINE = /^\s*[-*]\s*\[(.+?)\]\((.+?\.md)\)\s*(?:[:—-]\s*(.*))?$/i;
+// Windows and macOS (as it is set up by default) take Shop and shop for one folder.
+const FOLDS_CASE = process.platform === 'win32' || process.platform === 'darwin';
 
 const isInside = (dir, target) => {
   const rel = path.relative(path.resolve(dir), path.resolve(target));
@@ -43,7 +46,7 @@ const isInside = (dir, target) => {
 /** A name for the folder's memory in a shared place: readable, and unique to the path. */
 function folderKey(cwd) {
   const full = path.resolve(String(cwd));
-  const identity = process.platform === 'win32' ? full.toLowerCase() : full;
+  const identity = FOLDS_CASE ? full.toLowerCase() : full;
   const hash = crypto.createHash('sha1').update(identity).digest('hex').slice(0, 8);
   const slug = path.basename(full).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
   return `${slug || 'project'}-${hash}`;
@@ -51,9 +54,24 @@ function folderKey(cwd) {
 
 /** The memory folder of the project at `cwd`, for these settings. */
 function memoryDir(cwd, { location, customDir, appDir } = {}) {
-  if (location === 'project') return path.join(path.resolve(cwd), IN_PROJECT);
+  if (location === 'project') {
+    const dir = path.join(path.resolve(cwd), IN_PROJECT);
+    // A repository can carry .codingfleet, or the folder in it, as a link to
+    // anywhere. The notes of such a project stay in the app's folder: nothing
+    // is read, made or deleted at the link's end.
+    if (!appDir || !throughLink(cwd, dir)) return dir;
+  }
   if (location === 'custom' && customDir) return path.join(path.resolve(customDir), folderKey(cwd));
   return path.join(appDir, 'projects', folderKey(cwd), 'memory');
+}
+
+const samePath = (a, b) => (FOLDS_CASE ? a.toLowerCase() === b.toLowerCase() : a === b);
+
+// Whether `target`, written below `folder`, is reached through a link: its
+// real place is not the one its name gives. (realPath is defined further down.)
+function throughLink(folder, target) {
+  const rel = path.relative(path.resolve(folder), path.resolve(target));
+  return !samePath(realPath(target), path.join(realPath(folder), rel));
 }
 
 function descriptionOf(text) {
@@ -72,11 +90,19 @@ function entryFiles(dir) {
   for (const file of names) {
     if (!/\.md$/i.test(file) || file.toLowerCase() === INDEX_FILE.toLowerCase()) continue;
     try {
-      const stat = fs.statSync(path.join(dir, file));
+      // lstat: a link is not an entry, wherever it leads. Its target's first
+      // line would otherwise be copied into the index, and so into a prompt.
+      const stat = fs.lstatSync(path.join(dir, file));
       if (stat.isFile()) out.push({ name: file.replace(/\.md$/i, ''), file, size: stat.size, mtime: stat.mtimeMs });
     } catch { /* gone between the two calls */ }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// An entry file with nothing but white space: how the agent deletes an entry.
+function isBlank(dir, entry) {
+  if (entry.size > 4096) return false; // a longer file of only spaces is not worth the read
+  try { return !fs.readFileSync(path.join(dir, entry.file), 'utf8').trim(); } catch { return false; }
 }
 
 /**
@@ -88,10 +114,8 @@ function entryFiles(dir) {
 function syncIndex(dir) {
   const indexPath = path.join(dir, INDEX_FILE);
   for (const entry of entryFiles(dir)) {
-    if (entry.size > 64) continue; // only a file this small can be all white space
-    try {
-      if (!fs.readFileSync(path.join(dir, entry.file), 'utf8').trim()) fs.unlinkSync(path.join(dir, entry.file));
-    } catch { /* left as it is */ }
+    if (!isBlank(dir, entry)) continue;
+    try { fs.unlinkSync(path.join(dir, entry.file)); } catch { /* left as it is */ }
   }
   const files = new Map(entryFiles(dir).map((entry) => [entry.file.toLowerCase(), entry]));
   let current = null;
@@ -135,7 +159,9 @@ function listEntries(dir) {
       if (match) described.set(path.basename(match[2].trim()).toLowerCase(), (match[3] || '').trim());
     }
   } catch { /* no index */ }
-  return entryFiles(dir).map((entry) => ({ ...entry, description: described.get(entry.file.toLowerCase()) || '' }));
+  // An emptied file is an entry the agent deleted: the next sync removes it.
+  return entryFiles(dir).filter((entry) => !isBlank(dir, entry))
+    .map((entry) => ({ ...entry, description: described.get(entry.file.toLowerCase()) || '' }));
 }
 
 // Forward slashes: a model writes them reliably in a JSON argument, and Node
@@ -207,6 +233,8 @@ function allows(name, args, cwd, dirs) {
   const resolve = (p) => path.resolve(cwd || process.cwd(), String(p));
   const within = (target) => folders.some((dir) => {
     if (!isInside(dir, target)) return false;
+    // A memory folder in the project that is reached through a link is not one.
+    if (cwd && isInside(cwd, dir) && throughLink(cwd, dir)) return false;
     return isInside(realPath(dir), realPath(target));
   });
   if (name === 'fs_read' || name === 'fs_write' || name === 'fs_edit') {
@@ -252,11 +280,14 @@ function excludeFromGit(cwd) {
 
 /**
  * Move a memory folder's files to another place (the user changed where
- * memory is kept). A file that is already at the new place is not replaced.
- * Returns how many files moved.
+ * memory is kept). An entry that is already at the new place is not replaced:
+ * the one that moves gets a number after its name, unless the two are the same
+ * text. Returns how many files moved.
  */
 function moveMemory(from, to) {
-  if (!from || !to || path.resolve(from) === path.resolve(to)) return 0;
+  // The same folder under two spellings (another letter case, a link, a
+  // mapped drive) is one place: moving it onto itself would delete its index.
+  if (!from || !to || samePath(realPath(from), realPath(to))) return 0;
   let names;
   try { names = fs.readdirSync(from).filter((file) => /\.md$/i.test(file)); } catch { return 0; }
   if (!names.length) return 0;
@@ -274,7 +305,15 @@ function moveMemory(from, to) {
         const lines = fs.readFileSync(source, 'utf8').split(/\r?\n/).filter((line) => ENTRY_LINE.test(line));
         if (lines.length) fs.appendFileSync(target, `\n${lines.join('\n')}\n`, 'utf8');
       } else if (fs.existsSync(target)) {
-        continue; // an entry of the same name is there already: this one stays
+        // An entry of the same name is there already. Both are kept, unless
+        // they say the same: nothing stays behind in the old place.
+        if (!fs.readFileSync(source).equals(fs.readFileSync(target))) {
+          const base = file.replace(/\.md$/i, '');
+          let n = 2;
+          while (fs.existsSync(path.join(to, `${base}-${n}.md`))) n += 1;
+          fs.copyFileSync(source, path.join(to, `${base}-${n}.md`));
+          moved += 1;
+        }
       } else {
         fs.copyFileSync(source, target);
         if (!isIndex(file)) moved += 1;
@@ -295,6 +334,7 @@ module.exports = {
   INDEX_FILE,
   INDEX_MAX_CHARS,
   LOCATIONS,
+  FOLDS_CASE,
   folderKey,
   memoryDir,
   entryFiles,

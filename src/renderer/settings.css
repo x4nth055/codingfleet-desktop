@@ -591,3 +591,7 @@ textarea.sbx-input { height: auto; padding: 8px 10px; resize: vertical; line-hei
 .ca-head .btn { flex: none; white-space: nowrap; }
 .ca-missing-row .byok-link { white-space: nowrap; }
 .ca-install { padding: 0; border: 0; background: none; cursor: pointer; font-weight: 600; }
+
+/* Project memory: a folder path has no spaces to break at. */
+.memory-prefs .set-desc { overflow-wrap: anywhere; }
+.memory-prefs .set-select { min-width: 0; max-width: 100%; }

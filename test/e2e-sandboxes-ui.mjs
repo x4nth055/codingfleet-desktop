@@ -16,7 +16,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const api = require('../src/core/api.js');
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MODEL = process.env.E2E_MODEL || 'deepseek-v4-flash';
+const MODEL = process.env.E2E_MODEL || 'deepseek-v4.1-flash-low';
 const PORT = Number(process.env.E2E_CDP_PORT || 9335);
 const SHOTS = process.env.E2E_SHOTS || '';
 const TAG = `e2e-${Date.now().toString(36)}`;

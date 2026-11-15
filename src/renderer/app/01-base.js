@@ -142,9 +142,29 @@ DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
 });
 
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  // srcset can name any host and is never needed in an answer.
-  if (node.hasAttribute('srcset')) node.removeAttribute('srcset');
-  if (node.nodeName !== 'IMG' && !(node.nodeName === 'INPUT' && node.getAttribute('type') === 'image')) return;
+  // The other ways markup names a picture that a page fetches by itself: a
+  // srcset, a table's or a cell's background, a video's poster, a style. None
+  // is needed in an answer, and each can name any host.
+  for (const name of ['srcset', 'background', 'poster', 'style']) {
+    if (node.hasAttribute(name)) node.removeAttribute(name);
+  }
+  const tag = node.nodeName.toLowerCase();
+  // An address on anything but a link is fetched at once: an SVG <image>, a
+  // filter's <feImage>, a <use>. A link waits for a click (13-boot.js takes
+  // it). A reference inside the same drawing (#id) is kept.
+  if (tag !== 'a') {
+    for (const name of ['href', 'xlink:href']) {
+      if (node.hasAttribute(name) && !String(node.getAttribute(name)).trim().startsWith('#')) node.removeAttribute(name);
+    }
+  }
+  if (tag !== 'img' && !(tag === 'input' && node.getAttribute('type') === 'image')) return;
+  // //host/a.png and \\host\share\a.png name another computer. From this page,
+  // which is a file, that is a network share: the fetch would go out, and on
+  // Windows it would offer the user's sign-in to that computer.
+  if (/^\s*[\\/]{2}/.test(String(node.getAttribute('src') || ''))) {
+    node.removeAttribute('src');
+    return;
+  }
   if (node.nodeName === 'IMG' && window.CF_FILE_LINKS && CF_FILE_LINKS.isAbsoluteLocal(node.getAttribute('src'))) {
     node.setAttribute('data-local-src', node.getAttribute('src'));
     node.removeAttribute('src');

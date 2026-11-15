@@ -108,7 +108,10 @@ async function signInWithBrowser() {
   const res = await cf.signIn({});
   button.disabled = false;
   button.textContent = label;
+  // Cancel goes away: the keyboard's place goes back to the button beside it.
+  const hadFocus = document.activeElement === cancel;
   cancel.hidden = true;
+  if (hadFocus) button.focus();
   if (!res.ok) {
     const cancelled = res.error.message === 'Sign-in cancelled.';
     setSettingsStatus(cancelled ? 'Sign-in cancelled. Nothing was changed.' : res.error.message, cancelled ? 'info' : 'error');
@@ -124,6 +127,13 @@ function cancelBrowserSignIn() {
 }
 
 async function saveSettings() {
+  // Signed in, and no new key typed: there is nothing to save. Saving the
+  // same key again would start the account over (open sessions closed,
+  // transcripts in memory dropped) for no change.
+  if (S.settings && S.settings.hasKey && !$('keyInput').value.trim()) {
+    closeSettings();
+    return;
+  }
   const save = $('settingsSave');
   save.disabled = true;
   setSettingsStatus('Checking the key…', 'info');
@@ -769,8 +779,10 @@ function renderProjectMemory(body, pane) {
   });
   const change = (patch) => call(cf.setMemory, { ...patch, ...ask() }).then((view) => {
     draw(view);
-    paneStatus(pane, view.moved ? `Saved. ${view.moved} ${view.moved === 1 ? 'entry' : 'entries'} moved.`
-      : 'Saved. New sessions use this.', 'ok');
+    const late = view.failed ? ` The notes of ${view.failed} ${view.failed === 1 ? 'project' : 'projects'} could not be moved now: `
+      + 'they follow when a session starts there.' : '';
+    paneStatus(pane, (view.moved ? `Saved. ${view.moved} ${view.moved === 1 ? 'entry' : 'entries'} moved.`
+      : 'Saved. New sessions use this.') + late, view.failed ? 'error' : 'ok');
   }, (err) => {
     paneStatus(pane, err.message, 'error');
     load();
@@ -784,6 +796,9 @@ function renderSessionPrefs(body) {
   if (!S.account) {
     body.append(el('div', 'pane-empty', S.accountError || 'Loading your settings…'));
     if (!S.accountError) loadAccountSettings().then(() => showSettingsTab(settingsTab));
+    // Kept on this computer: it needs no answer from the account.
+    body.append(el('div', 'pane-section', 'Project memory'));
+    renderProjectMemory(body, pane);
     return;
   }
   body.append(el('div', 'pane-section first', 'New sessions'));

@@ -14,7 +14,7 @@ const api = require('../src/core/api.js');
 const { Run } = require('../src/core/runner.js');
 const tools = require('../src/core/tools.js');
 
-const MODEL = process.env.E2E_MODEL || 'deepseek-v4-flash-instant';
+const MODEL = process.env.E2E_MODEL || 'deepseek-v4.1-flash-low';
 const results = [];
 const check = (label, ok, detail = '') => {
   results.push(Boolean(ok));

@@ -104,6 +104,7 @@ Pick a folder to work on real code. Pick no folder for a safe, empty sandbox.
 | Reads outside the folder | Asks |
 | Runs a command or changes files | Asks |
 | Reads `.env`, keys or passwords | Asks, **even in Auto-approve** |
+| Takes a picture of your screen | Asks, **even in Auto-approve** |
 | Deletes files inside the folder (`rm -f tmp/a.py`, `Remove-Item -Force a.log`) | Same as changing files |
 | Deletes a folder that is made again (`rm -rf node_modules`, `.next`, `__pycache__`, `coverage`…) inside the folder | Same as changing files |
 | Deletes any other folder or anything outside the folder, rewrites git history, wipes data | Asks **every time** |
@@ -164,10 +165,10 @@ continues while the command keeps running.
 
 Switch with the shield button.
 
-- **Ask before changes** (default): you answer **Allow**, **Deny** or **Allow all this
-  session**. "Allow all" allows that *kind* of action, for example every command.
-- **Auto-approve**: only the protected actions above still ask. Use it only in a folder you
-  can afford to lose.
+- **Auto-approve** (default): only the protected actions above still ask. Use it only in a
+  folder you can afford to lose.
+- **Ask before changes**: you answer **Allow**, **Deny** or **Allow all this session**.
+  "Allow all" allows that *kind* of action, for example every command.
 
 ### Undoing a run
 

@@ -39,7 +39,10 @@ const STARTS_CLI = /^starts .+ on this computer$/;
 const alwaysAsk = (reason) => ALWAYS_ASK.has(reason) || BROWSER_TYPES.test(String(reason || ''))
   || STARTS_CLI.test(String(reason || ''));
 // Not covered by auto mode, but "allow for this session" is fine.
-const ASK_EVEN_IN_AUTO = new Set([SECRETS, COMPUTER]);
+// A picture of the screen shows every window on it, whatever folder the
+// session works in: Auto-approve does not cover it either.
+const SCREENSHOT = 'takes a picture of your screen';
+const ASK_EVEN_IN_AUTO = new Set([SECRETS, COMPUTER, SCREENSHOT]);
 
 // Templates are meant to be read and shared.
 const HARMLESS_ENV = /^\.env\.(example|sample|template|dist|defaults?)$/i;
@@ -189,7 +192,8 @@ function ordinaryDelete(args) {
   let regenerable = true;
   let targets = 0;
   const target = (w) => {
-    if (!w || ELSEWHERE.test(w) || isSecretPath(w)) return false;
+    // `rm -f $(cat list.txt)`: what a command prints can be any path.
+    if (!w || ELSEWHERE.test(w) || isSecretPath(w) || /\$\(|`/.test(w)) return false;
     targets++;
     if (!isRegenerable(w)) regenerable = false;
     return true;
@@ -226,8 +230,19 @@ function staysPut(text) {
 
 function deletesAreOrdinary(text) {
   if (!staysPut(text)) return false;
-  const rest = text.replace(DELETE, (whole, start, _name, args) => (ordinaryDelete(args) ? `${start}true` : whole));
-  return rest !== text && !destructive(rest);
+  let ofVariable = false;
+  const rest = text.replace(DELETE, (whole, start, _name, args) => {
+    if (!ordinaryDelete(args)) return whole;
+    if (/\$(?!\{?PWD\b)/i.test(args)) ofVariable = true;
+    return `${start}true`;
+  });
+  if (rest === text || destructive(rest)) return false;
+  // A delete of whatever a variable holds (`for f in ~/Documents/*; do rm -f
+  // "$f"; done`, `gci C:\Users -r | % { ri -fo $_ }`): what fills the variable
+  // is on the rest of the line, and a path there that is plainly somewhere
+  // else makes the delete one that is asked about.
+  if (!ofVariable) return true;
+  return !rest.replace(THROWN_AWAY, ' ').split(/[\s,;=(){}"'|&]+/).some((word) => word && ELSEWHERE.test(word));
 }
 
 // Whether a line that looks destructive only makes ordinary deletes: files
@@ -293,6 +308,6 @@ function mustAsk(reason, { auto, allowedThisSession }) {
 }
 
 module.exports = {
-  SECRETS, DESTRUCTIVE, REMOTE_SCRIPT, COMPUTER, ALWAYS_ASK, ASK_EVEN_IN_AUTO,
+  SECRETS, DESTRUCTIVE, REMOTE_SCRIPT, COMPUTER, SCREENSHOT, ALWAYS_ASK, ASK_EVEN_IN_AUTO,
   isSecretPath, isRegenerable, commandRisk, guardReason, mustAsk, alwaysAsk,
 };

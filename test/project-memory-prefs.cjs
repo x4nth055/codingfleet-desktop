@@ -54,7 +54,8 @@ app.whenReady().then(async () => {
     assert.equal(first.chosen, 'app');
     assert.deepEqual(first.options.map(([value]) => value), ['app', 'project', 'pick']);
     // The default place is named by its path on this computer, so nobody reads it as our servers.
-    assert.equal(first.options[0][1], 'In C:/Users/me/AppData/Roaming/CodingFleet/projects (default)');
+    assert.equal(first.options[0][1],
+      'In C:\\Users\\a-rather-long-user-name-for-a-windows-account\\AppData\\Roaming\\CodingFleet\\projects (default)');
     assert.match(first.descs[2], /projects\/webshop-1a2b3c4d\/memory$/);
     assert.equal(first.overflow, false);
 

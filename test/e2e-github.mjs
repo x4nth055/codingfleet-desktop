@@ -19,7 +19,7 @@ const tools = require('../src/core/tools.js');
 const { reviewPrompt, createPrompt } = require('../src/renderer/lib/pr-prompts.js');
 
 assert.ok(process.env.CODINGFLEET_API_KEY, 'Set CODINGFLEET_API_KEY.');
-const MODEL = process.env.E2E_MODEL || 'deepseek-v4-flash-instant';
+const MODEL = process.env.E2E_MODEL || 'deepseek-v4.1-flash-low';
 const results = [];
 const check = (label, ok, detail = '') => {
   results.push(Boolean(ok));

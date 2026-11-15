@@ -137,7 +137,11 @@ function memorySettings() {
   const customDir = typeof saved.customDir === 'string' ? saved.customDir : '';
   let location = projectMemory.LOCATIONS.includes(saved.location) ? saved.location : 'app';
   if (location === 'custom' && !customDir) location = 'app';
-  return { enabled: saved.enabled !== false, location, customDir };
+  // The places the notes were kept in before: a project that could not move
+  // with the others (no session left, its drive unplugged) follows later.
+  const left = (Array.isArray(saved.left) ? saved.left : [])
+    .filter((place) => place && projectMemory.LOCATIONS.includes(place.location)).slice(0, 4);
+  return { enabled: saved.enabled !== false, location, customDir, left };
 }
 
 const memoryDirOf = (cwd, settings = memorySettings()) =>
@@ -150,6 +154,11 @@ function prepareMemory(cwd, settings = memorySettings()) {
   if (!settings.enabled || !cwd) return null;
   const dir = memoryDirOf(cwd, settings);
   try {
+    // Notes still at a place they were kept in before come along now.
+    for (const place of settings.left || []) {
+      const old = memoryDirOf(cwd, { location: place.location, customDir: place.customDir || '' });
+      if (old !== dir && projectMemory.entryFiles(old).length) projectMemory.moveMemory(old, dir);
+    }
     const index = projectMemory.ensure(dir);
     if (settings.location === 'project') projectMemory.excludeFromGit(cwd);
     return { dir, index };
@@ -165,7 +174,7 @@ function projectFolders() {
   for (const session of Object.values(state.sessions || {})) {
     const cwd = session && session.cwd;
     if (typeof cwd !== 'string' || !cwd) continue;
-    const key = process.platform === 'win32' ? path.resolve(cwd).toLowerCase() : path.resolve(cwd);
+    const key = projectMemory.FOLDS_CASE ? path.resolve(cwd).toLowerCase() : path.resolve(cwd);
     if (seen.has(key)) continue;
     try { if (fs.statSync(cwd).isDirectory()) seen.set(key, cwd); } catch { /* the folder is gone */ }
   }
@@ -178,6 +187,21 @@ function prepareAllMemory() {
   const settings = memorySettings();
   if (!settings.enabled) return;
   for (const cwd of projectFolders()) prepareMemory(cwd, settings);
+}
+
+// The same at the start of the app, one project at a time with the window
+// free in between: each one reads a few files and, for notes kept in the
+// project, asks git once.
+function prepareAllMemorySoon() {
+  if (!memorySettings().enabled) return;
+  const folders = projectFolders();
+  const next = () => {
+    const cwd = folders.shift();
+    if (!cwd) return;
+    try { prepareMemory(cwd); } catch (err) { log.warn(`project memory: ${err.message}`); }
+    setImmediate(next);
+  };
+  next();
 }
 
 // The memory folders a session's file tools may use without approval: the one
@@ -1007,7 +1031,7 @@ const FINISHED_TEXT = {
 function approve(sessionId, cwd, call, localTools) {
   let reason;
   if (localTools && localTools.has(call.name)) reason = 'uses a local MCP tool';
-  else if (call.name === 'browser') reason = browser.approvalReason(call.arguments);
+  else if (call.name === 'browser') reason = browser.approvalReason(call.arguments, call.id);
   else reason = tools.approvalReason(call.name, call.arguments, cwd);
   // The agent's own notes: reading and writing .md files in the project's
   // memory folder never waits, wherever that folder is.
@@ -1703,11 +1727,15 @@ function registerIpc() {
     const body = { url: r.url };
     if (clientId) body.client_id = String(clientId).trim();
     if (clientSecret) body.client_secret = String(clientSecret);
-    const started = await api.mcpOAuthStart(body);
-    await shell.openExternal(mcpOAuth.authorizeUrlFor(started, api.snapshot().apiBase));
+    // In place before the first wait: Cancel works from the first moment.
     const controller = new AbortController();
     oauthWaits.set(id, controller);
+    const cancelled = { status: 'cancelled', error: null };
     try {
+      const started = await api.mcpOAuthStart(body);
+      if (controller.signal.aborted) return cancelled;
+      await shell.openExternal(mcpOAuth.authorizeUrlFor(started, api.snapshot().apiBase));
+      if (controller.signal.aborted) return cancelled;
       return await mcpOAuth.waitForSignIn(api, started, { signal: controller.signal });
     } finally {
       if (oauthWaits.get(id) === controller) oauthWaits.delete(id);
@@ -1792,11 +1820,23 @@ function registerIpc() {
     if (next.location === 'custom' && !next.customDir) throw new Error('Choose a folder for the memory first.');
     // The place changed: each project's memory moves with it.
     let moved = 0;
+    let failed = 0;
+    if (next.location !== before.location || next.customDir !== before.customDir) {
+      // The old place is remembered: a project that is not moved now (it has
+      // no session left, its drive is away, or the move failed) is moved the
+      // next time a session starts in it (prepareMemory).
+      const same = (a, b) => a.location === b.location && (a.customDir || '') === (b.customDir || '');
+      const was = { location: before.location, customDir: before.location === 'custom' ? before.customDir : '' };
+      const now = { location: next.location, customDir: next.location === 'custom' ? next.customDir : '' };
+      next.left = [was, ...(before.left || [])]
+        .filter((place, i, all) => !same(place, now) && all.findIndex((other) => same(other, place)) === i).slice(0, 4);
+    }
     if (next.enabled && (next.location !== before.location || next.customDir !== before.customDir)) {
       for (const cwd of projectFolders()) {
         try {
           moved += projectMemory.moveMemory(memoryDirOf(cwd, before), memoryDirOf(cwd, next));
         } catch (err) {
+          failed += 1;
           log.warn(`project memory: could not move the memory of ${cwd}: ${err.message}`);
         }
       }
@@ -1804,7 +1844,7 @@ function registerIpc() {
     state.projectMemory = next;
     saveState();
     prepareAllMemory();
-    return { ...memoryView(patch), moved };
+    return { ...memoryView(patch), moved, failed };
   });
 
   handle('memory:pickFolder', async () => {
@@ -1963,7 +2003,10 @@ function registerIpc() {
     let isDir = false;
     try { isDir = typeof cwd === 'string' && fs.statSync(cwd).isDirectory(); } catch { /* gone */ }
     if (!isDir) throw new Error('Choose a folder that exists.');
-    state.sessions[id] = { ...(state.sessions[id] || {}), cwd };
+    const local = { ...(state.sessions[id] || {}) };
+    // Another project: the first one's memory folder is no longer this session's.
+    if (local.cwd && path.resolve(local.cwd) !== path.resolve(cwd)) delete local.memoryDir;
+    state.sessions[id] = { ...local, cwd };
     saveState();
     return true;
   });
@@ -2075,6 +2118,8 @@ function registerIpc() {
   handle('run:steer', async ({ sessionId, message, files }) => {
     const run = runs.get(sessionId);
     if (!run) throw new Error('No run is going in this session.');
+    // The user just wrote: approvals in this run wait the full time again.
+    approvalClock.present(sessionId);
     return run.steer(message, Array.isArray(files) ? files.filter((x) => typeof x === 'string') : []);
   });
 
@@ -2159,7 +2204,7 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
     loadState();
     // After the window is up: this reads and writes a few small files per project.
     setTimeout(() => {
-      try { prepareAllMemory(); } catch (err) { log.warn(`project memory: ${err.message}`); }
+      try { prepareAllMemorySoon(); } catch (err) { log.warn(`project memory: ${err.message}`); }
     }, 3000);
     loadRecovery();
     loadCredentials();
