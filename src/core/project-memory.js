@@ -101,6 +101,7 @@ function entryFiles(dir) {
 
 // An entry file with nothing but white space: how the agent deletes an entry.
 function isBlank(dir, entry) {
+  if (entry.size === 0) return true;
   if (entry.size > 4096) return false; // a longer file of only spaces is not worth the read
   try { return !fs.readFileSync(path.join(dir, entry.file), 'utf8').trim(); } catch { return false; }
 }
@@ -278,6 +279,17 @@ function excludeFromGit(cwd) {
   }
 }
 
+// To a name that is free. A rename is one step and leaves no half-written
+// copy; it cannot cross to another drive, so there the file is copied.
+function moveFile(source, target) {
+  try {
+    fs.renameSync(source, target);
+  } catch {
+    fs.copyFileSync(source, target);
+    fs.unlinkSync(source);
+  }
+}
+
 /**
  * Move a memory folder's files to another place (the user changed where
  * memory is kept). An entry that is already at the new place is not replaced:
@@ -311,12 +323,14 @@ function moveMemory(from, to) {
           const base = file.replace(/\.md$/i, '');
           let n = 2;
           while (fs.existsSync(path.join(to, `${base}-${n}.md`))) n += 1;
-          fs.copyFileSync(source, path.join(to, `${base}-${n}.md`));
+          moveFile(source, path.join(to, `${base}-${n}.md`));
           moved += 1;
+          continue;
         }
       } else {
-        fs.copyFileSync(source, target);
+        moveFile(source, target);
         if (!isIndex(file)) moved += 1;
+        continue;
       }
       fs.unlinkSync(source);
     } catch { /* left where it was */ }

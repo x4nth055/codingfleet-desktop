@@ -33,6 +33,7 @@ const guard = require('../core/guard');
 const { createApprovalClock, unansweredOutput } = require('../core/approval-clock');
 const tools = require('../core/tools');
 const projectMemory = require('../core/project-memory');
+const { MemoryJobs, prepareProject } = require('../core/memory-jobs');
 const { LocalMcp } = require('../core/mcp');
 const mcpOAuth = require('../core/mcp-oauth');
 const { Run } = require('../core/runner');
@@ -150,58 +151,47 @@ const memoryDirOf = (cwd, settings = memorySettings()) =>
 // The folder and its index, made if they are not there. An in-project folder
 // is also kept out of git. Null when project memory is off or cannot be made:
 // a session then starts without it, as before.
+// One project, when a session starts in it: a few small files. Notes still at
+// a place they were kept in before come along now.
 function prepareMemory(cwd, settings = memorySettings()) {
   if (!settings.enabled || !cwd) return null;
-  const dir = memoryDirOf(cwd, settings);
   try {
-    // Notes still at a place they were kept in before come along now.
-    for (const place of settings.left || []) {
-      const old = memoryDirOf(cwd, { location: place.location, customDir: place.customDir || '' });
-      if (old !== dir && projectMemory.entryFiles(old).length) projectMemory.moveMemory(old, dir);
-    }
-    const index = projectMemory.ensure(dir);
-    if (settings.location === 'project') projectMemory.excludeFromGit(cwd);
-    return { dir, index };
+    return prepareProject(cwd, settings, app.getPath('userData'));
   } catch (err) {
-    log.warn(`project memory: could not prepare ${dir}: ${err.message}`);
+    log.warn(`project memory: could not prepare the memory of ${cwd}: ${err.message}`);
     return null;
   }
 }
 
-// The project folders this app knows: each folder a session works in, once.
-function projectFolders() {
+// The work for every project at once (thousands of file operations when there
+// are hundreds of projects) runs on a thread of its own: this process, which
+// the window and every running session wait on, does none of it.
+const memoryJobs = new MemoryJobs({ warn: (message) => log.warn(`project memory: ${message}`) });
+
+// The folders sessions work in, once each. Whether a folder is still there is
+// found where the list is used (core/memory-jobs.js), not on this thread.
+function sessionFolders() {
   const seen = new Map();
   for (const session of Object.values(state.sessions || {})) {
     const cwd = session && session.cwd;
     if (typeof cwd !== 'string' || !cwd) continue;
     const key = projectMemory.FOLDS_CASE ? path.resolve(cwd).toLowerCase() : path.resolve(cwd);
-    if (seen.has(key)) continue;
-    try { if (fs.statSync(cwd).isDirectory()) seen.set(key, cwd); } catch { /* the folder is gone */ }
+    if (!seen.has(key)) seen.set(key, cwd);
   }
   return [...seen.values()];
 }
 
-// Every known project has its memory folder and index from the start, not
-// only from its next new session.
-function prepareAllMemory() {
+const logMemoryErrors = (errors) => {
+  for (const { cwd, message } of errors || []) log.warn(`project memory: ${cwd}: ${message}`);
+};
+
+// Every known project has its memory folder and index from the start of the
+// app, not only from its next new session.
+function prepareAllMemorySoon() {
   const settings = memorySettings();
   if (!settings.enabled) return;
-  for (const cwd of projectFolders()) prepareMemory(cwd, settings);
-}
-
-// The same at the start of the app, one project at a time with the window
-// free in between: each one reads a few files and, for notes kept in the
-// project, asks git once.
-function prepareAllMemorySoon() {
-  if (!memorySettings().enabled) return;
-  const folders = projectFolders();
-  const next = () => {
-    const cwd = folders.shift();
-    if (!cwd) return;
-    try { prepareMemory(cwd); } catch (err) { log.warn(`project memory: ${err.message}`); }
-    setImmediate(next);
-  };
-  next();
+  memoryJobs.run({ type: 'prepare', cwds: sessionFolders(), settings, appDir: app.getPath('userData') })
+    .then((done) => logMemoryErrors(done.errors), (err) => log.warn(`project memory: ${err.message}`));
 }
 
 // The memory folders a session's file tools may use without approval: the one
@@ -212,17 +202,25 @@ function memoryDirsFor(sessionId, cwd) {
   return [(state.sessions[sessionId] || {}).memoryDir, memoryDirOf(cwd, settings)].filter(Boolean);
 }
 
-function memoryView({ sessionId, cwd } = {}) {
-  const settings = memorySettings();
+// The folder Preferences is asked about: the one given, else the session's.
+function memoryFolderOf({ sessionId, cwd } = {}) {
   const local = state.sessions[sessionIdOf(sessionId)] || {};
-  const folder = typeof cwd === 'string' && cwd ? cwd : local.cwd || null;
-  const describe = (dir) => ({ cwd: dir, dir: memoryDirOf(dir, settings), entries: projectMemory.listEntries(memoryDirOf(dir, settings)) });
-  return {
-    settings,
-    appDir: path.join(app.getPath('userData'), 'projects'),
-    current: folder && settings.enabled ? describe(folder) : null,
-    projects: settings.enabled ? projectFolders().map(describe).map(({ entries, ...rest }) => ({ ...rest, entries: entries.length })) : [],
-  };
+  return typeof cwd === 'string' && cwd ? cwd : local.cwd || null;
+}
+
+// What Preferences shows. `found` is { current, projects } from the thread.
+const memoryViewOf = (settings, found) => ({
+  settings,
+  appDir: path.join(app.getPath('userData'), 'projects'),
+  current: found.current,
+  projects: found.projects,
+});
+
+async function memoryView(arg) {
+  const settings = memorySettings();
+  return memoryViewOf(settings, await memoryJobs.run({
+    type: 'view', cwds: sessionFolders(), settings, appDir: app.getPath('userData'), current: memoryFolderOf(arg),
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1805,7 +1803,7 @@ function registerIpc() {
   // Project memory: where it is kept, and what each project has.
   handle('memory:get', (arg) => memoryView(arg || {}));
 
-  handle('memory:set', (patch) => {
+  handle('memory:set', async (patch) => {
     patch = patch && typeof patch === 'object' ? patch : {};
     const before = memorySettings();
     const next = { ...before };
@@ -1819,8 +1817,6 @@ function registerIpc() {
     }
     if (next.location === 'custom' && !next.customDir) throw new Error('Choose a folder for the memory first.');
     // The place changed: each project's memory moves with it.
-    let moved = 0;
-    let failed = 0;
     if (next.location !== before.location || next.customDir !== before.customDir) {
       // The old place is remembered: a project that is not moved now (it has
       // no session left, its drive is away, or the move failed) is moved the
@@ -1831,20 +1827,18 @@ function registerIpc() {
       next.left = [was, ...(before.left || [])]
         .filter((place, i, all) => !same(place, now) && all.findIndex((other) => same(other, place)) === i).slice(0, 4);
     }
-    if (next.enabled && (next.location !== before.location || next.customDir !== before.customDir)) {
-      for (const cwd of projectFolders()) {
-        try {
-          moved += projectMemory.moveMemory(memoryDirOf(cwd, before), memoryDirOf(cwd, next));
-        } catch (err) {
-          failed += 1;
-          log.warn(`project memory: could not move the memory of ${cwd}: ${err.message}`);
-        }
-      }
-    }
+    const move = next.enabled && (next.location !== before.location || next.customDir !== before.customDir);
+    // The choice holds from now: a session that starts while the notes are
+    // still on their way brings its own project's notes along (prepareMemory).
     state.projectMemory = next;
     saveState();
-    prepareAllMemory();
-    return { ...memoryView(patch), moved, failed };
+    const done = await memoryJobs.run({
+      type: 'set', cwds: sessionFolders(), before, next: memorySettings(), appDir: app.getPath('userData'),
+      move, current: memoryFolderOf(patch),
+    });
+    logMemoryErrors(done.errors);
+    // The settings as they are now: the user may have changed them again meanwhile.
+    return { ...memoryViewOf(memorySettings(), done), moved: done.moved, failed: done.failed };
   });
 
   handle('memory:pickFolder', async () => {

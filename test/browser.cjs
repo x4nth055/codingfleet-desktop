@@ -203,6 +203,21 @@ app.whenReady().then(async () => {
     check(reason({ action: 'type', ref: 'ref_1', text: 'x' }) === `types into ${site}`, 'typing into it asks');
     check(reason({ action: 'press', keys: 'Enter' }) === `types into ${site}`, 'and so does pressing Enter there');
     check(reason({ action: 'press', keys: 'Escape' }) === `uses ${site} in the browser`, 'other keys are only using it');
+    // Calls sent together are all asked about on the page of that moment. A
+    // "type" that was judged on a local page is not done when a navigation
+    // sent before it has put a site there.
+    r = await act({ action: 'navigate', url: base });
+    r = await act({ action: 'read_page' });
+    const typing = { action: 'type', ref: (/\[(ref_\d+)\] textbox "New todo"/.exec(textOf(r)) || [])[1], text: 'typed on the wrong page' };
+    check(browser.approvalReason(typing, 'together-1') === null, 'typing on a local page needs no OK');
+    r = await act({ action: 'navigate', url: `http://${site}/` });
+    r = await browser.forAgent('S', typing, { call: { id: 'together-1' } });
+    check(r.is_error && /^Nothing was typed: the page changed/.test(r.output) && r.output.includes(site),
+      `typing that was judged on another page is not done: ${JSON.stringify(r.output)}`);
+    // Sent again by itself it is asked about this site, and then it runs.
+    check(browser.approvalReason(typing, 'together-2') === `types into ${site}`, 'the same action, sent again, asks about this site');
+    r = await browser.forAgent('S', typing, { call: { id: 'together-2' } });
+    check(!/Nothing was typed/.test(textOf(r)), `once asked about this site, it runs: ${textOf(r)}`);
     // Every site allowed: opening and using ask no more, typing still does.
     policy.anySite = true;
     check(reason({ action: 'navigate', url: 'https://example.com/' }) === null, 'any site: opening needs no OK');

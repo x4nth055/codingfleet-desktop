@@ -777,7 +777,13 @@ function renderProjectMemory(body, pane) {
   const load = () => call(cf.memory, ask()).then(draw, (err) => {
     box.replaceChildren(el('div', 'set-desc bad', err.message));
   });
-  const change = (patch) => call(cf.setMemory, { ...patch, ...ask() }).then((view) => {
+  const change = (patch) => {
+    // With many projects a move takes some seconds: the app stays free meanwhile.
+    for (const input of box.querySelectorAll('select, input, button')) input.disabled = true;
+    paneStatus(pane, 'location' in patch ? 'Moving the notes…' : 'Saving…');
+    return save(patch);
+  };
+  const save = (patch) => call(cf.setMemory, { ...patch, ...ask() }).then((view) => {
     draw(view);
     const late = view.failed ? ` The notes of ${view.failed} ${view.failed === 1 ? 'project' : 'projects'} could not be moved now: `
       + 'they follow when a session starts there.' : '';

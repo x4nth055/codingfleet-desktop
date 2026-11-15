@@ -78,7 +78,13 @@ app.whenReady().then(async () => {
           const result = await computer.forAgent(session.id, args, context);
           results_.push(result);
           return result;
-        }]]),
+        }],
+        // The server offers a desktop key this tool too, and the app runs it
+        // in its main process, which is not here. Without an answer the turn
+        // would wait ten minutes for one.
+        ['take_screenshot', async () => ({
+          output: "take_screenshot is not available in this test. Use the computer tool's screenshot action.", is_error: true,
+        })]]),
         onEvent: (event, data) => {
           if (event === 'text.delta') answer += data.text;
           if (event === 'run.ended') ended = data;
