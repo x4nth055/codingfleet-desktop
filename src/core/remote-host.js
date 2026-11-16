@@ -3,8 +3,8 @@
 // computer directly: the desktop app tells the API it is there ("host"), with
 // the sessions and folders it offers and the approvals it is waiting on, and
 // waits for commands on a long poll. A command starts a run, makes a session
-// in a folder, or answers an approval; the app does it as if its owner had
-// typed it, and reports back.
+// in a folder, answers an approval, or asks for a picture in a session's
+// folder; the app does it as if its owner had typed it, and reports back.
 //
 // No Electron in here, so it can be tested on its own: the main process gives
 // it the API, the state to publish and the handlers (main/phones.js).
@@ -99,11 +99,31 @@ function buildHostState({ name, platform, version, permissionMode, sessions, las
   return { state, folderPaths };
 }
 
-/** What a command's sender is told: { ok, session_id?, run_id?, error? }, nothing else. */
+// A picture for image.read: what the server keeps (assistant/api/remote.py).
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const MAX_IMAGE_CHARS = 1_866_668;
+
+function imageResult(image) {
+  if (!image || !IMAGE_TYPES.has(image.type) || typeof image.data !== 'string' || !image.data
+    || image.data.length > MAX_IMAGE_CHARS) return null;
+  const out = { type: image.type, data: image.data };
+  for (const side of ['width', 'height']) {
+    if (Number.isInteger(image[side]) && image[side] > 0 && image[side] <= 20000) out[side] = image[side];
+  }
+  if (typeof image.name === 'string' && image.name) out.name = image.name.slice(0, 120);
+  return out;
+}
+
+/** What a command's sender is told: { ok, session_id?, run_id?, image?, error? }, nothing else. */
 function commandResult(value) {
   const out = { ok: Boolean(value && value.ok === true) };
   for (const key of ['session_id', 'run_id', 'error']) {
     if (value && typeof value[key] === 'string' && value[key]) out[key] = value[key].slice(0, 500);
+  }
+  if (out.ok && value.image) {
+    const image = imageResult(value.image);
+    if (image) out.image = image;
+    else return { ok: false, error: 'This picture cannot be sent to a phone.' };
   }
   if (!out.ok && !out.error) out.error = 'This computer could not do that.';
   return out;

@@ -1169,6 +1169,8 @@ const phones = createPhones({
   recoveryActive: (sessionId) => Boolean(recoveryStore && recoveryStore.active(sessionId)),
   decide: decideApproval,
   permissionMode: () => PERMISSION_OVERRIDE || state.permissionMode,
+  // localImages is made further down; a phone's first command comes long after.
+  readImage: (args) => localImages.forPhone(args),
   enabled: !STAGED,
 });
 

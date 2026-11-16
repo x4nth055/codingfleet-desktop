@@ -11,7 +11,9 @@
 // Only files inside the session's folder: an answer that names another path is
 // not a reason to read it, and the folder is the one this process holds for
 // the session, never a folder the window names. Only the app's own window can
-// ask: the browser pane has a session of its own, without this scheme.
+// ask: the browser pane has a session of its own, without this scheme. A
+// linked phone asks for the same pictures through phones.js (forPhone), under
+// the same rule.
 const fs = require('fs');
 const path = require('path');
 
@@ -24,6 +26,10 @@ const VIEWER_MAX_SIDE = 2600;     // opened over the app
 const INLINE_MAX_BYTES = 4 * 1024 * 1024;
 const VIEWER_MAX_BYTES = 12 * 1024 * 1024;
 const MAX_FILE = 40 * 1024 * 1024;
+// For a linked phone, through the relay (assistant/api/remote.py takes 1.4 MB).
+const PHONE_MAX_SIDE = 1400;
+const PHONE_MAX_BYTES = 1_350_000;
+const PHONE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 /**
  * @param {{ folderOf: (sessionId: string) => string|null, nativeImage: object }} o
@@ -97,6 +103,42 @@ function createLocalImages({ folderOf, nativeImage }) {
     return { ...found, ...sized.getSize(), type, data };
   }
 
+  /**
+   * The image for a linked phone (the relay's image.read): one the phone draws
+   * as it is, small enough for the relay. A drawing (SVG) is refused: it is a
+   * document, which can name other addresses, and the phone does not draw it.
+   * @returns {Promise<{ type, data: string (base64), width?, height?, name }>}
+   */
+  async function forPhone(args = {}) {
+    const { src, file } = await locate(args);
+    if (!PHONE_TYPES.has(images.mimeOf(file))) throw new Error(`${src} cannot be shown on a phone.`);
+    let image = await read({ sessionId: args.sessionId, path: args.path });
+    if (image.data.length > PHONE_MAX_BYTES && !images.keepsAsIs(file)) {
+      // Smaller again, as JPEG: a phone screen does not need more.
+      const decoded = nativeImage.createFromBuffer(image.data);
+      if (!decoded.isEmpty()) {
+        const size = decoded.getSize();
+        const scale = Math.min(1, PHONE_MAX_SIDE / Math.max(size.width, size.height));
+        const sized = scale < 1
+          ? decoded.resize({ width: Math.round(size.width * scale), height: Math.round(size.height * scale), quality: 'best' })
+          : decoded;
+        for (const quality of [85, 70, 55]) {
+          const data = sized.toJPEG(quality);
+          image = { ...image, ...sized.getSize(), type: 'image/jpeg', data };
+          if (data.length <= PHONE_MAX_BYTES) break;
+        }
+      }
+    }
+    if (image.data.length > PHONE_MAX_BYTES) throw new Error(`${src} is too large to show on a phone.`);
+    if (!PHONE_TYPES.has(image.type)) throw new Error(`${src} cannot be shown on a phone.`);
+    return {
+      type: image.type,
+      data: image.data.toString('base64'),
+      ...(image.width ? { width: image.width, height: image.height } : {}),
+      name: image.name,
+    };
+  }
+
   /** The image as a data: URL, for a copy drawn on a canvas (copying it). */
   async function dataUrl(args) {
     const { data, type, ...rest } = await read(args);
@@ -128,7 +170,7 @@ function createLocalImages({ folderOf, nativeImage }) {
     }
   }
 
-  return { info, read, dataUrl, respond };
+  return { info, read, forPhone, dataUrl, respond };
 }
 
 module.exports = { createLocalImages, SCHEME };

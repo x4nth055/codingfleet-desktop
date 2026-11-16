@@ -282,6 +282,21 @@ test('a result carries only what the server takes', () => {
   assert.equal(commandResult({ ok: false, error: 'x'.repeat(900) }).error.length, 500);
 });
 
+test('a picture for a phone is a small raster image, or the command fails', () => {
+  const image = { type: 'image/png', data: 'iVBORw0KGgo=', width: 640, height: 480, name: 'plot.png' };
+  assert.deepEqual(commandResult({ ok: true, image, url: 'x' }), { ok: true, image });
+  for (const bad of [
+    { ...image, type: 'image/svg+xml' },
+    { ...image, data: '' },
+    { ...image, data: 'A'.repeat(1_866_669) },
+  ]) {
+    assert.deepEqual(commandResult({ ok: true, image: bad }), { ok: false, error: 'This picture cannot be sent to a phone.' });
+  }
+  // Sizes that are not sizes are left out, not sent.
+  assert.deepEqual(commandResult({ ok: true, image: { ...image, width: -1, height: 1.5 } }).image,
+    { type: 'image/png', data: 'iVBORw0KGgo=', name: 'plot.png' });
+});
+
 test('the QR code is black on white, with white all around it', () => {
   const svg = qrSvg(`codingfleet://link/${'a'.repeat(32)}`);
   const size = Number(/viewBox="0 0 (\d+) \1"/.exec(svg)[1]);

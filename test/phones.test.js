@@ -9,6 +9,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { ApiError } = require('../src/core/api');
+const { createLocalImages } = require('../src/main/local-images');
 const { createPhones } = require('../src/main/phones');
 
 async function until(check, what) {
@@ -86,6 +87,12 @@ function setup({ devices = [COMPUTER, PHONE], state = {}, devicesError = null } 
       return world.approvals.delete(callId);
     },
     permissionMode: () => world.state.permissionMode,
+    // The real reader, with a decoder that reads nothing: a picture goes as it is.
+    readImage: (args) => localImages.forPhone(args),
+  });
+  const localImages = createLocalImages({
+    folderOf: (sessionId) => (world.state.sessions[sessionId] || {}).cwd || null,
+    nativeImage: { createFromBuffer: () => ({ isEmpty: () => true }) },
   });
   phones.register((channel, fn) => { world.ipc[channel] = fn; });
   // Hands commands to the poll in flight, and gives back their results.
@@ -230,6 +237,44 @@ test('a phone answers an approval with yes or no, and nothing more', async () =>
   // Answered twice: the second is told so.
   const [again] = await world.command({ type: 'approval.answer', call_id: 'call_1', decision: 'allow' });
   assert.equal(again.ok, false);
+  await world.close();
+});
+
+test('a phone sees a picture of a session folder, and nothing outside it', async () => {
+  const world = setup();
+  await world.ipc['phones:list']();
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  fs.mkdirSync(path.join(world.shop, 'out'));
+  fs.writeFileSync(path.join(world.shop, 'out', 'plot.png'), png);
+  fs.writeFileSync(path.join(world.shop, 'chart.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  fs.writeFileSync(path.join(world.shop, 'notes.txt'), 'secret');
+  fs.writeFileSync(path.join(world.other, 'elsewhere.png'), png);
+
+  const [shown, outside, svg, text, missing, cloud, unknown, extra] = await world.command(
+    { type: 'image.read', session_id: 'S1', path: 'out/plot.png' },
+    { type: 'image.read', session_id: 'S1', path: '../api/elsewhere.png' },
+    { type: 'image.read', session_id: 'S1', path: 'chart.svg' },
+    { type: 'image.read', session_id: 'S1', path: 'notes.txt' },
+    { type: 'image.read', session_id: 'S1', path: 'gone.png' },
+    { type: 'image.read', session_id: 'CLOUD', path: 'out/plot.png' },
+    { type: 'image.read', session_id: 'S9', path: 'out/plot.png' },
+    { type: 'image.read', session_id: 'S1', path: 'out/plot.png', cwd: world.other },
+  );
+  assert.deepEqual(shown, {
+    id: shown.id, ok: true, session_id: 'S1',
+    image: { type: 'image/png', data: png.toString('base64'), name: 'plot.png' },
+  });
+  assert.match(outside.error, /outside the session folder/);
+  assert.match(svg.error, /cannot be shown on a phone/);
+  assert.match(text.error, /Not an image/);
+  assert.match(missing.error, /not there/);
+  assert.match(cloud.error, /no folder/);
+  assert.match(unknown.error, /not on this computer/);
+  assert.match(extra.error, /cwd/);
+  for (const refused of [outside, svg, text, missing, cloud, unknown, extra]) {
+    assert.equal(refused.ok, false);
+    assert.equal(refused.image, undefined);
+  }
   await world.close();
 });
 

@@ -228,13 +228,15 @@ open here, it can also:
 | Sends a message in a session | The run starts here, as if you had typed it. The conversation shows the message, marked **From** the phone |
 | Starts a session in one of your recent folders | The same, in a new session |
 | Answers an approval | **Allow** or **Deny**, for that one call. "Allow all this session" stays on the computer |
+| Opens an answer with a chart | The app sends that picture (made smaller), as the conversation here shows it: only an image file inside the session's folder |
 
 A run a phone starts goes through the same approvals as yours. In **Auto-approve**, the
 commands it starts run without asking, like yours.
 
 The phone is told the *name* of each session's folder, the names of your recent folders, and
 the approvals that wait: the command, the file or the site. A folder's path never leaves the
-computer. A phone cannot name a path, change a setting or switch to Auto-approve.
+computer. A phone cannot change a setting or switch to Auto-approve, and the only path it can
+name is a picture's that an answer shows, read inside that session's folder.
 
 To turn it off, switch off **Phones can use this computer** in Settings > Phones: the app
 stops listening at once. **Remove** signs a phone out of your account. With no phone linked,

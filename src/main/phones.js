@@ -15,10 +15,13 @@
 // the folders with an id made here, and the approvals that wait. Never a path.
 //
 // What a phone can make this computer do: start a run with a message, in a
-// session or a folder this computer published, and say yes or no to one
-// approval. A command names no path and changes no setting; anything else in
-// it is refused. A run it starts goes through the window like a typed message,
-// and through the same approvals.
+// session or a folder this computer published, say yes or no to one approval,
+// and see a picture the agent made in a session's folder (the chart an answer
+// shows as ![chart](out/plot.png)). A command changes no setting, and the one
+// path a phone names, a picture's, is read only inside that session's folder
+// and only if it is an image (local-images.js, as for the window); anything
+// else in a command is refused. A run it starts goes through the window like a
+// typed message, and through the same approvals.
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -53,6 +56,7 @@ const COMMAND_FIELDS = {
   'run.start': ['session_id', 'message', 'model', 'files'],
   'session.create': ['folder', 'message', 'model', 'files'],
   'approval.answer': ['call_id', 'decision'],
+  'image.read': ['session_id', 'path'],
 };
 // Tools whose subject is a file: shown from the session's folder, as in the conversation.
 const FILE_TOOLS = new Set(['fs_read', 'fs_write', 'fs_edit', 'view_image']);
@@ -77,11 +81,13 @@ function isDirectory(dir) {
  * @param {(sessionId: string) => boolean} o.recoveryActive Whether an interrupted run waits to be recovered.
  * @param {(callId: string, decision: string) => boolean} o.decide Answers an approval, as the window does.
  * @param {() => string} o.permissionMode 'auto' or 'ask'.
+ * @param {(args: { sessionId: string, path: string }) => Promise<object>} [o.readImage] A picture of a
+ *   session's folder, for a phone (local-images.js forPhone).
  * @param {boolean} [o.enabled] False for a staged development start: nothing is asked, nothing listens.
  */
 function createPhones({
   api, app, log, send, getWindow, getState, saveState, runs, approvals, recoveryActive, decide, permissionMode,
-  enabled = true,
+  readImage, enabled = true,
 }) {
   let devices = null;       // the account's apps at the last look, or null when not known
   let unavailable = false;  // the server has no devices and no remote control yet (404)
@@ -262,10 +268,29 @@ function createPhones({
     return { ok: true, session_id: sessionId, ...(runId ? { run_id: String(runId) } : {}) };
   }
 
+  // A picture the agent made in a session's folder. The path is the answer's;
+  // readImage keeps it inside the folder and refuses what is not an image.
+  async function sendImage(command) {
+    checkFields(command);
+    const { session_id: sessionId, path: shown } = command;
+    const sessions = getState().sessions || {};
+    if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId) || !Object.hasOwn(sessions, sessionId)) {
+      throw new Error('This session is not on this computer.');
+    }
+    if (typeof shown !== 'string' || !shown || shown.length > 1024 || /[\u0000-\u001f]/.test(shown)) {
+      throw new Error('That is not a picture of this session.');
+    }
+    if (!readImage) throw new Error('This computer cannot send pictures.');
+    const image = await readImage({ sessionId, path: shown });
+    return { ok: true, session_id: sessionId, image };
+  }
+
   const host = new RemoteHost({
     api,
     state: () => build().state,
-    handlers: { 'run.start': startRun, 'session.create': createSession, 'approval.answer': answerApproval },
+    handlers: {
+      'run.start': startRun, 'session.create': createSession, 'approval.answer': answerApproval, 'image.read': sendImage,
+    },
     warn: (message) => log.warn(message),
     onHalt: (status, err) => {
       // 404: a server without remote control. Nothing is asked again until the
