@@ -321,6 +321,27 @@ module.exports = {
   snapshots: () => request('GET', '/snapshots?limit=200'),
   updateSnapshot: (snapshotId, body) => request('PATCH', `/snapshots/${id(snapshotId)}`, body),
   deleteSnapshot: (snapshotId) => request('DELETE', `/snapshots/${id(snapshotId)}`),
+  // The apps signed in to this account (computers and phones), and signing one out.
+  devices: () => request('GET', '/devices', undefined, undefined, 30000),
+  removeDevice: (deviceId) => request('DELETE', `/devices/${id(deviceId)}`, undefined, undefined, 30000),
+  // Linking a phone: a code to show as a QR code, what became of it, and the
+  // answer given on this computer once a phone scanned it ('approve' or 'deny').
+  startDeviceLink: () => request('POST', '/devices/links', {}, undefined, 30000),
+  deviceLink: (linkId) => request('GET', `/devices/links/${id(linkId)}`, undefined, undefined, 30000),
+  decideDeviceLink: (linkId, decision) =>
+    request('POST', `/devices/links/${id(linkId)}`, { decision }, undefined, 30000),
+  // The code is taken back: it stops working now, not when its time is up.
+  cancelDeviceLink: (linkId) => request('DELETE', `/devices/links/${id(linkId)}`, undefined, undefined, 15000),
+  // Remote control (core/remote-host.js): this computer says it is there, with
+  // what it offers, and stops saying so; it waits for the commands of the
+  // account's phones on a long poll, and reports what came of each.
+  publishRemoteHost: (state, signal) => request('PUT', '/remote/host', state, signal, 30000),
+  forgetRemoteHost: (timeoutMs = 30000) => request('DELETE', '/remote/host', undefined, undefined, timeoutMs),
+  // The server holds the answer up to `wait` seconds; the timeout leaves it room.
+  remoteCommands: (wait, signal) =>
+    request('GET', `/remote/commands?wait=${Number(wait) || 0}`, undefined, signal, ((Number(wait) || 0) + 15) * 1000),
+  remoteCommandResult: (commandId, result) =>
+    request('POST', `/remote/commands/${id(commandId)}/result`, result, undefined, 30000),
   uploadFile: upload,
   deleteFile: (fileId) => request('DELETE', `/files/${id(fileId)}`),
   fileContent: (fileId) => download(`/files/${id(fileId)}/content`),

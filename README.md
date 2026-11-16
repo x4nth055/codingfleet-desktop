@@ -53,6 +53,7 @@ Open the app, click **Sign in with your browser**, and approve. That's all.
 | 💳 **Cost before you send** | An estimate next to the Send button, and what the session has cost so far. |
 | @ **Mention files** | Type `@` to pick a file or folder of the project. |
 | 🌐 **Browser** | A browser beside the conversation. The agent opens your dev server there to check what it built: it reads the page, clicks, types, and looks at it. |
+| 📱 **Phones** | Link the CodingFleet mobile app with a QR code. See this computer's sessions on your phone, continue them, and answer approvals. |
 | 🖥️ **Terminal** | Your own shells beside the conversation, at the bottom or on the right. Ctrl+\` shows and hides it. |
 | ⌨️ **Keyboard first** | Answer approvals with Alt+Y / Alt+N, search sessions, find in a conversation. Ctrl+/ lists every shortcut. |
 | 📄 **Export** | Copy an answer as Markdown, or save a whole session as a `.md` file. |
@@ -212,6 +213,33 @@ The browser has its own profile: none of your real browser's logins or cookies, 
 and no camera, location or notifications. **Clear browsing data** in Preferences empties it.
 Turn **Browser for the agent** off in Preferences > Agent tools to keep the agent out of it.
 
+### Phones
+
+**Settings > Phones** links the CodingFleet mobile app to your account. Click **Link a
+phone**, scan the QR code with the app, check that both screens show the same four digits,
+and click **Link this phone**. Nobody types a password or a key on the phone. A code works
+once, for three minutes.
+
+A linked phone sees the sessions of this computer and can follow a run. While the app is
+open here, it can also:
+
+| What the phone does | What happens on the computer |
+|---|---|
+| Sends a message in a session | The run starts here, as if you had typed it. The conversation shows the message, marked **From** the phone |
+| Starts a session in one of your recent folders | The same, in a new session |
+| Answers an approval | **Allow** or **Deny**, for that one call. "Allow all this session" stays on the computer |
+
+A run a phone starts goes through the same approvals as yours. In **Auto-approve**, the
+commands it starts run without asking, like yours.
+
+The phone is told the *name* of each session's folder, the names of your recent folders, and
+the approvals that wait: the command, the file or the site. A folder's path never leaves the
+computer. A phone cannot name a path, change a setting or switch to Auto-approve.
+
+To turn it off, switch off **Phones can use this computer** in Settings > Phones: the app
+stops listening at once. **Remove** signs a phone out of your account. With no phone linked,
+the app does not listen at all.
+
 ## Project instructions (`AGENTS.md`)
 
 Put an `AGENTS.md` file in your folder, and the agent follows it:
@@ -323,6 +351,9 @@ In practice:
   your system and shell, which features and built-in connectors are on, which coding CLIs it
   found, and whether each tool call ran at once or after you answered. These are words from a
   fixed list and counts, never a path, a file or server name, or what is in a file.
+- With a phone linked and **Phones can use this computer** on, it tells CodingFleet which
+  sessions and folder names this computer offers and which approvals wait, so the phone can
+  show them. Never a folder's path.
 - It checks for updates only if you said yes.
 - It sends a crash report only if you click **Send report**.
 - Images from other websites load only when you click them.

@@ -169,6 +169,22 @@ contextBridge.exposeInMainWorld('cf', {
     ipcRenderer.on('codingAgents:changed', wrapped);
     return () => ipcRenderer.removeListener('codingAgents:changed', wrapped);
   },
+  // Phones (Settings > Phones): the account's devices, linking a phone with a
+  // QR code, and whether linked phones may use this computer.
+  phones: call('phones:list'),
+  linkPhone: call('phones:link'),
+  phoneLink: call('phones:linkStatus'),
+  decidePhoneLink: call('phones:linkDecide'),
+  cancelPhoneLink: call('phones:linkCancel'),
+  removePhone: call('phones:remove'),
+  setRemoteControl: call('phones:setRemote'),
+  // A message a linked phone sent for this computer, and how sending it went.
+  onPhoneRun: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on('phones:run', wrapped);
+    return () => ipcRenderer.removeListener('phones:run', wrapped);
+  },
+  phoneRunResult: call('phones:runResult'),
   // The path of a file dropped on the window (Electron no longer puts it on File).
   pathForFile: (file) => {
     try { return webUtils.getPathForFile(file) || ''; } catch { return ''; }

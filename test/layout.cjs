@@ -248,6 +248,67 @@ app.whenReady().then(async () => {
         checks++;
       }
     }
+    // Settings > Phones: the QR code is black on a white card in every theme
+    // and loads under the page's CSP; the code, then the phone to confirm,
+    // then the list, all stay inside the pane.
+    const { qrSvg } = require('../src/core/qr-svg');
+    const qr = qrSvg(`codingfleet://link/${'k'.repeat(32)}`);
+    for (const width of [940, 1320]) {
+      win.setContentSize(width, 850);
+      for (const theme of ['dark', 'light', 'hacker']) {
+        for (const phase of ['code', 'claimed']) {
+          const result = await win.webContents.executeJavaScript(`(async () => {
+            document.documentElement.dataset.theme = ${JSON.stringify(theme)};
+            S.permission = 'auto';
+            openSettings(false, 'phones');
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            stopPhoneLink();
+            phoneLink = { phase: ${JSON.stringify(phase)}, id: 'link', qr: ${JSON.stringify(qr)}, expiresAt: Date.now() + 161000, every: 2000,
+              known: new Set(), misses: 0, device: { name: "Someone's Pixel 9 Pro XL with a long name", platform: 'android' }, code: '4827' };
+            drawPhones();
+            const picture = document.querySelector('.phone-qr img');
+            if (picture) await picture.decode().catch(() => {});
+            const pane = $('phonesPane');
+            const box = (n) => n.getBoundingClientRect();
+            const errors = [];
+            if (pane.scrollWidth > pane.clientWidth + 1) errors.push('the pane scrolls sideways');
+            for (const n of pane.querySelectorAll('.btn, .phone-qr, .phone-code, .set-row, .phone-link, .pill, .switch')) {
+              const r = box(n);
+              if (r.width && (r.x < box(pane).x - 1 || r.right > box(pane).right + 1)) errors.push(n.className + ' leaves the pane');
+            }
+            for (const n of pane.querySelectorAll('.btn')) if (n.scrollWidth > n.clientWidth + 1) errors.push(n.textContent + ' is cut off');
+            const card = document.querySelector('.phone-qr');
+            if (card) {
+              if (getComputedStyle(card).backgroundColor !== 'rgb(255, 255, 255)') errors.push('the code is not on white');
+              if (Math.abs(box(card).width - box(card).height) > 1 || box(card).width < 160) errors.push('the code is not a readable square');
+              if (!picture.naturalWidth) errors.push('the code did not load');
+            }
+            const out = {
+              errors, code: Boolean(card), countdown: (pane.querySelector('.phone-countdown') || {}).textContent || '',
+              digits: (pane.querySelector('.phone-code') || {}).textContent || '',
+              buttons: [...pane.querySelectorAll('#phoneLinkBox .btn')].map((b) => b.textContent),
+              rows: pane.querySelectorAll('.phone-row').length, warn: pane.querySelectorAll('.set-row.warn').length,
+              remove: [...pane.querySelectorAll('.phone-row .btn')].map((b) => b.textContent),
+              tab: document.querySelector('#settingsTabs .active').textContent,
+            };
+            stopPhoneLink();
+            $('settings').hidden = true;
+            return out;
+          })()`);
+          assert.deepEqual(result.errors, [], `phones ${width}/${theme}/${phase}`);
+          assert.equal(result.tab, 'Phones');
+          assert.equal(result.code, phase === 'code', `${phase}: the code shows only until a phone scanned it`);
+          assert.match(result.countdown, phase === 'code' ? /^This code works for 2:4\d more\.$/ : /^Answer within 2:4\d\.$/);
+          assert.equal(result.digits, phase === 'claimed' ? '4827' : '');
+          assert.deepEqual(result.buttons, phase === 'code' ? ['Cancel'] : ['Deny', 'Link this phone']);
+          // One phone with its Remove button, two computers without; Auto-approve is said.
+          assert.equal(result.rows, 3);
+          assert.deepEqual(result.remove, ['Remove']);
+          assert.equal(result.warn, 1);
+          checks++;
+        }
+      }
+    }
     // A window too small for the width chosen takes the sidebar down, not the conversation.
     win.setContentSize(940, 850);
     await win.webContents.executeJavaScript('new Promise(resolve => setTimeout(resolve, 100))');

@@ -56,6 +56,18 @@ contextBridge.exposeInMainWorld('cf', {
   moveToBackground: async ({ callId }) => { moved.push(callId); return { ok: true, data: true }; },
   movedCalls: async () => [...moved],
   decide: async ({ callId, decision }) => { decided.push({ callId, decision }); return { ok: true, data: true }; },
+  // Settings > Phones: the account's devices, as the main process answers them (test/layout.cjs).
+  phones: async () => ({ ok: true, data: {
+    remoteControl: true, hosting: true,
+    devices: [
+      { id: 'pc', name: 'A-RATHER-LONG-COMPUTER-NAME (desktop app)', kind: 'computer', platform: 'windows', current: true,
+        online: true, created_at: '2026-09-01T10:00:00Z', last_used_at: new Date().toISOString() },
+      { id: 'phone', name: "Someone's Pixel 9 Pro XL with a long name", kind: 'phone', platform: 'android', current: false,
+        online: false, created_at: '2026-09-20T10:00:00Z', last_used_at: new Date(Date.now() - 2 * 3600000).toISOString() },
+      { id: 'mac', name: 'Studio', kind: 'computer', platform: 'macos', current: false, online: false,
+        created_at: '2026-08-01T10:00:00Z', last_used_at: null },
+    ],
+  } }),
   decisions: async () => [...decided],
   init: async () => ({ ok: true, data: {
     platform: 'win32', version: 'test',

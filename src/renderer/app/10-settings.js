@@ -75,6 +75,8 @@ function resetAccountView() {
   });
   sbx.building.clear();
   sbx.openErrors.clear();
+  // And its phones, and a phone it was in the middle of linking.
+  forgetPhones();
 }
 
 // The account the app works as has changed: forget what the old one loaded.
@@ -257,6 +259,7 @@ function showSettingsTab(tab) {
   }
   for (const pane of document.querySelectorAll('.settings-pane')) pane.hidden = pane.dataset.pane !== tab;
   markPrefsMenu();
+  if (tab === 'phones') renderPhonesPane();
   if (tab === 'privacy') renderPrivacyPane();
   if (tab === 'preferences') renderPreferencesPane();
   if (tab === 'mcp') renderMcpPane();

@@ -263,6 +263,8 @@ function fromHistory(sessionId, messages, compactions = []) {
     }
   }
   flushCompactions(null);
+  // The history does not say which messages a phone sent: this window does (12-phones.js).
+  markPhoneMessages(sessionId, items);
   return items;
 }
 

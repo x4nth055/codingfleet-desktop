@@ -288,7 +288,12 @@ function renderItem(item) {
     case 'user': {
       node = el('div', `msg user${item.steer ? ' steer' : ''}`);
       const wrap = el('div', 'user-wrap');
-      if (item.at) wrap.append(stamp(item.at, 'user'));
+      if (item.at) {
+        const when = stamp(item.at, 'user');
+        // Sent from a linked phone (12-phones.js): the line says which.
+        if (item.from) when.textContent = `${when.textContent} · From ${item.from}`;
+        wrap.append(when);
+      }
       if (item.steer) wrap.append(el('div', 'steer-label', 'Sent while working'));
       if (item.files && item.files.length) {
         const files = el('div', 'msg-files');

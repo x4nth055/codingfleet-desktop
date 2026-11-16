@@ -13,6 +13,7 @@ const { startNativeDumps, createCrashes } = require('./crash');
 const { createUpdater } = require('./updater');
 const { createTaskbar } = require('./taskbar');
 const { createCodingAgents } = require('./coding-agents');
+const { createPhones } = require('./phones');
 const fileIndex = require('../core/file-index');
 const { createLog } = require('../core/log');
 const { BackgroundJobs } = require('../core/background');
@@ -126,6 +127,8 @@ function saveState() {
   const temporary = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify(state, null, 2));
   fs.renameSync(temporary, file);
+  // What a linked phone is shown of this computer comes from this state (phones.js).
+  phones.refresh();
 }
 
 // ---------------------------------------------------------------------------
@@ -712,7 +715,7 @@ function rememberUndo(sessionId, run) {
 }
 
 let signIn = null;            // the browser sign-in waiting for approval, if any
-const approvals = new Map();  // tool call id -> { resolve, sessionId, reason, clock? }
+const approvals = new Map();  // tool call id -> { resolve, sessionId, reason, call, clock? }
 // An approval nobody answers gives up after 10, then 5, 3 and 1 minutes (core/approval-clock.js).
 const approvalClock = createApprovalClock();
 
@@ -1052,7 +1055,7 @@ function approve(sessionId, cwd, call, localTools) {
       if (cli && decision !== 'allow') codingAgents.declined(sessionId, call, cwd);
       answer(decision);
     };
-    const entry = { resolve, sessionId, reason };
+    const entry = { resolve, sessionId, reason, call };
     // Nobody answered in time: the call is not run, and the agent is told so
     // and goes on with the rest of the work.
     entry.clock = approvalClock.start(sessionId, (minutes) => {
@@ -1074,7 +1077,7 @@ function approve(sessionId, cwd, call, localTools) {
 function confirmInterruptedTool(sessionId, call) {
   const reason = 'retry interrupted tool';
   return new Promise((resolve) => {
-    approvals.set(call.id, { resolve, sessionId, reason });
+    approvals.set(call.id, { resolve, sessionId, reason, call });
     syncTaskbar();
     send('run:event', { sessionId, event: 'client.approval', data: { id: call.id, reason } });
     notify(sessionId, `Check whether ${call.name} ran before retrying it.`);
@@ -1111,6 +1114,7 @@ function makeRun(sessionId, localTools, recovery) {
     onEvent: (event, data) => {
       send('run:event', { sessionId, event, data });
       logRunEvent(sessionId, event, data);
+      phones.onRunEvent(sessionId, event, data);
       if (event === 'tool.result') cloudToolResult(sessionId, data);
       if (event === 'client.finished' && FINISHED_TEXT[data.reason]) notify(sessionId, FINISHED_TEXT[data.reason]);
     },
@@ -1118,8 +1122,55 @@ function makeRun(sessionId, localTools, recovery) {
 }
 
 // The taskbar button: busy while a run goes, marked while an approval waits.
+// A linked phone is told of the same changes: an approval asked or answered.
 const taskbar = createTaskbar({ app, nativeImage, getWindow: () => win });
-const syncTaskbar = () => taskbar.sync({ running: runs.size, waiting: approvals.size });
+const syncTaskbar = () => {
+  taskbar.sync({ running: runs.size, waiting: approvals.size });
+  phones.refresh();
+};
+
+// The answer to an approval: from the window's bar, or from a linked phone
+// (phones.js), which only ever says 'allow' or 'deny'.
+function decideApproval(callId, decision) {
+  const waiting = approvals.get(callId);
+  if (!waiting) return false;
+  approvals.delete(callId);
+  syncTaskbar();
+  // Someone answered: the next approval in this session waits the full time again.
+  approvalClock.present(waiting.sessionId);
+  // A destructive command is never allowed for a whole session, whatever the window sends.
+  if (decision === 'allow-session' && !guard.alwaysAsk(waiting.reason)) {
+    rememberAllow(waiting.sessionId, waiting.reason);
+  }
+  // "Always allow <site>": only for a browser site's question, and it adds
+  // the site to the ones the user trusts (Preferences > Agent tools).
+  const site = /^uses (.+) in the browser$/.exec(String(waiting.reason || ''));
+  if (decision === 'allow-site' && site) {
+    const host = browserPage.normalizeSite(site[1]);
+    if (host && !(state.browserSites || []).includes(host)) {
+      state.browserSites = [...(state.browserSites || []), host].slice(0, 100);
+      saveState();
+    }
+  }
+  computer.approvalAnswered(waiting.sessionId);
+  waiting.resolve(decision === 'deny' ? 'deny' : 'allow');
+  return true;
+}
+
+// Phones: linking one to the account with a QR code, and letting linked
+// phones use this computer while the app is open (phones.js).
+const phones = createPhones({
+  api, app, log, send,
+  getWindow: () => win,
+  getState: () => state,
+  saveState,
+  runs,
+  approvals,
+  recoveryActive: (sessionId) => Boolean(recoveryStore && recoveryStore.active(sessionId)),
+  decide: decideApproval,
+  permissionMode: () => PERMISSION_OVERRIDE || state.permissionMode,
+  enabled: !STAGED,
+});
 
 // Keeps a Modern Standby laptop from freezing this app mid-run (see awake.js).
 const awake = createAwake(powerSaveBlocker);
@@ -1313,6 +1364,7 @@ function pointGitWatch(target) {
 
 function registerIpc() {
   codingAgents.register(handle);
+  phones.register(handle);
   handle('app:init', () => ({
     version: app.getVersion(),
     // A crash since the last window load, for the window to offer to send.
@@ -1344,16 +1396,20 @@ function registerIpc() {
     const nextKey = String(apiKey || '').trim() || previous.apiKey;
     const nextBase = config.ENV_API_BASE || config.DEFAULT_API_BASE;
     if (!nextKey) throw new Error('Paste your API key.');
+    // Phones stop hearing from this computer under the key it has now (phones.js).
+    await phones.signOut();
     api.configure({ apiBase: nextBase, apiKey: nextKey });
     let credits;
     try {
       credits = await api.credits();
     } catch (err) {
       api.configure({ apiBase: previous.apiBase, apiKey: previous.apiKey });
+      phones.accountChanged();
       if (err.status === 401) throw new Error('That key was refused. Check it, or create a new one.');
       throw err;
     }
     storeCredentials(nextBase, nextKey);
+    phones.accountChanged();
     return { settings: settingsView(), credits };
   });
 
@@ -1397,8 +1453,11 @@ function registerIpc() {
         if (answer.status === 'denied') throw new Error('The sign-in was declined in the browser.');
         if (answer.status === 'approved' && answer.api_key) {
           approvedKey = answer.api_key;
+          // Phones stop hearing from this computer under the old key first (phones.js).
+          await phones.signOut();
           api.configure({ apiBase: base, apiKey: answer.api_key });
           storeCredentials(base, answer.api_key);
+          phones.accountChanged();
           // Signed in from here on, even if the balance cannot be read right
           // now: failing would put the old key back in memory while the new
           // one is already saved. The window loads the balance itself.
@@ -1425,7 +1484,9 @@ function registerIpc() {
     return true;
   });
 
-  handle('settings:removeKey', () => {
+  handle('settings:removeKey', async () => {
+    // While the key is still there: phones are told this computer stopped listening.
+    await phones.signOut();
     const { apiBase } = api.snapshot();
     api.configure({ apiKey: '' });
     storeCredentials(apiBase, null);
@@ -2134,31 +2195,7 @@ function registerIpc() {
     };
   });
 
-  handle('tool:decide', ({ callId, decision }) => {
-    const waiting = approvals.get(callId);
-    if (!waiting) return false;
-    approvals.delete(callId);
-    syncTaskbar();
-    // Someone answered: the next approval in this session waits the full time again.
-    approvalClock.present(waiting.sessionId);
-    // A destructive command is never allowed for a whole session, whatever the window sends.
-    if (decision === 'allow-session' && !guard.alwaysAsk(waiting.reason)) {
-      rememberAllow(waiting.sessionId, waiting.reason);
-    }
-    // "Always allow <site>": only for a browser site's question, and it adds
-    // the site to the ones the user trusts (Preferences > Agent tools).
-    const site = /^uses (.+) in the browser$/.exec(String(waiting.reason || ''));
-    if (decision === 'allow-site' && site) {
-      const host = browserPage.normalizeSite(site[1]);
-      if (host && !(state.browserSites || []).includes(host)) {
-        state.browserSites = [...(state.browserSites || []), host].slice(0, 100);
-        saveState();
-      }
-    }
-    computer.approvalAnswered(waiting.sessionId);
-    waiting.resolve(decision === 'deny' ? 'deny' : 'allow');
-    return true;
-  });
+  handle('tool:decide', ({ callId, decision }) => decideApproval(callId, decision));
 }
 
 // ---------------------------------------------------------------------------
@@ -2207,6 +2244,7 @@ if (!app.requestSingleInstanceLock() && !SCREENSHOT) {
     createWindow();
     updates.start();
     codingAgents.start();
+    phones.start();
   });
   app.on('window-all-closed', () => app.quit());
   app.on('will-quit', () => {

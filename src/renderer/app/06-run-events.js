@@ -119,6 +119,19 @@ function onRunEvent(payload) {
       // The main process tells someone in another window (notify in main.js).
       break;
     }
+    case 'client.approval_answered': {
+      // Answered from a linked phone (main: phones.js): the bar goes, as for an
+      // answer given here, and the next call in line answers to the keys.
+      const answered = findTool(sessionId, data.id);
+      if (!answered || answered.status !== 'waiting') break;
+      updateTool(sessionId, data.id, { status: data.decision === 'deny' ? 'denied' : 'queued' });
+      const next = waitingTools(sessionId)[0];
+      if (next && next.group !== answered.group) {
+        refreshItem(sessionId, next.group);
+        if (next.group.agentId) agentChanged(sessionId, next.group.agentId);
+      }
+      break;
+    }
     case 'client.tool_running':
       updateTool(sessionId, data.id, { status: 'running', runningSince: Date.now() });
       // A command still running by then offers "Run in background".

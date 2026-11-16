@@ -129,6 +129,8 @@ function wire() {
   if (typeof cf.onBackground === 'function') cf.onBackground(onBackgroundChanged);
   if (typeof cf.onUpdate === 'function') cf.onUpdate(onUpdateStatus);
   if (typeof cf.onGitChanged === 'function') cf.onGitChanged(onGitChanged);
+  // A message a linked phone sent for this computer (12-phones.js).
+  if (typeof cf.onPhoneRun === 'function') cf.onPhoneRun(runFromPhone);
   cf.onOpenSession((sessionId) => {
     if (S.sessions.some((s) => s.id === sessionId)) selectSession(sessionId);
   });
@@ -393,7 +395,7 @@ async function boot() {
     TERM.position = S.init.shotMenu === 'terminal-right' ? 'right' : 'bottom';
     openTerminalPanel();
   }
-  if (['privacy', 'preferences', 'mcp'].includes(S.init.shotMenu)) openSettings(false, S.init.shotMenu);
+  if (['privacy', 'preferences', 'mcp', 'phones'].includes(S.init.shotMenu)) openSettings(false, S.init.shotMenu);
   if (S.init.shotMenu === 'copy') {
     setTimeout(() => { const button = document.querySelector('.code-copy'); if (button) button.click(); }, 2500);
   }
