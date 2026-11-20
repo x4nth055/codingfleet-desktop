@@ -21,6 +21,8 @@ function onRunEvent(payload) {
   switch (event) {
     case 'client.recovering':
       if (!run) {
+        // This app's own run after all: no longer followed as another client's.
+        dropWatch(sessionId);
         const transcript = transcriptOf(sessionId);
         const startedAt = Date.parse(data.started_at);
         const promptAt = transcript.findLastIndex((item) => item.type === 'user' && item.checkpointId

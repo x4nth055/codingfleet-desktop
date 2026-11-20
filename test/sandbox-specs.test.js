@@ -216,3 +216,45 @@ test('the API client sends each sandbox call to the right place', { timeout: 100
     ['GET', '/v1/sandbox_specs/gone', null],
   ]);
 });
+
+// ---- which sandbox a cloud session works in ----
+
+test('a session in a sandbox of its own, or on a computer, has nothing to say', () => {
+  for (const session of [null, undefined, {}, { executor: 'sandbox' }, { executor: 'sandbox', sandbox_of: null },
+    { executor: 'client', sandbox_of: 'account' }]) {
+    assert.equal(sbx.placeLabel(session), '');
+    assert.equal(sbx.placeTitle(session), '');
+  }
+});
+
+test('the shared sandbox and another session\'s are named', () => {
+  assert.equal(sbx.placeLabel({ executor: 'sandbox', sandbox_of: 'account' }), 'Shared sandbox');
+  assert.equal(sbx.placeLabel({ executor: 'sandbox', sandbox_of: 'abc', sandbox_of_title: 'Storefront' }), 'Sandbox of Storefront');
+  assert.equal(sbx.placeLabel({ executor: 'sandbox', sandbox_of: 'abc', sandbox_of_title: null }), "Another session's sandbox");
+  assert.equal(sbx.placeTitle({ executor: 'sandbox', sandbox_of: 'account' }),
+    "Tools run on CodingFleet's servers, in your account's shared sandbox.");
+  assert.equal(sbx.placeTitle({ executor: 'sandbox', sandbox_of: 'abc', sandbox_of_title: 'Storefront',
+    sandbox_reason: 'The project is there.' }),
+  "Tools run on CodingFleet's servers, in the sandbox of Storefront. The project is there.");
+});
+
+test('the server\'s answer is put on the session the window holds', () => {
+  const session = { id: 's1', executor: 'sandbox', sandbox_of: 'abc', sandbox_of_title: 'Old', sandbox_reason: 'x' };
+  sbx.applyPlace(session, { kind: 'shared', session: null, title: 'Shared sandbox', reason: '' });
+  assert.deepEqual([session.sandbox_of, session.sandbox_of_title, session.sandbox_reason], ['account', null, '']);
+  sbx.applyPlace(session, { kind: 'session', session: 'def', title: 'Storefront', reason: 'It is there.' });
+  assert.deepEqual([session.sandbox_of, session.sandbox_of_title, session.sandbox_reason], ['def', 'Storefront', 'It is there.']);
+  sbx.applyPlace(session, { kind: 'own', session: null, title: '', reason: '' });
+  assert.deepEqual([session.sandbox_of, session.sandbox_of_title, session.sandbox_reason], [null, null, '']);
+  // Nothing to apply: nothing changes, nothing throws.
+  assert.equal(sbx.applyPlace(null, { kind: 'own' }), null);
+  assert.equal(sbx.applyPlace(session, null), session);
+  assert.equal(session.sandbox_of, null);
+});
+
+test('a move is said in one line, with the agent\'s reason when it gave one', () => {
+  assert.equal(sbx.movedHint({ executor: 'sandbox', sandbox_of: null }), 'This session now works in: its own sandbox.');
+  assert.equal(sbx.movedHint({ executor: 'sandbox', sandbox_of: 'account' }), 'This session now works in: Shared sandbox.');
+  assert.equal(sbx.movedHint({ executor: 'sandbox', sandbox_of: 'abc', sandbox_of_title: 'Storefront',
+    sandbox_reason: 'The project is there.' }), 'This session now works in: Sandbox of Storefront. The project is there.');
+});

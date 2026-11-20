@@ -212,10 +212,45 @@
     return `Cloud · ${spec ? spec.name : 'custom image'}`;
   }
 
+  // Where a cloud session works when not in a sandbox of its own: the
+  // account's shared sandbox, or another session's. '' for its own, and for a
+  // session that runs on a computer.
+  function placeLabel(session) {
+    if (!session || session.executor === 'client' || !session.sandbox_of) return '';
+    if (session.sandbox_of === 'account') return 'Shared sandbox';
+    return session.sandbox_of_title ? `Sandbox of ${session.sandbox_of_title}` : "Another session's sandbox";
+  }
+
+  // The same, as a sentence for a tooltip, with the agent's reason when it gave one.
+  function placeTitle(session) {
+    const place = placeLabel(session);
+    if (!place) return '';
+    const where = place === 'Shared sandbox' ? "your account's shared sandbox" : place.replace(/^Sandbox of /, 'the sandbox of ');
+    const why = session.sandbox_reason ? ` ${session.sandbox_reason}` : '';
+    return `Tools run on CodingFleet's servers, in ${where[0].toLowerCase()}${where.slice(1)}.${why}`;
+  }
+
+  // What the server answered about where a session works ({kind, session,
+  // title, reason}), onto the session the window holds.
+  function applyPlace(session, current) {
+    if (!session || !current) return session;
+    session.sandbox_of = current.kind === 'shared' ? 'account' : current.kind === 'session' ? current.session : null;
+    session.sandbox_of_title = current.kind === 'session' ? (current.title || null) : null;
+    session.sandbox_reason = current.reason || '';
+    return session;
+  }
+
+  // Said once when a session moved: by the agent, or from another app.
+  function movedHint(session) {
+    const place = placeLabel(session) || 'its own sandbox';
+    return `This session now works in: ${place}.${session && session.sandbox_reason ? ` ${session.sandbox_reason}` : ''}`;
+  }
+
   const api = {
     SOURCES, SOURCE_FIELD, ESSENTIALS_SOURCES, LIMITS, REGISTRY_RE, ENV_NAME_RE,
     sourceOf, envRow, emptyForm, formFromSpec, formFromSnapshot, checkForm, checkEnv, envChanges, specBody,
     buildState, anyBuilding, inMinutes, sandboxLine, limitLine, cloudLabel,
+    placeLabel, placeTitle, applyPlace, movedHint,
   };
   root.CF_SANDBOX = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

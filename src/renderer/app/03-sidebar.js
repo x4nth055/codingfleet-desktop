@@ -468,7 +468,8 @@ async function exportSession(session) {
     return;
   }
   const title = sessionLabel(session);
-  const folder = session.executor === 'client' ? local(session.id).cwd : 'Cloud sandbox';
+  const folder = session.executor === 'client' ? local(session.id).cwd
+    : session.origin === 'web' ? 'Web chat' : 'Cloud sandbox';
   const text = CF_SESSION_TOOLS.transcriptMarkdown({
     title,
     folder,

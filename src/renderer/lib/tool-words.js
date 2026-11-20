@@ -25,6 +25,9 @@
     computer: (a) => computerWords(a),
     browser: (a) => browserWords(a),
     generate_image: (a) => ['Generate image', a.prompt],
+    // Work in another conversation's sandbox (the server's switch_sandbox tool).
+    switch_sandbox: (a) => [a.action === 'use'
+      ? (a.session === 'own' ? 'Go back to its own sandbox' : 'Switch sandbox') : 'Look at your sandboxes', a.reason || ''],
     read_file: (a) => ['Read attachment', a.path || a.file_id],
   };
 

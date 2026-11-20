@@ -506,6 +506,7 @@ async function runFromPhone(request) {
     if (Date.now() > request.expires) throw new Error('This computer took too long to answer.');
     const bubble = { type: 'user', text, at: nowIso(), files: [], from: request.from || 'Phone' };
     transcriptOf(id).push(bubble);
+    dropWatch(id);
     S.running.set(id, { runId: null, started: Date.now(), turnStart: transcriptOf(id).length });
     started = true;
     const session = S.sessions.find((s) => s.id === id);

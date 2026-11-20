@@ -1034,6 +1034,7 @@ async function sendMessage() {
     autosize();
     transcriptOf(id).push({ type: 'user', text, at: nowIso(), files: sentFiles });
     clearAttachments();
+    dropWatch(id);
     S.running.set(id, { runId: null, started: Date.now(), turnStart: transcriptOf(id).length });
     started = true;
     const session = S.sessions.find((s) => s.id === id);

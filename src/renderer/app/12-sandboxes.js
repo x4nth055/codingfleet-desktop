@@ -148,8 +148,17 @@ function forgetMissingDraftSpec() {
   if (id && sbx.specs && !specById(id)) setDraftSpec(null);
 }
 
+// Where a cloud session works when not in a sandbox of its own: the account's
+// shared sandbox, or another session's (the agent's switch_sandbox tool moves
+// it there, and so can the person, from the folder menu). '' for its own.
+function sandboxPlaceLabel(session) {
+  return SBX.placeLabel(session);
+}
+
 // The composer's button for a cloud session: "Cloud sandbox", or the spec.
 function cloudButtonLabel(session) {
+  const place = sandboxPlaceLabel(session);
+  if (place) return place;
   const specId = session ? session.sandbox_spec : chosenSpecId();
   // Not after a failure: its redraw comes back here, and would ask again without end.
   if (specId && !sbx.specs && !sbx.specsLoading && !sbx.unsupported && !sbx.specsError) loadSpecs();
@@ -157,9 +166,53 @@ function cloudButtonLabel(session) {
 }
 
 function cloudButtonTitle(session) {
+  const place = SBX.placeTitle(session);
+  if (place) return place;
   const spec = specById(session ? session.sandbox_spec : draftSpecId());
   return spec ? `Tools run on CodingFleet's servers, in a sandbox built from "${spec.name}" (${spec.summary})`
     : "Tools run on CodingFleet's servers";
+}
+
+// What the server answered about where a session works, onto the session the window holds.
+function applySandboxPlace(session, current) {
+  SBX.applyPlace(session, current);
+}
+
+async function moveSessionSandbox(session, wanted) {
+  try {
+    const state = await call(cf.moveSandbox, { sessionId: session.id, session: wanted });
+    applySandboxPlace(session, state.current);
+    flashHint(SBX.movedHint(session), 5000);
+  } catch (err) {
+    showBanner(`The sandbox could not be changed: ${err.message}`);
+  }
+  renderMain();
+  renderSidebar();
+}
+
+// The folder menu of a cloud session: which sandbox it works in, and the
+// others it could. The session's own and the shared one are always there; the
+// other sessions that have a sandbox are asked for, and added when they come.
+function sandboxPlaceItems(session, option, list) {
+  if (!session || session.executor === 'client' || typeof cf.moveSandbox !== 'function') return;
+  list.append(el('div', 'menu-group', "This session's sandbox"));
+  const mine = !session.sandbox_of;
+  const shared = session.sandbox_of === 'account';
+  const row = (iconName, name, sub, selected, wanted) => option(iconName, name, sub, selected,
+    () => { if (!selected) moveSessionSandbox(session, wanted); });
+  list.append(row('sparkle', 'Its own sandbox', "Only this session's files, the same in every app", mine, 'own'));
+  list.append(row('box', 'Shared sandbox', 'One for the account, as web chats used to work', shared, 'shared'));
+  if (!mine && !shared) {
+    list.append(row('sparkle', session.sandbox_of_title || 'Another session', session.sandbox_reason || 'Working here now', true, ''));
+  }
+  const others = el('div', 'sbx-place-others');
+  list.append(others);
+  call(cf.sessionSandbox, session.id).then((state) => {
+    if (!others.isConnected) return;
+    for (const choice of (state.choices || []).slice(0, 8)) {
+      others.append(row('sparkle', choice.title, choice.state === 'running' ? 'Running' : 'Stopped, files saved', false, choice.session));
+    }
+  }).catch(() => {});
 }
 
 // Before a new cloud session is created on a spec: a spec whose last build
@@ -777,9 +830,21 @@ function renderConfigSection(pane) {
   pinRow.append(pinText, select);
   pane.append(pinRow);
 
+  if (typeof config.shared_sandbox === 'boolean') {
+    pane.append(switchRow({
+      title: 'One shared sandbox for new conversations',
+      desc: 'Off (recommended): each new conversation gets a sandbox of its own, the same one here, on your phone '
+        + 'and in the web chat. On: new web chats and new cloud sessions all work in one shared sandbox. '
+        + 'Either way a conversation can be moved to another sandbox from its folder menu.',
+      checked: config.shared_sandbox,
+      disabled: locked,
+      onChange: (on) => save({ shared_sandbox: on }),
+    }));
+  }
   pane.append(switchRow({
     title: 'Start every web chat sandbox empty',
-    desc: 'The web chat does not restore its last snapshot. A cloud session here still gets its own files back.',
+    desc: 'A web chat does not get its saved files back when its sandbox is stopped, including when it is stopped '
+      + 'to make room for another conversation. A cloud session started here still gets its own files back.',
     checked: config.always_fresh,
     disabled: locked,
     onChange: (on) => save({ always_fresh: on }),

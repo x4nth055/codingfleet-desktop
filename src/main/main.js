@@ -38,6 +38,7 @@ const { MemoryJobs, prepareProject } = require('../core/memory-jobs');
 const { LocalMcp } = require('../core/mcp');
 const mcpOAuth = require('../core/mcp-oauth');
 const { Run } = require('../core/runner');
+const { Watches } = require('../core/watch');
 const { RecoveryStore } = require('../core/recovery-store');
 const { revertRun } = require('../core/undo');
 
@@ -682,6 +683,13 @@ function handle(channel, fn) {
 }
 
 const runs = new Map();       // session id -> Run
+// Runs another client started, followed read-only for the window (core/watch.js).
+// Never beside a run of this app, or one it is about to pick up again.
+const watches = new Watches({
+  api,
+  emit: (sessionId, runId, event, data) => send('run:watch-event', { sessionId, runId, event, data }),
+  owned: (sessionId) => runs.has(sessionId) || Boolean(recoveryStore && recoveryStore.active(sessionId)),
+});
 const undoable = new Map();
 const MAX_UNDO_RUNS = 20;
 let recoveryStore;
@@ -1705,7 +1713,8 @@ function registerIpc() {
   // object is passed through a list, not as it came.
   const SPEC_FIELDS = ['name', 'description', 'image_source', 'snapshot', 'registry_image', 'dockerfile',
     'install_essentials', 'env_vars'];
-  const CONFIG_FIELDS = ['env_vars', 'always_fresh', 'snapshot_window_hours', 'block_network', 'default_spec'];
+  const CONFIG_FIELDS = ['env_vars', 'always_fresh', 'snapshot_window_hours', 'block_network', 'default_spec',
+    'shared_sandbox'];
   const pick = (body, keys) => Object.fromEntries(
     keys.filter((key) => body && typeof body === 'object' && key in body).map((key) => [key, body[key]]));
   handle('sandbox:specs', () => api.sandboxSpecs());
@@ -1720,6 +1729,9 @@ function registerIpc() {
   handle('sandbox:updateConfig', (body) => api.updateSandboxConfig(pick(body, CONFIG_FIELDS)));
   handle('sandbox:list', (refresh) => api.sandboxes(refresh === true));
   handle('sandbox:stop', (sandboxId) => api.stopSandboxById(idOf(sandboxId)));
+  // Which sandbox a cloud session works in, and moving it to another.
+  handle('sandbox:place', (sessionId) => api.sessionSandbox(idOf(sessionId)));
+  handle('sandbox:move', ({ sessionId, session } = {}) => api.moveSandbox(idOf(sessionId), String(session || '')));
   handle('sandbox:snapshot', ({ id, body } = {}) => api.snapshotSandbox(idOf(id), pick(body, ['name', 'description'])));
   handle('sandbox:snapshots', () => api.snapshots());
   handle('sandbox:updateSnapshot', ({ id, body } = {}) => api.updateSnapshot(idOf(id), pick(body, ['name', 'description'])));
@@ -2165,6 +2177,9 @@ function registerIpc() {
     }
     return resumed;
   }
+
+  handle('run:watch', (arg) => watches.start(String((arg && arg.sessionId) || ''), String((arg && arg.runId) || '')));
+  handle('run:unwatch', (sessionId) => watches.stop(String(sessionId || '')));
 
   handle('run:cancel', async (sessionId) => {
     const run = runs.get(sessionId);

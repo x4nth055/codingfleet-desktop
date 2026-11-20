@@ -275,6 +275,11 @@ module.exports = {
   duplicateSession: (sessionId) => request('POST', `/sessions/${id(sessionId)}/duplicate`),
   deleteSession: (sessionId) => request('DELETE', `/sessions/${id(sessionId)}`),
   stopSandbox: (sessionId) => request('DELETE', `/sessions/${id(sessionId)}/sandbox`),
+  // Where a cloud session works (its own sandbox, the account's shared one,
+  // another session's), where it could, and moving it there.
+  sessionSandbox: (sessionId) => request('GET', `/sessions/${id(sessionId)}/sandbox`, undefined, undefined, 30000),
+  moveSandbox: (sessionId, session) =>
+    request('PUT', `/sessions/${id(sessionId)}/sandbox`, { session }, undefined, 30000),
   // A cloud session's background commands, in its sandbox. refresh asks the
   // sandbox what they do; without it the server answers from what it knows.
   backgroundJobs: (sessionId, refresh) =>

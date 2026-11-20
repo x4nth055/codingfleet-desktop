@@ -126,6 +126,7 @@ function wire() {
   });
 
   cf.onRunEvent(onRunEvent);
+  if (typeof cf.onWatchEvent === 'function') cf.onWatchEvent(onWatchEvent);
   if (typeof cf.onBackground === 'function') cf.onBackground(onBackgroundChanged);
   if (typeof cf.onUpdate === 'function') cf.onUpdate(onUpdateStatus);
   if (typeof cf.onGitChanged === 'function') cf.onGitChanged(onGitChanged);

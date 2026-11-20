@@ -407,8 +407,8 @@ function renderWorking(sessionId) {
 
 function renderRemoteWorking() {
   const node = el('div', 'working remote');
-  node.append(el('span', 'spinner'), el('span', 'shimmer', 'Working in another window…'),
-    el('span', 'hint', 'This view updates when it finishes'));
+  node.append(el('span', 'spinner'), el('span', 'shimmer', 'Working in another app or the web chat…'),
+    el('span', 'hint', remoteWorkingHint(S.current)));
   return node;
 }
 

@@ -105,7 +105,8 @@ function sessionSpec(session) {
 function sessionGroup(session) {
   const spec = sessionSpec(session);
   if (spec) return spec.name;
-  if (session.executor !== 'client') return 'Cloud sandbox';
+  // A conversation of the web chat on codingfleet.com: a folder of its own.
+  if (session.executor !== 'client') return session.origin === 'web' ? 'Web chat' : 'Cloud sandbox';
   const cwd = local(session.id).cwd;
   return cwd ? baseName(cwd) : 'Another computer';
 }
@@ -212,7 +213,14 @@ async function loadSessions({ quiet = false } = {}) {
     const data = await call(cf.sessions);
     const next = data.sessions || [];
     changed = JSON.stringify(next) !== JSON.stringify(S.sessions);
+    const before = S.current && S.sessions.find((s) => s.id === S.current);
+    const after = S.current && next.find((s) => s.id === S.current);
     S.sessions = next;
+    if (before && after && 'sandbox_of' in after && (before.sandbox_of || null) !== (after.sandbox_of || null)) {
+      // Moved by the agent (its switch_sandbox tool) or from another app.
+      flashHint(CF_SANDBOX.movedHint(after), 8000);
+      renderMain();
+    }
     S.sessionsError = null;
   } catch (err) {
     if (quiet) return;
@@ -259,6 +267,9 @@ async function reloadTranscript(id) {
   try {
     data = await call(cf.messages, id);
     if (S.running.has(id)) return; // this app started a run meanwhile
+    // A run followed from another client is drawn under the transcript: the
+    // history replaces it when it ends, not under it while it works.
+    if (S.watching.has(id)) return;
     S.transcripts.set(id, rebuiltTranscript(id, data));
     // The whole history is here now: opening the session later must not load
     // it a second time behind this one.
@@ -280,6 +291,8 @@ async function reloadTranscript(id) {
 // Whether a turn is going in the open session somewhere else.
 async function checkCurrentSession() {
   const id = S.current;
+  // Only the session on screen is followed (06-watch.js).
+  dropWatchesExcept(id);
   if (!id || S.running.has(id)) return;
   let detail;
   try {
@@ -287,9 +300,17 @@ async function checkCurrentSession() {
   } catch {
     return;
   }
-  if (S.current !== id) return;
+  if (S.current !== id || S.running.has(id)) return;
   const busy = Boolean(detail.busy);
   const was = S.remoteBusy.has(id);
+  // The run another client is working on, drawn as it goes. A server that
+  // names none (an older one, or a turn it could not make a run of) leaves
+  // this as it was: "working", and the transcript read again at the end.
+  if (busy && detail.active_run_id) startWatch(id, detail.active_run_id);
+  else if (!busy) {
+    dropWatch(id);
+    S.watched.delete(id);
+  }
   if (busy === was) {
     const session = currentSession();
     if (session) noticeNewAnswers({ ...session, last_message_at: detail.last_message_at });

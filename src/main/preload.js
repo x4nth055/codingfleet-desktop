@@ -56,6 +56,8 @@ contextBridge.exposeInMainWorld('cf', {
   updateSandboxConfig: call('sandbox:updateConfig'),
   sandboxes: call('sandbox:list'),
   stopSandbox: call('sandbox:stop'),
+  sessionSandbox: call('sandbox:place'),
+  moveSandbox: call('sandbox:move'),
   snapshotSandbox: call('sandbox:snapshot'),
   snapshots: call('sandbox:snapshots'),
   updateSnapshot: call('sandbox:updateSnapshot'),
@@ -83,6 +85,9 @@ contextBridge.exposeInMainWorld('cf', {
   openFolder: call('shell:openFolder'),
   startRun: call('run:start'),
   recoverRuns: call('run:recover'),
+  // A run another client started, followed read-only (core/watch.js).
+  watchRun: call('run:watch'),
+  unwatchRun: call('run:unwatch'),
   cancelRun: call('run:cancel'),
   steerRun: call('run:steer'),
   undoRun: call('run:undo'),
@@ -204,6 +209,11 @@ contextBridge.exposeInMainWorld('cf', {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on('run:event', wrapped);
     return () => ipcRenderer.removeListener('run:event', wrapped);
+  },
+  onWatchEvent: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on('run:watch-event', wrapped);
+    return () => ipcRenderer.removeListener('run:watch-event', wrapped);
   },
   onGitChanged: (listener) => {
     const wrapped = (_event, payload) => listener(payload);

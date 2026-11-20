@@ -431,6 +431,8 @@ function openFolderMenu() {
       true,
       () => { if (cwd) cf.openFolder(cwd); },
     ));
+    // A cloud session: which sandbox it works in, and moving it (12-sandboxes.js).
+    sandboxPlaceItems(session, option, list);
     list.append(el('div', 'menu-group', 'New session'));
   }
 
