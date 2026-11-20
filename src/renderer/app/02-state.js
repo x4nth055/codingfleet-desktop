@@ -310,6 +310,7 @@ async function checkCurrentSession() {
   else if (!busy) {
     dropWatch(id);
     S.watched.delete(id);
+    S.watchFailed.delete(id);
   }
   if (busy === was) {
     const session = currentSession();

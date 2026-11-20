@@ -255,6 +255,10 @@ function fromHistory(sessionId, messages, compactions = []) {
         ? 'This run stopped before finishing. Its partial work is saved; you can continue here.'
         : 'This run is still in progress. Its partial work is saved.' });
     }
+    // Still being worked on: taken off when the run is followed live (06-watch.js).
+    if (message.partial && !message.interrupted) {
+      for (const item of items.slice(firstItem)) item.unfinished = true;
+    }
     if (message.model || message.usage) {
       items.push({ type: 'footer', model: message.model, usage: message.usage || null });
     }

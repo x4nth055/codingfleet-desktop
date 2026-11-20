@@ -12,7 +12,7 @@
 const RETRIES = 5;
 
 class Watches {
-  // api: { runEvents(runId, signal) -> async iterable of { event, data } }
+  // api: { runEvents(runId, signal) -> a promise of an async iterable of { event, data } }
   // emit(sessionId, runId, event, data): pass one event on to the window.
   // owned(sessionId): a run of this app is going, or being picked up again, there.
   constructor({ api, emit, owned, wait }) {
@@ -60,32 +60,43 @@ class Watches {
     const mine = () => this.active.get(sessionId) === watch && !controller.signal.aborted;
     let ended = false;
     let failure = null;
-    for (let attempt = 0; mine() && !ended; attempt++) {
-      // A run of this app took the session over: this is no longer a watch.
-      if (this.owned(sessionId)) break;
-      try {
-        if (attempt) this.emit(sessionId, runId, 'watch.reconnecting', {});
-        for await (const { event, data } of this.api.runEvents(runId, controller.signal)) {
+    try {
+      for (let attempt = 0; mine() && !ended; attempt++) {
+        // A run of this app took the session over: this is no longer a watch.
+        if (this.owned(sessionId)) break;
+        try {
+          if (attempt) this.emit(sessionId, runId, 'watch.reconnecting', {});
+          // Opened first, then read: the API answers with a promise of the
+          // stream (api.js openStream), which is not itself something to loop over.
+          const events = await this.api.runEvents(runId, controller.signal);
+          for await (const { event, data } of events) {
+            if (!mine()) break;
+            if (event === 'run.ended') ended = true;
+            this.emit(sessionId, runId, event, data || {});
+          }
+          // The stream closed with no end: the run goes on, read it again.
+          failure = null;
+        } catch (err) {
           if (!mine()) break;
-          if (event === 'run.ended') ended = true;
-          this.emit(sessionId, runId, event, data || {});
+          failure = err;
+          // Not this run's stream any more (it ended and another began), or not ours to read.
+          if (!err || !err.transient) break;
         }
-        // The stream closed with no end: the run goes on, read it again.
-        failure = null;
-      } catch (err) {
-        if (!mine()) break;
-        failure = err;
-        // Not this run's stream any more (it ended and another began), or not ours to read.
-        if (!err || !err.transient) break;
+        if (ended || attempt >= RETRIES) break;
+        await this.wait(Math.min(15000, 1000 * 2 ** attempt), controller.signal);
       }
-      if (ended || attempt >= RETRIES) break;
-      await this.wait(Math.min(15000, 1000 * 2 ** attempt), controller.signal);
-    }
-    if (this.active.get(sessionId) === watch) {
-      this.active.delete(sessionId);
-      this.emit(sessionId, runId, 'watch.closed', {
-        ended, error: failure && !ended ? String(failure.message || failure) : null,
-      });
+    } finally {
+      const current = this.active.get(sessionId) === watch;
+      if (current) this.active.delete(sessionId);
+      // However it ended, its connection ends with it. One left open is held
+      // by the server until the run is over, and the server allows only so
+      // many from one network address before it refuses every other request.
+      controller.abort();
+      if (current) {
+        this.emit(sessionId, runId, 'watch.closed', {
+          ended, error: failure && !ended ? String(failure.message || failure) : null,
+        });
+      }
     }
   }
 }

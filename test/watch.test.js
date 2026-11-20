@@ -15,7 +15,8 @@ function setup({ streams, owned = () => false }) {
   const asked = [];
   let call = 0;
   const api = {
-    runEvents(runId, signal) {
+    // A promise of the stream, as the real one is (api.js openStream).
+    async runEvents(runId, signal) {
       asked.push(runId);
       const script = streams[Math.min(call++, streams.length - 1)];
       return (async function* events() {
@@ -166,4 +167,124 @@ test('nothing to follow without a session and a run', () => {
   const { watches } = setup({ streams: [[]] });
   assert.equal(watches.start('', 'r1'), false);
   assert.equal(watches.start('s1', ''), false);
+});
+
+// ── Against the real API client, over HTTP ─────────────────────────────────
+// The stand-in above once answered with the stream itself where the real
+// client answers with a promise of it, and every watch failed before its
+// first event while its connection stayed open. These read a real stream.
+
+const http = require('node:http');
+const api = require('../src/core/api');
+
+const frame = (event, data) => 'event: ' + event + '\ndata: ' + JSON.stringify(data) + '\n\n';
+
+async function withServer(onEvents, body) {
+  const saved = api.snapshot();
+  const state = { opened: 0, open: 0 };
+  const server = http.createServer((req, res) => {
+    state.opened += 1;
+    state.open += 1;
+    res.on('close', () => { state.open -= 1; });
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    onEvents(req, res, state);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  api.configure({ apiBase: 'http://127.0.0.1:' + server.address().port + '/v1', apiKey: 'test' });
+  try {
+    await body(state);
+  } finally {
+    api.configure(saved);
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+const until = async (check, ms = 10000) => {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error('timed out waiting');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+};
+
+test('over real HTTP a run is one connection, read to its end', { timeout: 30000 }, async () => {
+  await withServer((req, res) => {
+    assert.equal(req.url, '/v1/runs/R1/events');
+    res.write(frame('run.started', { run_id: 'R1' }) + frame('text.delta', { text: 'Hi' }));
+    setTimeout(() => res.end(frame('tool.call', { id: 'c1', name: 'run_command' })
+      + frame('run.ended', { reason: 'completed' })), 30);
+  }, async (state) => {
+    const seen = [];
+    const watches = new Watches({ api, emit: (s, r, event, data) => seen.push([event, data]) });
+    assert.equal(watches.start('S1', 'R1'), true);
+    // Asked for again while it is read, as the window does on every look.
+    assert.equal(watches.start('S1', 'R1'), true);
+    await watches.active.get('S1').done;
+    assert.deepEqual(seen.map((row) => row[0]), ['run.started', 'text.delta', 'tool.call', 'run.ended', 'watch.closed']);
+    assert.deepEqual(seen.at(-1)[1], { ended: true, error: null });
+    assert.equal(state.opened, 1);
+    await until(() => state.open === 0);
+  });
+});
+
+test('over real HTTP a watch that fails leaves no connection open', { timeout: 30000 }, async () => {
+  await withServer((req, res) => {
+    // A run that goes on: the stream stays open after its first event.
+    res.write(frame('text.delta', { text: 'working' }));
+  }, async (state) => {
+    const seen = [];
+    const watches = new Watches({ api, emit: (s, r, event) => {
+      seen.push(event);
+      if (event === 'text.delta') throw new Error('the window is gone');
+    } });
+    watches.start('S1', 'R1');
+    await watches.active.get('S1').done;
+    assert.deepEqual(seen, ['text.delta', 'watch.closed']);
+    assert.equal(state.opened, 1);
+    await until(() => state.open === 0);
+  });
+});
+
+test('over real HTTP stopping a watch closes its connection', { timeout: 30000 }, async () => {
+  await withServer((req, res) => {
+    res.write(frame('text.delta', { text: 'working' }));
+  }, async (state) => {
+    const seen = [];
+    const watches = new Watches({ api, emit: (s, r, event) => seen.push(event) });
+    watches.start('S1', 'R1');
+    const done = watches.active.get('S1').done;
+    await until(() => seen.length === 1);
+    assert.equal(state.open, 1);
+    watches.stop('S1');
+    await done;
+    await until(() => state.open === 0);
+    assert.deepEqual(seen, ['text.delta']);
+  });
+});
+
+test('over real HTTP a run the server refuses is asked for once', { timeout: 30000 }, async () => {
+  const saved = api.snapshot();
+  let asked = 0;
+  const server = http.createServer((req, res) => {
+    asked += 1;
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: { code: 'not_found', message: 'No such run.' } }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  api.configure({ apiBase: 'http://127.0.0.1:' + server.address().port + '/v1', apiKey: 'test' });
+  try {
+    const seen = [];
+    const watches = new Watches({ api, emit: (s, r, event, data) => seen.push([event, data]), wait: async () => {} });
+    watches.start('S1', 'R1');
+    await watches.active.get('S1').done;
+    assert.equal(asked, 1);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0][0], 'watch.closed');
+    assert.equal(seen[0][1].ended, false);
+    assert.ok(seen[0][1].error);
+  } finally {
+    api.configure(saved);
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

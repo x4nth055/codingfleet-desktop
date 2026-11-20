@@ -15,6 +15,7 @@
     "e2e": "node test/e2e-run.mjs",
     "e2e:github": "node test/e2e-github.mjs",
     "e2e:background": "node test/e2e-background.mjs",
+    "e2e:watch": "node test/e2e-watch-ui.mjs",
     "test:layout": "electron test/layout.cjs",
     "test:transcript": "electron test/transcript.cjs",
     "test:stream": "electron test/markdown-stream.cjs",
