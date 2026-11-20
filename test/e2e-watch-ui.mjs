@@ -44,7 +44,8 @@ const server = {
   busy: false,
   runId: null,
   eventsStatus: 200,
-  asked: { events: 0, messages: 0, session: 0 },
+  asked: { events: 0, messages: 0, session: 0, runsStarted: 0 },
+  steers: [],            // what was sent into a run: { runId, message }
   open: new Set(),       // event streams held open now
   mostOpen: 0,
   history: [
@@ -78,8 +79,23 @@ const fake = http.createServer((req, res) => {
     res.writeHead(status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(body));
   };
+  if (req.headers.authorization !== `Bearer ${KEY}`) { req.resume(); return json(401, { error: { code: 'invalid_token', message: 'Invalid key.' } }); }
+  const steer = route.match(/^\/runs\/([^/]+)\/steer$/);
+  if (steer && req.method === 'POST') {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      server.steers.push({ runId: steer[1], message: JSON.parse(raw || '{}').message });
+      json(200, { status: 'accepted', steer_id: 'steer-1' });
+    });
+    return undefined;
+  }
   req.resume();
-  if (req.headers.authorization !== `Bearer ${KEY}`) return json(401, { error: { code: 'invalid_token', message: 'Invalid key.' } });
+  // A second turn while one is going: refused, as the real server does.
+  if (route === `/sessions/${SESSION}/runs` && req.method === 'POST') {
+    server.asked.runsStarted += 1;
+    return json(409, { error: { code: 'run_in_progress', message: 'This session already has a run going.' } });
+  }
   if (route === '/credits') {
     return json(200, {
       plan: { name: 'Elite', unlimited_models: true }, credits: 1000, weekly_remaining: 900, weekly_total: 1200,
@@ -227,6 +243,22 @@ async function run() {
   check('still live', await js(`${HINT}`) === 'Live', await js(HINT));
   await shot('02-after-many-looks');
 
+  // ── A message typed here steers it ───────────────────────────────────────
+  const STEER = 'Make it 30 seconds instead';
+  check('the prompt box says a message will steer', /steer/i.test(await js('$("prompt").placeholder')), await js('$("prompt").placeholder'));
+  await js(`(() => { const p = $("prompt"); p.value = ${JSON.stringify(STEER)}; p.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+  check('the button says Steer', /Steer/.test(await js('$("send").title')), await js('$("send").title'));
+  await js('sendMessage(); true');
+  check('the message is sent into the followed run', await waitFor('true', 100) && await (async () => {
+    for (let i = 0; i < 40 && !server.steers.length; i++) await sleep(100);
+    return server.steers.length === 1 && server.steers[0].runId === server.runId && server.steers[0].message === STEER;
+  })(), JSON.stringify(server.steers));
+  check('no second turn was started', server.asked.runsStarted === 0, server.asked.runsStarted);
+  check('it is shown as sent while working', await waitFor(`${TRANSCRIPT}.includes(${JSON.stringify(STEER)}) && ${TRANSCRIPT}.includes("Sent while working")`, 5000), await js(TRANSCRIPT));
+  check('the prompt box is empty again', (await js('$("prompt").value')) === '');
+  check('still one connection on the run', server.asked.events === 1, server.asked.events);
+  await shot('02b-steered');
+
   // ── It ends ──────────────────────────────────────────────────────────────
   emit('tool.result', { id: 'call-1', ok: true, output: 'done' });
   emit('text.delta', { text: `\n\n${CLOSING}` });
@@ -242,6 +274,7 @@ async function run() {
   check('the saved turn replaces what was drawn, once', count(after, OPENING) === 1 && count(after, CLOSING) === 1 && count(after, PROMPT) === 1,
     `${count(after, OPENING)}/${count(after, CLOSING)}/${count(after, PROMPT)}`);
   check('the working line is gone', !(await js('Boolean(document.querySelector(".working.remote"))')));
+  check('the prompt box is for a new message again', !/steer/i.test(await js('$("prompt").placeholder')), await js('$("prompt").placeholder'));
   await sleep(4000);
   check('the ended run is not asked for again', server.asked.events === 1, server.asked.events);
   check('its connection is closed', server.open.size === 0, server.open.size);

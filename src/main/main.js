@@ -2187,12 +2187,20 @@ function registerIpc() {
     return run.cancel();
   });
 
-  handle('run:steer', async ({ sessionId, message, files }) => {
+  handle('run:steer', async ({ sessionId, message, files, runId }) => {
     const run = runs.get(sessionId);
-    if (!run) throw new Error('No run is going in this session.');
+    const ids = Array.isArray(files) ? files.filter((x) => typeof x === 'string') : [];
+    if (!run) {
+      // A run another client started, followed here (core/watch.js): the
+      // message goes to that run, as it would from the phone or the web chat.
+      // The window names the run it follows; the watch here may not be up yet.
+      const watched = watches.watching(sessionId) || (typeof runId === 'string' ? runId : '');
+      if (!watched) throw new Error('No run is going in this session.');
+      return api.steerRun(watched, message, ids);
+    }
     // The user just wrote: approvals in this run wait the full time again.
     approvalClock.present(sessionId);
-    return run.steer(message, Array.isArray(files) ? files.filter((x) => typeof x === 'string') : []);
+    return run.steer(message, ids);
   });
 
   // Put back the files a finished run changed. A file the user edited since is

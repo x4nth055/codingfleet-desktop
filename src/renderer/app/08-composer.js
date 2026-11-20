@@ -370,7 +370,8 @@ function autosize() {
 
 function renderComposer() {
   const session = currentSession();
-  const running = Boolean(S.current && S.running.has(S.current));
+  // A run of this app, or one followed from another client: both are steered.
+  const running = Boolean(S.current && (S.running.has(S.current) || watchedRunId(S.current)));
   const prompt = $('prompt');
   prompt.placeholder = running
     ? 'Send a message to steer the agent while it works…'
@@ -428,10 +429,12 @@ function updateSendButton() {
       : voice.state === 'recording' ? 'Stop recording and send what you said' : 'Send once your words are typed';
     return;
   }
+  // A run followed from another client is steered from here, never stopped.
+  const steering = running || Boolean(watchedRunId(S.current));
   const stop = running && !hasText;
   send.classList.toggle('stop', stop);
   send.innerHTML = stop ? ICON.stop : ICON.arrowUp;
-  send.title = stop ? 'Stop' : running ? 'Steer (Enter)' : 'Send (Enter)';
+  send.title = stop ? 'Stop' : steering ? 'Steer (Enter)' : 'Send (Enter)';
   send.disabled = (!stop && !hasText) || S.sending;
   send.title = uploading && !stop ? 'Sends once the files finish uploading' : send.title;
 }
@@ -935,7 +938,10 @@ async function sendMessage() {
   }
   hideBanner();
 
-  if (S.current && S.running.has(S.current)) {
+  // A run of this app, or one another client started and this window follows:
+  // the message steers it. The followed one is named, since it is not ours.
+  const followed = S.current && !S.running.has(S.current) ? watchedRunId(S.current) : null;
+  if (S.current && (S.running.has(S.current) || followed)) {
     const id = S.current;
     if (S.attachments.some((a) => a.kind === 'file')) {
       showBanner('Only images can be sent while the agent works. Attach other files to your next message.');
@@ -951,6 +957,7 @@ async function sendMessage() {
       if (uploadedIds(steerFiles).length > 3) throw new Error('At most 3 images can be sent while the agent works.');
       await call(cf.steerRun, {
         sessionId: id, message: withReferences(text, steerFiles), files: uploadedIds(steerFiles),
+        ...(followed ? { runId: followed } : {}),
       });
       clearAttachments();
       addItem(id, { type: 'user', text, steer: true, at: nowIso(), files: steerFiles });

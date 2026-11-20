@@ -5,7 +5,8 @@
 // 02-state.js), with the prompt box held as it always was. This draws that
 // run's text and tool calls under the transcript while it works, from the
 // events the main process reads (src/core/watch.js). Nothing more: no tool of
-// it is run here, it cannot be stopped or steered from here, and when it ends
+// it is run here and it cannot be stopped from here. A message typed while it
+// works steers it, as it does from the phone or the web chat. When it ends
 // the transcript is read again from the server, so the saved turn, with the
 // other client's message above it, replaces what was drawn.
 //
@@ -21,6 +22,19 @@ const WATCH_TRIES = 3;
 
 function watchOf(sessionId) {
   return S.watching.get(sessionId) || null;
+}
+
+// The run a message typed now would steer: the one followed in this session.
+function watchedRunId(sessionId) {
+  const watch = sessionId ? watchOf(sessionId) : null;
+  return watch && !watch.ended ? watch.runId : null;
+}
+
+// The prompt box says what Enter does, and that changes with a watch.
+function refreshPromptFor(sessionId) {
+  if (sessionId !== S.current) return;
+  renderComposer();
+  updateSendButton();
 }
 
 // Take back what a watch drew: the server replays a run from its start.
@@ -47,6 +61,7 @@ function startWatch(sessionId, runId) {
   S.watching.set(sessionId, watch);
   beginWatch(sessionId, watch);
   if (sessionId === S.current) updateRemoteWorking();
+  refreshPromptFor(sessionId);
 }
 
 // The saved part of a turn still being worked on (fromHistory, 09-navigation.js).
@@ -90,6 +105,7 @@ async function beginWatch(sessionId, watch) {
   S.watching.delete(sessionId);
   eraseWatched(sessionId, watch);
   if (sessionId === S.current) updateRemoteWorking();
+  refreshPromptFor(sessionId);
 }
 
 // Stop following, and take back what was drawn. A session that is no longer
@@ -100,6 +116,7 @@ function dropWatch(sessionId) {
   S.watching.delete(sessionId);
   if (typeof cf.unwatchRun === 'function') call(cf.unwatchRun, sessionId).catch(() => {});
   eraseWatched(sessionId, watch);
+  refreshPromptFor(sessionId);
 }
 
 function dropWatchesExcept(sessionId) {
@@ -165,6 +182,7 @@ function onWatchEvent(payload) {
     }
     case 'run.ended':
       watch.ended = true;
+      refreshPromptFor(sessionId);
       break;
     case 'watch.closed':
       finishWatch(sessionId, watch, Boolean(data && data.ended));
@@ -197,6 +215,7 @@ function finishWatch(sessionId, watch, ended) {
   }
   if (sessionId !== S.current) return;
   updateRemoteWorking();
+  refreshPromptFor(sessionId);
   // The turn is over, or about to be: read the session again now, which
   // puts the saved turn in place of the drawn one once the server is idle.
   if (done) checkCurrentSession();

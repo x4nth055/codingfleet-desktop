@@ -17,7 +17,7 @@ function setup({ accepts = true, history = null } = {}) {
     if (!transcripts.has(id)) transcripts.set(id, []);
     return transcripts.get(id);
   };
-  const calls = { watch: [], unwatch: [], render: 0, check: 0, messages: 0, reload: [] };
+  const calls = { watch: [], unwatch: [], render: 0, check: 0, messages: 0, reload: [], prompt: 0 };
   const clock = { now: 1000000 };
   const context = {
     S: {
@@ -58,6 +58,9 @@ function setup({ accepts = true, history = null } = {}) {
     reloadTranscript: (id) => { calls.reload.push(id); },
     $: () => null,
     nearBottom: () => true,
+    // The prompt box, which says whether Enter sends or steers.
+    renderComposer: () => { calls.prompt += 1; },
+    updateSendButton: () => {},
     document: { querySelector: () => null },
   };
   vm.createContext(context);
@@ -292,4 +295,39 @@ test('an app from before this could follow nothing: no call is made', async () =
   await watch(context, 's1', 'r1');
   assert.equal(calls.watch.length, 0);
   assert.equal(S.watching.size, 0);
+});
+
+test('a followed run is the one a typed message steers, until it ends', async () => {
+  const { context, calls, S } = setup();
+  assert.equal(context.watchedRunId('s1'), null);
+  await watch(context, 's1', 'r1');
+  assert.equal(context.watchedRunId('s1'), 'r1');
+  // The prompt box was told: Enter steers now.
+  const told = calls.prompt;
+  assert.ok(told >= 1);
+  // Another session's run is not this one's to steer.
+  assert.equal(context.watchedRunId('s2'), null);
+  assert.equal(context.watchedRunId(null), null);
+  send(context, 'run.ended', { reason: 'completed' });
+  // Over: a message now is a new turn, not a steer of a run that is gone.
+  assert.equal(context.watchedRunId('s1'), null);
+  assert.ok(calls.prompt > told);
+  send(context, 'watch.closed', { ended: true });
+  assert.equal(context.watchedRunId('s1'), null);
+  assert.equal(S.watching.size, 0);
+});
+
+test('a run that could not be followed is not steered from here', async () => {
+  const { context } = setup({ accepts: false });
+  await watch(context, 's1', 'r1');
+  assert.equal(context.watchedRunId('s1'), null);
+});
+
+test('leaving the session gives the prompt box back', async () => {
+  const { context, calls } = setup();
+  await watch(context, 's1', 'r1');
+  const told = calls.prompt;
+  context.dropWatch('s1');
+  assert.equal(context.watchedRunId('s1'), null);
+  assert.ok(calls.prompt > told);
 });
