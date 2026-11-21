@@ -58,3 +58,31 @@ test('another name, platform or kind is another device, and the order is kept', 
   assert.deepEqual(list.map((entry) => entry.ids.length), [1, 1, 1, 1, 1]);
   assert.deepEqual(uniqueDevices(null), []);
 });
+
+test('two keys that each say which device they are on are two devices, even with the same name', () => {
+  const pc = (id, extra) => device(id, { kind: 'computer', platform: 'windows', name: 'Work laptop', ...extra });
+  const list = uniqueDevices([
+    pc('a', { hardware: true, last_used_at: '2026-11-21T09:00:00Z' }),
+    pc('b', { hardware: true }),
+    // A key from before device ids joins the first of them: it cannot say which it was.
+    pc('old', { last_used_at: '2026-10-12T09:00:00Z' }),
+  ]);
+  assert.deepEqual(list.map((entry) => entry.ids), [['a', 'old'], ['b']]);
+});
+
+test('a laptop key from before platforms is the same laptop as its newer keys', () => {
+  const list = uniqueDevices([
+    device('old', { kind: 'computer', platform: null, name: 'LAPTOP-NL967996 (desktop app)', last_used_at: '2026-10-14T09:00:00Z' }),
+    device('new', { kind: 'computer', platform: 'windows', name: 'LAPTOP-NL967996 (desktop app)', hardware: true, current: true }),
+    device('mac', { kind: 'computer', platform: 'macos', name: 'LAPTOP-NL967996 (desktop app)' }),
+  ]);
+  assert.deepEqual(list.map((entry) => entry.ids), [['new', 'old'], ['mac']]);
+  assert.equal(list[0].platform, 'windows');
+  // The other way round: the platform the newer key says is shown for the old one chosen.
+  const only = uniqueDevices([
+    device('old', { kind: 'computer', platform: null, name: 'PC', current: true }),
+    device('new', { kind: 'computer', platform: 'linux', name: 'PC' }),
+  ]);
+  assert.equal(only[0].id, 'old');
+  assert.equal(only[0].platform, 'linux');
+});

@@ -87,16 +87,19 @@ function isDirectory(dir) {
  * @param {(args: { sessionId: string, path: string }) => Promise<object>} [o.readImage] A picture of a
  *   session's folder, for a phone (local-images.js forPhone).
  * @param {boolean} [o.enabled] False for a staged development start: nothing is asked, nothing listens.
+ * @param {() => Promise<string>} [o.deviceId] Which computer this is (device-id.js): told to the
+ *   server once per sign-in, so it keeps one key for this computer.
  */
 function createPhones({
   api, app, log, send, getWindow, getState, saveState, runs, approvals, recoveryActive, decide, permissionMode,
-  readImage, enabled = true,
+  readImage, enabled = true, deviceId = null,
 }) {
   let devices = null;       // the account's apps at the last look, one per device (core/devices.js), or null when not known
   let unavailable = false;  // the server has no devices and no remote control yet (404)
   let lookTimer = null;
   let lookFailures = 0;
   let epoch = 0;            // goes up when the account changes: an answer for the old one is dropped
+  let claimedFor = -1;      // the epoch in which the server was told which computer this key is on
   const links = new Set();     // the links started here
   const requests = new Map();  // request id -> takes the window's answer to a phone's message
   const waiters = new Map();   // session id -> takes the start of a run a phone asked for
@@ -338,6 +341,8 @@ function createPhones({
         platform: cut(device.platform, 20) || null,
         current: device.current === true,
         online: device.online === true,
+        // The app said which device it is: the server keeps one such key per device.
+        hardware: device.hardware === true,
         created_at: typeof device.created_at === 'string' ? device.created_at : null,
         last_used_at: typeof device.last_used_at === 'string' ? device.last_used_at : null,
       })));
@@ -354,8 +359,18 @@ function createPhones({
     }
     let failed = null;
     let answer = null;
+    // Once per sign-in: this key is on this computer, and the server signs out
+    // the computer's earlier keys. A server without it (404) is not asked again.
+    if (deviceId && claimedFor !== mine) {
+      try {
+        answer = await api.claimDevice(await deviceId());
+        if (mine === epoch) claimedFor = mine;
+      } catch (err) {
+        if (!err.transient && mine === epoch) claimedFor = mine;
+      }
+    }
     try {
-      answer = await api.devices();
+      if (!answer) answer = await api.devices();
     } catch (err) {
       failed = err;
     }
@@ -540,16 +555,17 @@ function createPhones({
 
   // This computer is signing out, or in again with a new key: the key it has
   // now is revoked on the server, so the laptop is not listed once per sign-in.
-  // Called while that key is still the one in use; a key that cannot list
-  // devices (a pasted key for code) or no connection leaves it as it is.
-  async function retireThisComputer() {
-    if (!signedIn()) return false;
+  // Called while that key is still the one in use, or with the key itself once
+  // another one replaced it (a pasted key). A key that cannot list devices (a
+  // key for code) or no connection leaves it as it is.
+  async function retireThisComputer(key = api.snapshot().apiKey) {
+    if (!key) return false;
     let timer = null;
     const late = new Promise((_, reject) => {
       timer = setTimeout(() => reject(new Error('the server took too long')), RETIRE_MS);
     });
     try {
-      await Promise.race([late, retire()]);
+      if (!await Promise.race([late, api.retireKey(key, RETIRE_MS)])) throw new Error('nothing to retire');
       return true;
     } catch (err) {
       if (err.message !== 'nothing to retire') log.warn(`could not sign the old key of this computer out: ${err.message}`);
@@ -557,14 +573,6 @@ function createPhones({
     } finally {
       clearTimeout(timer);
     }
-  }
-
-  async function retire() {
-    const answer = await api.devices();
-    const me = (Array.isArray(answer && answer.devices) ? answer.devices : [])
-      .find((device) => device && device.current === true && device.kind !== 'phone');
-    if (!me || !DEVICE_ID.test(String(me.id || ''))) throw new Error('nothing to retire');
-    await api.removeDevice(String(me.id));
   }
 
   // Another account, or the same one signed in again: what was known is the old one's.

@@ -14,6 +14,7 @@ const { createUpdater } = require('./updater');
 const { createTaskbar } = require('./taskbar');
 const { createCodingAgents } = require('./coding-agents');
 const { createPhones } = require('./phones');
+const { createDeviceId } = require('./device-id');
 const fileIndex = require('../core/file-index');
 const { createLog } = require('../core/log');
 const { BackgroundJobs } = require('../core/background');
@@ -1167,8 +1168,9 @@ function decideApproval(callId, decision) {
 
 // Phones: linking one to the account with a QR code, and letting linked
 // phones use this computer while the app is open (phones.js).
+const deviceId = createDeviceId({ getState: () => state, saveState });
 const phones = createPhones({
-  api, app, log, send,
+  api, app, log, send, deviceId,
   getWindow: () => win,
   getState: () => state,
   saveState,
@@ -1420,6 +1422,9 @@ function registerIpc() {
     }
     storeCredentials(nextBase, nextKey);
     phones.accountChanged();
+    // The key it replaces is signed out on the server, not just forgotten here,
+    // once the new one is known to work. Not the same key saved again.
+    if (previous.apiKey && previous.apiKey !== nextKey) phones.retireThisComputer(previous.apiKey).catch(() => {});
     return { settings: settingsView(), credits };
   });
 
@@ -1436,7 +1441,10 @@ function registerIpc() {
     signIn = attempt;
     api.configure({ apiBase: base });
     try {
-      const start = await api.startDeviceAuth(`${os.hostname()} (desktop app)`);
+      const start = await api.startDeviceAuth(`${os.hostname()} (desktop app)`, {
+        platform: { win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform],
+        deviceId: await deviceId().catch(() => ''),
+      });
       await shell.openExternal(start.verify_url);
       const every = Math.max(1000, (Number(start.interval) || 3) * 1000);
       const deadline = Date.now() + (Number(start.expires_in) || 600) * 1000;

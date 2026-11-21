@@ -42,11 +42,12 @@ function headers() {
 }
 
 // For requests with a body of their own (multipart) or none.
-function authHeaders() {
-  if (!credentials.key) {
+// `key`: another key than the one in use (the one a sign-out leaves behind).
+function authHeaders(key = credentials.key) {
+  if (!key) {
     throw new ApiError(401, { error: { message: 'Add your CodingFleet API key in Settings.', code: 'missing_token' } });
   }
-  const out = { Authorization: `Bearer ${credentials.key}` };
+  const out = { Authorization: `Bearer ${key}` };
   if (credentials.client) out['X-CodingFleet-Client'] = credentials.client;
   return out;
 }
@@ -75,9 +76,10 @@ function plainError(status, text) {
   return body.slice(0, 200);
 }
 
-async function request(method, path, body, signal, timeoutMs) {
+async function request(method, path, body, signal, timeoutMs, key) {
   const timeout = timeoutMs ? AbortSignal.timeout(timeoutMs) : null;
-  const init = { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body),
+  const init = { method, headers: key ? { ...authHeaders(key), 'Content-Type': 'application/json' } : headers(),
+    body: body === undefined ? undefined : JSON.stringify(body),
     signal: timeout ? (signal ? AbortSignal.any([signal, timeout]) : timeout) : signal };
   let res;
   try {
@@ -250,7 +252,20 @@ module.exports = {
   snapshot,
   readEvents,
   // Browser sign-in: start it, then poll until the person approves it there.
-  startDeviceAuth: (name) => unauthenticated('POST', '/auth/device', { name }),
+  // `platform` and `device_id` (main/device-id.js) let the server keep one key
+  // per computer. A server from before them refuses fields it does not know:
+  // asked again with the name alone.
+  startDeviceAuth: async (name, { platform, deviceId } = {}) => {
+    const extra = {};
+    if (platform) extra.platform = platform;
+    if (deviceId) extra.device_id = deviceId;
+    try {
+      return await unauthenticated('POST', '/auth/device', { name, ...extra });
+    } catch (err) {
+      if (err.status !== 400 || err.code !== 'unknown_field' || !Object.keys(extra).length) throw err;
+      return unauthenticated('POST', '/auth/device', { name });
+    }
+  },
   pollDeviceAuth: (deviceCode) => unauthenticated('POST', '/auth/device/token', { device_code: deviceCode }),
   credits: () => request('GET', '/credits'),
   crashReport: (report) => request('POST', '/diagnostics/crash', report, undefined, 30000),
@@ -329,6 +344,18 @@ module.exports = {
   // The apps signed in to this account (computers and phones), and signing one out.
   devices: () => request('GET', '/devices', undefined, undefined, 30000),
   removeDevice: (deviceId) => request('DELETE', `/devices/${id(deviceId)}`, undefined, undefined, 30000),
+  // This key is on this computer: the server signs out the computer's other
+  // keys (its earlier sign-ins) and answers with the device list.
+  claimDevice: (deviceId) => request('PUT', '/devices/current', { device_id: deviceId }, undefined, 30000),
+  // Signs `key` out: the device it is for, as that key lists it. For a key no
+  // longer in use here (replaced by a pasted one); false when it is not an app's.
+  retireKey: async (key, timeoutMs = 8000) => {
+    const listed = await request('GET', '/devices', undefined, undefined, timeoutMs, key);
+    const me = ((listed && listed.devices) || []).find((device) => device && device.current === true && device.kind !== 'phone');
+    if (!me) return false;
+    await request('DELETE', `/devices/${id(me.id)}`, undefined, undefined, timeoutMs, key);
+    return true;
+  },
   // Linking a phone: a code to show as a QR code, what became of it, and the
   // answer given on this computer once a phone scanned it ('approve' or 'deny').
   startDeviceLink: () => request('POST', '/devices/links', {}, undefined, 30000),

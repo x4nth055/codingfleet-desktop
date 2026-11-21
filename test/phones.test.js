@@ -25,7 +25,7 @@ const COMPUTER = { id: 'dev_pc', name: 'Work laptop', kind: 'computer', platform
 
 // The app around phones.js. `commands` are handed to the long poll one list at
 // a time; a poll with nothing to hand over hangs until it is aborted.
-function setup({ devices = [COMPUTER, PHONE], state = {}, devicesError = null } = {}) {
+function setup({ devices = [COMPUTER, PHONE], state = {}, devicesError = null, deviceId = null } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-phones-'));
   const shop = path.join(root, 'storefront');
   const other = path.join(root, 'api');
@@ -35,7 +35,7 @@ function setup({ devices = [COMPUTER, PHONE], state = {}, devicesError = null } 
     root, shop, other,
     state: { sessions: { S1: { cwd: shop, createdAt: 2 }, CLOUD: { cwd: null, createdAt: 3 } }, lastCwd: other, permissionMode: 'ask', ...state },
     saved: 0, sent: [], decided: [], published: [], results: [], polls: 0, forgotten: 0, removed: [],
-    commands: [], waiting: null, key: 'cf_sk_test', devices, devicesError,
+    commands: [], waiting: null, key: 'cf_sk_test', devices, devicesError, claims: [], claimError: null, retired: [],
     runs: new Map(), approvals: new Map(), ipc: {}, window: { isDestroyed: () => false },
     // What the window answers to a phone's message; null leaves it unanswered.
     windowAnswer: (request) => ({ ok: true, sessionId: request.sessionId || 'NEW1' }),
@@ -45,6 +45,20 @@ function setup({ devices = [COMPUTER, PHONE], state = {}, devicesError = null } 
     devices: async () => {
       if (world.devicesError) throw world.devicesError;
       return { devices: world.devices };
+    },
+    // The real one lists with `key` and removes what that key calls current.
+    retireKey: async (key) => {
+      world.retired.push(key);
+      if (world.devicesError) throw world.devicesError;
+      const me = world.devices.find((device) => device.current && device.kind !== 'phone');
+      if (!me) return false;
+      await api.removeDevice(me.id);
+      return true;
+    },
+    claimDevice: async (id) => {
+      world.claims.push(id);
+      if (world.claimError) throw world.claimError;
+      return { devices: world.devices, replaced: 0 };
     },
     removeDevice: async (id) => {
       if (!world.devices.some((device) => device.id === id)) {
@@ -92,6 +106,7 @@ function setup({ devices = [COMPUTER, PHONE], state = {}, devicesError = null } 
     permissionMode: () => world.state.permissionMode,
     // The real reader, with a decoder that reads nothing: a picture goes as it is.
     readImage: (args) => localImages.forPhone(args),
+    deviceId,
   });
   const localImages = createLocalImages({
     folderOf: (sessionId) => (world.state.sessions[sessionId] || {}).cwd || null,
@@ -431,7 +446,52 @@ test('signing this computer out or in again revokes the key it had, and only tha
   world.devicesError = null;
   world.key = '';
   world.devices.push(COMPUTER);
+  const asked = world.retired.length;
   assert.equal(await world.phones.retireThisComputer(), false);
+  assert.equal(world.retired.length, asked);
   assert.deepEqual(world.removed, ['dev_pc']);
+
+  // A pasted key replaced it: the old key is named, and signed out with itself.
+  assert.equal(await world.phones.retireThisComputer('cf_sk_old'), true);
+  assert.equal(world.retired.at(-1), 'cf_sk_old');
+  assert.deepEqual(world.removed, ['dev_pc', 'dev_pc']);
   await world.close();
+});
+
+test('the server is told which computer this is once per sign-in, and an old server is not asked again', async () => {
+  const world = setup({ deviceId: async () => 'L'.repeat(43) });
+  await world.ipc['phones:list']();
+  assert.deepEqual(world.claims, ['L'.repeat(43)]);
+  // The list came with the answer: not asked for again.
+  await world.ipc['phones:list']();
+  assert.equal(world.claims.length, 1);
+  // Signed in again: told again, under the new key.
+  world.phones.accountChanged();
+  await world.ipc['phones:list']();
+  assert.equal(world.claims.length, 2);
+  await world.close();
+
+  // A server from before device ids answers 404: the list is read as before, and it is not asked again.
+  const old = setup({ deviceId: async () => 'L'.repeat(43) });
+  old.claimError = new ApiError(404, null, 'Not found');
+  const view = await old.ipc['phones:list']();
+  assert.deepEqual(view.devices.map((device) => device.id), ['dev_pc', 'dev_phone']);
+  await old.ipc['phones:list']();
+  assert.equal(old.claims.length, 1);
+  await old.close();
+
+  // Offline for a moment: asked again on the next look.
+  const offline = setup({ deviceId: async () => 'L'.repeat(43) });
+  offline.claimError = new ApiError(0, null, 'Cannot reach');
+  await offline.ipc['phones:list']();
+  offline.claimError = null;
+  await offline.ipc['phones:list']();
+  assert.equal(offline.claims.length, 2);
+  await offline.close();
+
+  // No device id at all (a staged start): only the list.
+  const none = setup();
+  await none.ipc['phones:list']();
+  assert.equal(none.claims.length, 0);
+  await none.close();
 });
