@@ -27,6 +27,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const { uniqueDevices } = require('../core/devices');
 const { RemoteHost, buildHostState } = require('../core/remote-host');
 const { qrSvg } = require('../core/qr-svg');
 const tools = require('../core/tools');
@@ -37,6 +38,8 @@ const words = require('../renderer/lib/tool-words');
 const LOOK_EVERY_MS = 10 * 60 * 1000;
 // After the window is up: nothing here is needed to start the app.
 const FIRST_LOOK_MS = 5000;
+// How long signing out or in waits to revoke this computer's old key.
+const RETIRE_MS = 8000;
 // How long the window has to take a phone's message: it may read the session's
 // history or make the session first.
 const ANSWER_MS = 45000;
@@ -89,7 +92,7 @@ function createPhones({
   api, app, log, send, getWindow, getState, saveState, runs, approvals, recoveryActive, decide, permissionMode,
   readImage, enabled = true,
 }) {
-  let devices = null;       // the account's apps at the last look, or null when not known
+  let devices = null;       // the account's apps at the last look, one per device (core/devices.js), or null when not known
   let unavailable = false;  // the server has no devices and no remote control yet (404)
   let lookTimer = null;
   let lookFailures = 0;
@@ -324,8 +327,10 @@ function createPhones({
     lookTimer.unref?.();
   }
 
+  // One entry per device: the same laptop signed in again, or the same phone
+  // linked again, is one row, with the ids of all its keys.
   function cleanDevices(list) {
-    return (Array.isArray(list) ? list : []).filter((device) => device && DEVICE_ID.test(String(device.id || '')))
+    return uniqueDevices((Array.isArray(list) ? list : []).filter((device) => device && DEVICE_ID.test(String(device.id || '')))
       .slice(0, 100).map((device) => ({
         id: String(device.id),
         name: cut(device.name, 60) || (device.kind === 'phone' ? 'Phone' : 'Computer'),
@@ -335,7 +340,7 @@ function createPhones({
         online: device.online === true,
         created_at: typeof device.created_at === 'string' ? device.created_at : null,
         last_used_at: typeof device.last_used_at === 'string' ? device.last_used_at : null,
-      }));
+      })));
   }
 
   // Reads the account's devices, then starts or stops listening to match.
@@ -475,10 +480,13 @@ function createPhones({
       const device = (devices || []).find((entry) => entry.id === deviceId);
       // Only a phone: this computer signs itself out in Account, never from this list.
       if (!device || device.kind !== 'phone') throw new Error('That phone is no longer linked.');
-      try {
-        await api.removeDevice(device.id);
-      } catch (err) {
-        if (err.code !== 'device_not_found') throw err; // already removed elsewhere
+      // Every key of this phone: the ones from an earlier link too.
+      for (const id of device.ids || [device.id]) {
+        try {
+          await api.removeDevice(id);
+        } catch (err) {
+          if (err.code !== 'device_not_found') throw err; // already removed elsewhere
+        }
       }
       devices = (devices || []).filter((entry) => entry.id !== device.id);
       // The last phone gone: this computer stops listening.
@@ -530,6 +538,35 @@ function createPhones({
     await host.stop({ timeoutMs: 3000 }).catch(() => {});
   }
 
+  // This computer is signing out, or in again with a new key: the key it has
+  // now is revoked on the server, so the laptop is not listed once per sign-in.
+  // Called while that key is still the one in use; a key that cannot list
+  // devices (a pasted key for code) or no connection leaves it as it is.
+  async function retireThisComputer() {
+    if (!signedIn()) return false;
+    let timer = null;
+    const late = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('the server took too long')), RETIRE_MS);
+    });
+    try {
+      await Promise.race([late, retire()]);
+      return true;
+    } catch (err) {
+      if (err.message !== 'nothing to retire') log.warn(`could not sign the old key of this computer out: ${err.message}`);
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function retire() {
+    const answer = await api.devices();
+    const me = (Array.isArray(answer && answer.devices) ? answer.devices : [])
+      .find((device) => device && device.current === true && device.kind !== 'phone');
+    if (!me || !DEVICE_ID.test(String(me.id || ''))) throw new Error('nothing to retire');
+    await api.removeDevice(String(me.id));
+  }
+
   // Another account, or the same one signed in again: what was known is the old one's.
   function accountChanged() {
     epoch++;
@@ -541,7 +578,7 @@ function createPhones({
   }
 
   return {
-    register, start, signOut, accountChanged, onRunEvent,
+    register, start, signOut, retireThisComputer, accountChanged, onRunEvent,
     // What this computer offers has changed (a session, a folder, an approval, the permission mode).
     refresh: () => host.refresh(),
   };

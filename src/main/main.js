@@ -1463,8 +1463,10 @@ function registerIpc() {
         if (answer.status === 'denied') throw new Error('The sign-in was declined in the browser.');
         if (answer.status === 'approved' && answer.api_key) {
           approvedKey = answer.api_key;
-          // Phones stop hearing from this computer under the old key first (phones.js).
+          // Phones stop hearing from this computer under the old key first, then
+          // that key is revoked: the laptop is listed once, not once per sign-in (phones.js).
           await phones.signOut();
+          await phones.retireThisComputer();
           api.configure({ apiBase: base, apiKey: answer.api_key });
           storeCredentials(base, answer.api_key);
           phones.accountChanged();
@@ -1495,8 +1497,10 @@ function registerIpc() {
   });
 
   handle('settings:removeKey', async () => {
-    // While the key is still there: phones are told this computer stopped listening.
+    // While the key is still there: phones are told this computer stopped
+    // listening, and the key is revoked on the server, not just forgotten here.
     await phones.signOut();
+    await phones.retireThisComputer();
     const { apiBase } = api.snapshot();
     api.configure({ apiKey: '' });
     storeCredentials(apiBase, null);

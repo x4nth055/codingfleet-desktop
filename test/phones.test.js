@@ -47,6 +47,9 @@ function setup({ devices = [COMPUTER, PHONE], state = {}, devicesError = null } 
       return { devices: world.devices };
     },
     removeDevice: async (id) => {
+      if (!world.devices.some((device) => device.id === id)) {
+        throw new ApiError(404, { error: { code: 'device_not_found', message: 'Device not found.' } });
+      }
       world.removed.push(id);
       world.devices = world.devices.filter((device) => device.id !== id);
     },
@@ -376,5 +379,59 @@ test('the link is shown as a picture, and the window never gets the code or the 
   // Only the mobile app's own address goes into a code.
   world.linkUrl = 'https://example.com/link/abc';
   await assert.rejects(() => world.ipc['phones:link'](), /does not understand/);
+  await world.close();
+});
+
+test('the same phone linked twice, or the same laptop signed in twice, is listed once', async () => {
+  const oldPhone = { ...PHONE, id: 'dev_phone_old', created_at: '2026-11-01T10:00:00Z', last_used_at: '2026-11-20T09:00:00Z' };
+  const newPhone = { ...PHONE, id: 'dev_phone_new', created_at: '2026-11-21T10:00:00Z', last_used_at: '2026-11-21T12:00:00Z' };
+  const otherPhone = { ...PHONE, id: 'dev_iphone', name: 'Pixel', platform: 'ios', last_used_at: '2026-11-19T09:00:00Z' };
+  const pcOld = { ...COMPUTER, id: 'dev_pc_old', current: false, last_used_at: '2026-11-21T13:00:00Z' };
+  const pcOlder = { ...COMPUTER, id: 'dev_pc_older', current: false, last_used_at: '2026-10-12T09:00:00Z' };
+  const world = setup({ devices: [pcOlder, COMPUTER, oldPhone, pcOld, newPhone, otherPhone] });
+  const view = await world.ipc['phones:list']();
+  // This computer is the key in use here, even if an older key was used later;
+  // the phone is its newest link; the same name on another platform is another phone.
+  assert.deepEqual(view.devices.map((device) => device.id), ['dev_pc', 'dev_phone_new', 'dev_iphone']);
+  assert.deepEqual(view.devices[0].ids, ['dev_pc', 'dev_pc_older', 'dev_pc_old']);
+  assert.equal(view.devices[0].last_used_at, '2026-11-21T13:00:00Z');
+  assert.deepEqual(view.devices[1].ids, ['dev_phone_new', 'dev_phone_old']);
+  assert.equal(view.hosting, true);
+
+  // Removing the phone signs out every key it ever had, and only that phone.
+  const after = await world.ipc['phones:remove']('dev_phone_new');
+  assert.deepEqual(world.removed, ['dev_phone_new', 'dev_phone_old']);
+  assert.deepEqual(after.devices.map((device) => device.id), ['dev_pc', 'dev_iphone']);
+  assert.equal(after.hosting, true);
+
+  // A key removed elsewhere in the meantime does not stop the others.
+  world.devices.push(oldPhone, newPhone);
+  await world.ipc['phones:list']();
+  world.devices = world.devices.filter((device) => device.id !== 'dev_phone_new');
+  const left = await world.ipc['phones:remove']('dev_phone_new');
+  assert.deepEqual(world.removed.slice(2), ['dev_phone_old']);
+  assert.deepEqual(left.devices.map((device) => device.id), ['dev_pc', 'dev_iphone']);
+  await world.close();
+});
+
+test('signing this computer out or in again revokes the key it had, and only that one', async () => {
+  const world = setup({ devices: [COMPUTER, PHONE, { ...COMPUTER, id: 'dev_pc2', name: 'Home desktop', current: false }] });
+  assert.equal(await world.phones.retireThisComputer(), true);
+  assert.deepEqual(world.removed, ['dev_pc']);
+
+  // Nothing marked as this computer (a key that is not the app's): nothing is revoked.
+  assert.equal(await world.phones.retireThisComputer(), false);
+  assert.deepEqual(world.removed, ['dev_pc']);
+
+  // A pasted key for code cannot list devices: signing out still goes on.
+  world.devicesError = new ApiError(403, { error: { code: 'app_key_required', message: 'no' } });
+  assert.equal(await world.phones.retireThisComputer(), false);
+
+  // Signed out already: the server is not asked.
+  world.devicesError = null;
+  world.key = '';
+  world.devices.push(COMPUTER);
+  assert.equal(await world.phones.retireThisComputer(), false);
+  assert.deepEqual(world.removed, ['dev_pc']);
   await world.close();
 });

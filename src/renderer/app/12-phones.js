@@ -315,7 +315,7 @@ function phoneLinkBox() {
 async function startPhoneLink() {
   stopPhoneLink();
   // The phones there are now: the one that is not among them afterwards is the new one.
-  const known = new Set(((phonesView && phonesView.devices) || []).map((device) => device.id));
+  const known = new Set(((phonesView && phonesView.devices) || []).flatMap((device) => device.ids || [device.id]));
   const link = { phase: 'starting', known, misses: 0 };
   phoneLink = link;
   redrawPhoneLink();
