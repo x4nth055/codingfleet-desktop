@@ -525,8 +525,8 @@ function send(channel, payload) {
 // The window's own colors for each theme: the background shown before the
 // page paints, and the title bar buttons drawn over the top right.
 const THEMES = {
-  dark: { background: '#0d0f12', symbols: '#9aa3ad' },
-  light: { background: '#ffffff', symbols: '#5b6470' },
+  dark: { background: '#0b0e17', symbols: '#98a1b6' },
+  light: { background: '#ffffff', symbols: '#586377' },
   hacker: { background: '#020604', symbols: '#4fdc7f' },
 };
 const themeOf = (name) => (THEMES[name] ? name : 'dark');

@@ -3,30 +3,30 @@
 /* ── Light ───────────────────────────────────────────────── */
 :root[data-theme="light"] {
   --bg: #ffffff;
-  --sidebar: #f5f6f8;
-  --panel: #f8f9fb;
-  --panel-2: #eff1f4;
-  --hover: #eaedf1;
-  --line: #e2e5ea;
-  --line-2: #d3d8df;
-  --line-3: #b9c0ca;
-  --text: #1b1f24;
-  --muted: #5b6470;
-  --faint: #8a929d;
+  --sidebar: #f4f6fb;
+  --panel: #f7f8fc;
+  --panel-2: #eef1f8;
+  --hover: #e8ecf5;
+  --line: #e1e5ee;
+  --line-2: #d1d7e3;
+  --line-3: #b5bdcd;
+  --text: #1a1f2b;
+  --muted: #586377;
+  --faint: #8790a3;
   --accent: #4f5ee8;
   --accent-ink: #ffffff;
   --green: #14a066;
   --red: #d63843;
   --amber: #b7770f;
-  --well: #f6f8fa;
-  --well-2: #eef1f4;
+  --well: #f5f7fb;
+  --well-2: #edf0f7;
   --red-ink: #c02a35;
   --green-ink: #11804f;
   --iq: #7c3aed;
   --iq-ink: #6d28d9;
-  --scroll: #d0d5dc;
-  --scroll-hover: #b6bdc7;
-  --switch-off: #cfd4db;
+  --scroll: #ced4e0;
+  --scroll-hover: #b3bccc;
+  --switch-off: #cdd3e0;
   --knob: #ffffff;
   --overlay: rgba(24, 28, 36, .32);
   color-scheme: light;
@@ -165,8 +165,8 @@
 .tp-line.wide { width: 90%; }
 .tp-bubble { justify-self: end; width: 42%; height: 9px; border-radius: 3px; background: var(--p-panel); border: 1px solid var(--p-line); }
 .tp-input { position: absolute; left: 8px; right: 8px; bottom: 6px; height: 12px; border-radius: 4px; background: var(--p-panel); border: 1px solid var(--p-line); }
-.theme-card[data-preview="dark"] { --p-bg: #0d0f12; --p-side: #090b0e; --p-panel: #181c22; --p-line: #2a3039; --p-text: #e7eaef; --p-accent: #7b8cff; }
-.theme-card[data-preview="light"] { --p-bg: #ffffff; --p-side: #f1f3f6; --p-panel: #f4f6f8; --p-line: #d3d8df; --p-text: #1b1f24; --p-accent: #4f5ee8; }
+.theme-card[data-preview="dark"] { --p-bg: #0b0e17; --p-side: #080a13; --p-panel: #161b28; --p-line: #283044; --p-text: #e6e9f2; --p-accent: #7b8cff; }
+.theme-card[data-preview="light"] { --p-bg: #ffffff; --p-side: #f4f6fb; --p-panel: #f7f8fc; --p-line: #d1d7e3; --p-text: #1a1f2b; --p-accent: #4f5ee8; }
 .theme-card[data-preview="hacker"] { --p-bg: #020604; --p-side: #010302; --p-panel: #071a0f; --p-line: #16502e; --p-text: #39ff7a; --p-accent: #39ff7a; }
 .theme-card[data-preview="hacker"] .tp-line { box-shadow: 0 0 4px #39ff7a; border-radius: 0; }
 .theme-card[data-preview="hacker"] .theme-name { font-family: "Cascadia Code", Consolas, monospace; }

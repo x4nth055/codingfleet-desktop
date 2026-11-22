@@ -1,32 +1,32 @@
 :root {
-  --bg: #0d0f12;
-  --sidebar: #090b0e;
-  --panel: #13161b;
-  --panel-2: #181c22;
-  --hover: #1a1e25;
-  --line: #20252d;
-  --line-2: #2a3039;
-  --text: #e7eaef;
-  --muted: #9098a3;
-  --faint: #5f6873;
+  --bg: #0b0e17;
+  --sidebar: #080a13;
+  --panel: #11151f;
+  --panel-2: #161b28;
+  --hover: #1b2131;
+  --line: #1e2433;
+  --line-2: #283044;
+  --text: #e6e9f2;
+  --muted: #8f98ae;
+  --faint: #5e6780;
   --accent: #7b8cff;
   --accent-ink: #0b0d12;
   --green: #3ecf8e;
   --red: #f4636b;
   --amber: #f0b44c;
   /* --font and --mono: fonts.css */
-  --well: #0a0c10;
-  --well-2: #0f1217;
-  --line-3: #3a424d;
+  --well: #080b12;
+  --well-2: #0d1019;
+  --line-3: #384259;
   --red-ink: #ffa7ac;
   --green-ink: #8fe8bd;
   --iq: #8b5cf6;
   --iq-ink: #c4b5fd;
-  --scroll: #262b33;
-  --scroll-hover: #333a44;
-  --switch-off: #2b313a;
-  --knob: #c9ced6;
-  --overlay: rgba(4, 5, 7, .62);
+  --scroll: #252c3d;
+  --scroll-hover: #323b50;
+  --switch-off: #29304a;
+  --knob: #c8cedc;
+  --overlay: rgba(3, 5, 12, .62);
   color-scheme: dark;
 }
 
