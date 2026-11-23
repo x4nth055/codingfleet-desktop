@@ -254,7 +254,7 @@ async function run() {
     return server.steers.length === 1 && server.steers[0].runId === server.runId && server.steers[0].message === STEER;
   })(), JSON.stringify(server.steers));
   check('no second turn was started', server.asked.runsStarted === 0, server.asked.runsStarted);
-  check('it is shown as sent while working', await waitFor(`${TRANSCRIPT}.includes(${JSON.stringify(STEER)}) && ${TRANSCRIPT}.includes("Sent while working")`, 5000), await js(TRANSCRIPT));
+  check('it is shown as sent while responding', await waitFor(`${TRANSCRIPT}.includes(${JSON.stringify(STEER)}) && ${TRANSCRIPT}.includes("Sent while responding")`, 5000), await js(TRANSCRIPT));
   check('the prompt box is empty again', (await js('$("prompt").value')) === '');
   check('still one connection on the run', server.asked.events === 1, server.asked.events);
   await shot('02b-steered');

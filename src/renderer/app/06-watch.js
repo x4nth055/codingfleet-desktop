@@ -37,10 +37,19 @@ function refreshPromptFor(sessionId) {
   updateSendButton();
 }
 
-// Take back what a watch drew: the server replays a run from its start.
+// A message sent while the run works, put in where its answer has got to.
+const steerInto = (sessionId) => (item) => {
+  closeLiveText(sessionId);
+  addItem(sessionId, item);
+};
+
+// Take back what a watch drew: the server replays a run from its start. The
+// messages sent into it are not in the replay: they are held, to go back where
+// they were sent once the replay gets there (lib/steer-place.js).
 function eraseWatched(sessionId, watch) {
   closeLiveText(sessionId);
   const items = transcriptOf(sessionId);
+  CF_STEER.holdSteers(watch, items.slice(watch.turnStart));
   if (items.length > watch.turnStart) items.length = watch.turnStart;
   watch.status = null;
   if (sessionId === S.current) renderTranscript();
@@ -66,12 +75,11 @@ function startWatch(sessionId, runId) {
 
 // The saved part of a turn still being worked on (fromHistory, 09-navigation.js).
 // The run is replayed from its start, so that part would be there twice.
+// What was taken off, for the steers among it.
 function dropUnfinished(items) {
   let end = items.length;
   while (end && items[end - 1].unfinished) end -= 1;
-  const dropped = end !== items.length;
-  items.length = end;
-  return dropped;
+  return items.splice(end);
 }
 
 function redrawKeepingPlace() {
@@ -95,7 +103,10 @@ async function beginWatch(sessionId, watch) {
   if (items) S.transcripts.set(sessionId, items);
   const dropped = dropUnfinished(transcriptOf(sessionId));
   watch.turnStart = transcriptOf(sessionId).length;
-  if ((items || dropped) && sessionId === S.current) redrawKeepingPlace();
+  // A message sent into the saved part goes back in where the run gets to it.
+  CF_STEER.holdSteers(watch, dropped);
+  CF_STEER.releaseSteers(watch, steerInto(sessionId));
+  if ((items || dropped.length) && sessionId === S.current) redrawKeepingPlace();
   let ok = false;
   try {
     ok = await call(cf.watchRun, { sessionId, runId: watch.runId });
@@ -143,6 +154,7 @@ function onWatchEvent(payload) {
   switch (event) {
     case 'watch.reconnecting':
       eraseWatched(sessionId, watch);
+      CF_STEER.releaseSteers(watch, steerInto(sessionId));
       break;
     case 'status':
       if (data.state === 'started') watch.status = data.kind;
@@ -157,13 +169,14 @@ function onWatchEvent(payload) {
         watch.status = null;
         if (sessionId === S.current) updateRemoteWorking();
       }
-      appendText(sessionId, data.text || '');
+      CF_STEER.feedText(watch, data.text || '', (text) => appendText(sessionId, text), steerInto(sessionId));
       break;
     case 'tool.call':
       closeLiveText(sessionId);
       // Shown, never run: not even one meant for a computer, which is another one.
       if (!findTool(sessionId, data.id)) {
         addTool(sessionId, { id: data.id, name: data.name, arguments: data.arguments || {}, status: 'running', watched: true });
+        CF_STEER.feedTool(watch, steerInto(sessionId));
       }
       break;
     case 'tool.result': {
@@ -199,6 +212,8 @@ function finishWatch(sessionId, watch, ended) {
   const done = ended || watch.ended;
   let givenUp = false;
   if (done) {
+    // A steer the replay never got to: at the end, until the saved turn is read.
+    CF_STEER.flushSteers(watch, steerInto(sessionId));
     // Followed to its end: not to be followed again while the server still lists it.
     S.watched.set(sessionId, watch.runId);
     S.watchFailed.delete(sessionId);

@@ -294,7 +294,9 @@ function renderItem(item) {
         if (item.from) when.textContent = `${when.textContent} · From ${item.from}`;
         wrap.append(when);
       }
-      if (item.steer) wrap.append(el('div', 'steer-label', 'Sent while working'));
+      // Sent while a run worked: drawn where the answer had got to, and not a
+      // turn of its own (no tick on the rail, not counted as a turn).
+      if (item.steer) wrap.append(el('div', 'steer-label', 'Sent while responding'));
       if (item.files && item.files.length) {
         const files = el('div', 'msg-files');
         for (const file of item.files) {
@@ -452,6 +454,27 @@ function appendText(sessionId, text) {
   if (!text.trim()) return;
   assistantStamp(sessionId);
   addItem(sessionId, { type: 'assistant', text, live: true });
+}
+
+// A message sent while a run works goes where its answer has got to: after
+// the text and tool rows drawn so far, with the answer going on below it (the
+// paragraph being written is closed, so more text starts a new one). Its
+// `place` says where that was, for a replay of the run (lib/steer-place.js).
+function putSteer(sessionId, item) {
+  closeLiveText(sessionId);
+  addItem(sessionId, item);
+}
+
+// A steer the run did not take: off the conversation again.
+function takeBackSteer(sessionId, item) {
+  const items = transcriptOf(sessionId);
+  const at = items.indexOf(item);
+  if (at >= 0) items.splice(at, 1);
+  for (const flow of [S.running.get(sessionId), S.watching.get(sessionId)]) {
+    if (flow && flow.heldSteers) flow.heldSteers = flow.heldSteers.filter((held) => held !== item);
+  }
+  if (item.node) item.node.remove();
+  delete item.node;
 }
 
 function closeLiveText(sessionId) {

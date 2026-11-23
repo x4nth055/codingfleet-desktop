@@ -952,16 +952,22 @@ async function sendMessage() {
     autosize();
     updateSendButton();
     let steerFiles = [];
+    let shown = null;
     try {
       steerFiles = await readyAttachments(id);
       if (uploadedIds(steerFiles).length > 3) throw new Error('At most 3 images can be sent while the agent works.');
+      // Drawn at once where the answer has got to, the answer going on below
+      // it; taken back if the run does not take it.
+      const flow = S.running.get(id) || watchOf(id);
+      shown = { type: 'user', text, steer: true, at: nowIso(), files: steerFiles, place: CF_STEER.livePlace(flow) };
+      putSteer(id, shown);
       await call(cf.steerRun, {
         sessionId: id, message: withReferences(text, steerFiles), files: uploadedIds(steerFiles),
         ...(followed ? { runId: followed } : {}),
       });
       clearAttachments();
-      addItem(id, { type: 'user', text, steer: true, at: nowIso(), files: steerFiles });
     } catch (err) {
+      if (shown) takeBackSteer(id, shown);
       prompt.value = text;
       rememberDraft();
       autosize();

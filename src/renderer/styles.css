@@ -316,8 +316,7 @@ button, input, textarea, select, a { -webkit-app-region: no-drag; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.msg.steer { margin-top: 0; }
-.msg.steer .bubble { border-style: dashed; color: var(--muted); }
+/* Sent while the agent worked: a prompt like any other, inside the answer. */
 .steer-label { font-size: 11px; color: var(--faint); margin-bottom: 3px; }
 
 .markdown { overflow-wrap: anywhere; }

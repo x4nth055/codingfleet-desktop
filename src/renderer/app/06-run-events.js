@@ -25,18 +25,23 @@ function onRunEvent(payload) {
         dropWatch(sessionId);
         const transcript = transcriptOf(sessionId);
         const startedAt = Date.parse(data.started_at);
-        const promptAt = transcript.findLastIndex((item) => item.type === 'user' && item.checkpointId
+        const promptAt = transcript.findLastIndex((item) => item.type === 'user' && !item.steer && item.checkpointId
           && Math.abs(Date.parse(item.at) - startedAt) < 60000);
+        let dropped = [];
         if (promptAt >= 0) {
           const checkpointId = transcript[promptAt].checkpointId;
           let end = promptAt + 1;
           while (end < transcript.length && transcript[end].checkpointId === checkpointId) end++;
-          transcript.splice(promptAt + 1, end - promptAt - 1);
+          dropped = transcript.splice(promptAt + 1, end - promptAt - 1);
         }
-        S.running.set(sessionId, {
+        const recovered = {
           runId: data.run_id, started: Date.parse(data.started_at) || Date.now(),
           turnStart: transcript.length,
-        });
+        };
+        // The run is replayed from its start: its steers go back where they were sent.
+        CF_STEER.holdSteers(recovered, dropped);
+        S.running.set(sessionId, recovered);
+        CF_STEER.releaseSteers(recovered, (item) => putSteer(sessionId, item));
         S.remoteBusy.delete(sessionId);
         if (sessionId === S.current) renderMain();
         renderSidebar();
@@ -83,7 +88,9 @@ function onRunEvent(payload) {
         run.status = null;
         updateWorkingLabel(sessionId);
       }
-      appendText(sessionId, data.text || '');
+      // A steer held for a replay goes back in where the text reaches it.
+      CF_STEER.feedText(run, data.text || '', (text) => appendText(sessionId, text),
+        (item) => putSteer(sessionId, item));
       break;
     case 'tool.call':
       closeLiveText(sessionId);
@@ -107,6 +114,7 @@ function onRunEvent(payload) {
             if (tool && tool.status === 'running') updateTool(sessionId, data.id, {});
           }, MOVE_AFTER_MS + 50);
         }
+        CF_STEER.feedTool(run, (item) => putSteer(sessionId, item));
       }
       break;
     case 'client.approval': {
@@ -218,8 +226,12 @@ function onRunEvent(payload) {
           if (agent) remember(agent.items);
           agentsOf(sessionId).delete(id);
         }
+        // Messages sent while it worked are not in the replay: each goes back
+        // where it was sent once the replay gets there.
+        CF_STEER.holdSteers(run, transcriptOf(sessionId).slice(run.turnStart));
         transcriptOf(sessionId).length = run.turnStart;
         run.stamped = false;
+        CF_STEER.releaseSteers(run, (item) => putSteer(sessionId, item));
         if (sessionId === S.current) renderTranscript();
       }
       break;
@@ -237,6 +249,8 @@ function onRunEvent(payload) {
 function finishRun(sessionId) {
   const run = S.running.get(sessionId);
   S.running.delete(sessionId);
+  // A steer a replay never got to: at the end of the answer.
+  CF_STEER.flushSteers(run, (item) => putSteer(sessionId, item));
   closeLiveText(sessionId);
   for (const group of transcriptOf(sessionId).filter((i) => i.type === 'tools')) {
     let changed = false;

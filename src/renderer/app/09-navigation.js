@@ -147,10 +147,11 @@ function sameAnswer(mine, theirs) {
   return a.slice(-tail) === b.slice(-tail);
 }
 
-// Where the last turn of a rebuilt transcript begins: after its prompt.
+// Where the last turn of a rebuilt transcript begins: after its prompt. A
+// steer is in the turn, not a prompt of its own.
 function lastTurnStart(items) {
   for (let i = items.length - 1; i >= 0; i--) {
-    if (items[i].type === 'user') return i + 1;
+    if (items[i].type === 'user' && !items[i].steer) return i + 1;
   }
   return null;
 }
@@ -188,7 +189,15 @@ function fromHistory(sessionId, messages, compactions = []) {
       items.push({ type: 'compaction', before: c.before_tokens, after: c.after_tokens, manual: c.manual, at: c.at });
     }
   };
-  for (const message of messages) {
+  // A message sent while the agent worked (a steer) sits in the answer that
+  // follows its prompt, where that answer had got to (steer_places). One with
+  // no place, from an older turn, sits at the top of the answer.
+  const steerItem = (steer, place) => {
+    const parts = splitReferences(String(steer));
+    return { type: 'user', text: parts.text, files: parts.refs, steer: true, place };
+  };
+  let answerSteers = [];
+  messages.forEach((message, index) => {
     if (message.created_at) flushCompactions(message.created_at);
     const firstItem = items.length;
     if (message.role === 'user') {
@@ -201,32 +210,41 @@ function fromHistory(sessionId, messages, compactions = []) {
           fileId: file.id, preview: null,
         }))],
       });
-      for (const steer of message.steers || []) {
-        const parts = splitReferences(String(steer));
-        items.push({ type: 'user', text: parts.text, files: parts.refs, steer: true });
-      }
+      const next = messages[index + 1];
+      const answered = Boolean(next && next.role !== 'user');
+      const places = Array.isArray(message.steer_places) ? message.steer_places : [];
+      answerSteers = [];
+      (message.steers || []).forEach((steer, i) => {
+        const place = answered ? CF_STEER.validPlace(places[i]) : null;
+        if (place) answerSteers.push({ steer, place });
+        else items.push(steerItem(steer, { text: 0, tools: 0 }));
+      });
       if (message.checkpoint_id) {
         for (const item of items.slice(firstItem)) item.checkpointId = message.checkpoint_id;
       }
-      continue;
+      return;
     }
+    const steers = answerSteers;
+    answerSteers = [];
     if (message.created_at) items.push({ type: 'stamp', at: message.created_at });
     // Tools sit between the paragraphs they came between (text_offset); tools
     // called together, with no text between them, share one group. An older
-    // turn has no offsets: its tools come first, in one group.
-    const text = message.text || '';
-    let cursor = 0;
+    // turn has no offsets: its tools come first, in one group. A steer cuts
+    // the text, and the group, where it was sent (lib/steer-place.js).
+    const tools = message.tools || [];
     let group = null;
-    const pushText = (upTo) => {
-      const chunk = text.slice(cursor, upTo).trim();
-      cursor = upTo;
-      if (!chunk) return;
-      items.push({ type: 'assistant', text: chunk });
-      group = null;
-    };
-    for (const tool of message.tools || []) {
-      const at = Number.isInteger(tool.text_offset) ? Math.min(tool.text_offset, text.length) : cursor;
-      if (at > cursor) pushText(at);
+    for (const piece of CF_STEER.answerPieces(message.text || '', tools, steers.map((s) => s.place))) {
+      if (piece.type === 'text') {
+        items.push({ type: 'assistant', text: piece.text });
+        group = null;
+        continue;
+      }
+      if (piece.type === 'steer') {
+        items.push(steerItem(steers[piece.index].steer, { text: piece.at || 0, tools: piece.after || 0 }));
+        group = null;
+        continue;
+      }
+      const tool = tools[piece.index];
       if (!group) {
         group = { type: 'tools', sessionId, tools: [], open: false, history: true };
         items.push(group);
@@ -249,7 +267,6 @@ function fromHistory(sessionId, messages, compactions = []) {
       }
       group.tools.push(entry);
     }
-    pushText(text.length);
     if (message.partial) {
       items.push({ type: 'notice', text: message.interrupted
         ? 'This run stopped before finishing. Its partial work is saved; you can continue here.'
@@ -265,7 +282,7 @@ function fromHistory(sessionId, messages, compactions = []) {
     if (message.checkpoint_id) {
       for (const item of items.slice(firstItem)) item.checkpointId = message.checkpoint_id;
     }
-  }
+  });
   flushCompactions(null);
   // The history does not say which messages a phone sent: this window does (12-phones.js).
   markPhoneMessages(sessionId, items);

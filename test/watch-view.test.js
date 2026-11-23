@@ -58,6 +58,8 @@ function setup({ accepts = true, history = null } = {}) {
     reloadTranscript: (id) => { calls.reload.push(id); },
     $: () => null,
     nearBottom: () => true,
+    // Where a message sent into the run goes (lib/steer-place.js).
+    CF_STEER: require('../src/renderer/lib/steer-place'),
     // The prompt box, which says whether Enter sends or steers.
     renderComposer: () => { calls.prompt += 1; },
     updateSendButton: () => {},
@@ -330,4 +332,64 @@ test('leaving the session gives the prompt box back', async () => {
   context.dropWatch('s1');
   assert.equal(context.watchedRunId('s1'), null);
   assert.ok(calls.prompt > told);
+});
+
+// A message sent into the run, as 08-composer.js draws it.
+const steer = (context, items, text) => {
+  const watched = context.S.watching.get('s1');
+  items().push({ type: 'user', text, steer: true, place: context.CF_STEER.livePlace(watched) });
+};
+
+test('a message sent into the run sits where the answer had got to, and the answer goes on below it', async () => {
+  const { context, items } = setup();
+  await watch(context, 's1', 'r1');
+  send(context, 'text.delta', { text: 'Reading.' });
+  send(context, 'tool.call', { id: 'c1', name: 'fs_read', arguments: {} });
+  steer(context, items, 'also the docs');
+  send(context, 'text.delta', { text: 'Now the docs.' });
+  assert.deepEqual(items().slice(2).map((i) => i.text || i.type), ['Reading.', 'tools', 'also the docs', 'Now the docs.']);
+  assert.deepEqual({ ...items()[4].place }, { text: 8, tools: 1 });
+});
+
+test('a reconnect puts a message sent into the run back where it was sent', async () => {
+  const { context, items } = setup();
+  await watch(context, 's1', 'r1');
+  send(context, 'text.delta', { text: 'One. ' });
+  steer(context, items, 'wait');
+  send(context, 'text.delta', { text: 'Two.' });
+  send(context, 'watch.reconnecting');
+  assert.equal(items().length, 2);
+  // Replayed in other pieces: the text is cut where the message was sent.
+  send(context, 'text.delta', { text: 'One. Tw' });
+  send(context, 'text.delta', { text: 'o.' });
+  assert.deepEqual(items().slice(2).map((i) => i.text), ['One. ', 'wait', 'Two.']);
+});
+
+test('a message sent into the saved part goes back in where the run gets to it', async () => {
+  const history = () => [
+    { type: 'user', text: 'earlier' }, { type: 'assistant', text: 'earlier answer' },
+    { type: 'user', text: 'Fix it' },
+    { type: 'stamp', unfinished: true }, { type: 'assistant', text: 'Looking.', unfinished: true },
+    { type: 'user', text: 'the tests too', steer: true, place: { text: 8, tools: 1 }, unfinished: true },
+  ];
+  const { context, items } = setup({ history });
+  await watch(context, 's1', 'r1');
+  assert.deepEqual(items().map((i) => i.text), ['earlier', 'earlier answer', 'Fix it']);
+  send(context, 'text.delta', { text: 'Looking.' });
+  assert.equal(items().length, 4);
+  send(context, 'tool.call', { id: 'c1', name: 'fs_read', arguments: {} });
+  send(context, 'text.delta', { text: 'Done.' });
+  assert.deepEqual(items().slice(3).map((i) => i.text || i.type), ['Looking.', 'tools', 'the tests too', 'Done.']);
+});
+
+test('a held message the replay never reaches is shown at the end', async () => {
+  const { context, items } = setup();
+  await watch(context, 's1', 'r1');
+  send(context, 'text.delta', { text: 'A long answer.' });
+  steer(context, items, 'stop');
+  send(context, 'watch.reconnecting');
+  send(context, 'text.delta', { text: 'Short.' });
+  send(context, 'run.ended', { reason: 'completed' });
+  send(context, 'watch.closed', { ended: true });
+  assert.deepEqual(items().slice(2).map((i) => i.text), ['Short.', 'stop']);
 });
