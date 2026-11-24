@@ -309,7 +309,9 @@ function renderItem(item) {
         }
         wrap.append(files);
       }
-      wrap.append(el('div', 'bubble', item.text));
+      const bubble = el('div', 'bubble', item.text);
+      bubble.dir = 'auto';
+      wrap.append(bubble);
       node.append(wrap);
       break;
     }

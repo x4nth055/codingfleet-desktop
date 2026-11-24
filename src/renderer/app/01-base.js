@@ -353,10 +353,40 @@ function setMarkdown(node, text) {
   node.mdFinal = true;
 }
 
+// Each block of an answer reads in the direction of its first letter: a
+// paragraph in Arabic or Hebrew right to left, a line of English in it left to
+// right, and a list, quote or table the way its first words read. Code is
+// always left to right, and does not decide its block's way. (Not dir="auto":
+// it passes over children with a dir of their own, so a list would find no
+// words and read left to right.) The phone app reads it the same way
+// (codingfleet-mobile src/lib/direction.ts).
+const RTL_LETTERS = '\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF';
+const LTR_LETTERS = 'A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02B8\u0370-\u03FF\u0400-\u052F\u0531-\u058F'
+  + '\u0900-\u1FFF\u2C00-\u2DFF\u3040-\u9FFF\uA640-\uA6FF\uAC00-\uD7AF\uF900-\uFAFF';
+const FIRST_LETTER = new RegExp(`[${RTL_LETTERS}${LTR_LETTERS}]`);
+const RTL_LETTER = new RegExp(`[${RTL_LETTERS}]`);
+const TEXT_BLOCKS = 'p, li, ul, ol, h1, h2, h3, h4, h5, h6, blockquote, table, th, td, dl, dt, dd';
+
+function textDirection(node) {
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+    if (text.parentElement.closest('code, pre')) continue;
+    const first = FIRST_LETTER.exec(text.data);
+    if (first) return RTL_LETTER.test(first[0]) ? 'rtl' : 'ltr';
+  }
+  return 'ltr';
+}
+
+function setTextDirection(node) {
+  for (const block of node.querySelectorAll(TEXT_BLOCKS)) block.dir = textDirection(block);
+  for (const code of node.querySelectorAll('code, pre')) code.dir = 'ltr';
+}
+
 // What sanitized markdown still needs once it is in `node`: code blocks, and
 // pictures. `seen` holds the pictures shown before `node` in the same answer.
 // Returns the pictures `node` adds to them.
 function finishMarkdown(node, seen, writing = null) {
+  setTextDirection(node);
   decorateCode(node, writing);
   // A generated image is saved with the answer, and the model often shows it
   // again in its reply: each picture is shown once.
