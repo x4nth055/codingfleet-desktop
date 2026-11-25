@@ -32,6 +32,8 @@
       percent,
       hours,
       state: reached ? 'reached' : (percent >= WARN_PERCENT ? 'warn' : ''),
+      // The bar: orange above 70%, red above 90%.
+      level: percent > 90 ? 'high' : (percent > 70 ? 'warn' : ''),
       line,
     };
   }

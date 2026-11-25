@@ -32,6 +32,14 @@ test('from 80% it warns, at the limit it says when models are back', () => {
   assert.match(reached.line, /^100% used · back at /);
 });
 
+test('the bar is orange above 70% and red above 90%', () => {
+  assert.equal(usage.windowView(win({ percent_used: 70 }), NOW).level, '');
+  assert.equal(usage.windowView(win({ percent_used: 71 }), NOW).level, 'warn');
+  assert.equal(usage.windowView(win({ percent_used: 90 }), NOW).level, 'warn');
+  assert.equal(usage.windowView(win({ percent_used: 91 }), NOW).level, 'high');
+  assert.equal(usage.windowView(win({ percent_used: 100, limit_reached: true }), NOW).level, 'high');
+});
+
 test('nothing in the window', () => {
   const view = usage.windowView(win({ percent_used: 0, clears_at: null }), NOW);
   assert.equal(view.line, '0% used');

@@ -49,7 +49,7 @@ function renderUsagePane() {
     row.id = 'usageWindow';
     const head = el('div', 'usage-quiet-head');
     head.append(el('span', 'usage-quiet-title', `${view.hours}-hour standard limit`), el('span', 'usage-quiet-value', view.line));
-    const bar = el('div', 'usage-quiet-bar');
+    const bar = el('div', view.level ? `usage-quiet-bar ${view.level}` : 'usage-quiet-bar');
     const fill = el('span');
     fill.style.width = `${view.percent}%`;
     bar.append(fill);
