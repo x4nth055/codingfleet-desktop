@@ -336,7 +336,13 @@ function renderItem(item) {
       node = renderComputer(item);
       break;
     case 'notice':
-      node = el('div', 'notice', item.text);
+      node = el('div', item.link && item.link.tab === 'usage' ? 'notice notice-quiet' : 'notice', item.text);
+      if (item.link && item.link.tab === 'usage') {
+        // The 5-hour limit notices: Settings at Usage shows how much is used.
+        const link = el('button', 'notice-link', item.link.label);
+        link.addEventListener('click', openUsage);
+        node.append(' ', link);
+      }
       break;
     case 'compaction':
       node = compactionChip(item);

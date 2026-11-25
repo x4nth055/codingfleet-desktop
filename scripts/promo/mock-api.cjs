@@ -68,6 +68,13 @@ function createMock({ turns, sessions: seeded = [], speed = 1 }) {
       urls: { plans: 'https://codingfleet.com/pricing/', credits: 'https://codingfleet.com/pricing/#one-time-purchase', billing: 'https://codingfleet.com/billing/' },
     },
     credits: 1840, weekly_remaining: 3260, weekly_total: 5000, quota_remaining: 5100,
+    // The 5-hour limit on Unlimited models (MOCK_WINDOW_PERCENT sets the share).
+    standard_window: {
+      window_hours: 5, percent_used: Number(process.env.MOCK_WINDOW_PERCENT || 42),
+      limit_reached: Number(process.env.MOCK_WINDOW_PERCENT || 42) >= 100,
+      back_under_limit_at: Number(process.env.MOCK_WINDOW_PERCENT || 42) >= 100 ? new Date(Date.now() + 70 * 60000).toISOString() : null,
+      clears_at: new Date(Date.now() + 200 * 60000).toISOString(),
+    },
     concurrency: { limit: 5, active: [...runs.values()].filter((r) => !r.done).length },
     account: { username: 'ada', email: 'ada@example.com' },
     key: { name: 'CodingFleet Desktop', hint: 'cf_sk_…demo', client: 'desktop', created_at: iso(9000), expires_at: null },

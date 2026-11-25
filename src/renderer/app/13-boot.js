@@ -396,7 +396,17 @@ async function boot() {
     TERM.position = S.init.shotMenu === 'terminal-right' ? 'right' : 'bottom';
     openTerminalPanel();
   }
-  if (['privacy', 'preferences', 'mcp', 'phones'].includes(S.init.shotMenu)) openSettings(false, S.init.shotMenu);
+  if (['privacy', 'preferences', 'mcp', 'phones', 'usage'].includes(S.init.shotMenu)) openSettings(false, S.init.shotMenu);
+  if (S.init.shotMenu === 'poolwarn' && !S.current && S.sessions.length) await selectSession(S.sessions[0].id);
+  if (S.init.shotMenu === 'poolwarn' && S.current) {
+    // The notice a run on an Unlimited model ends with from 80% of the 5-hour limit.
+    const notice = { code: 'pool_warn', upgrade: true,
+      message: '84% of your 5-hour standard limit is used.' };
+    setTimeout(() => {
+      addItem(S.current, { type: 'notice', text: notice.message, link: CF_USAGE_WINDOW.usageLink(notice) });
+      $('transcript').scrollTop = $('transcript').scrollHeight;
+    }, 1200);
+  }
   if (S.init.shotMenu === 'copy') {
     setTimeout(() => { const button = document.querySelector('.code-copy'); if (button) button.click(); }, 2500);
   }

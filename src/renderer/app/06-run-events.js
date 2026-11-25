@@ -80,7 +80,7 @@ function onRunEvent(payload) {
       break;
     case 'notice':
       assistantStamp(sessionId);
-      addItem(sessionId, { type: 'notice', text: data.message });
+      addItem(sessionId, { type: 'notice', text: data.message, link: CF_USAGE_WINDOW.usageLink(data) });
       notePoolCap(data);
       break;
     case 'text.delta':

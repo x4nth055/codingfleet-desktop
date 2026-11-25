@@ -13,6 +13,10 @@ function openSettings(required = false, tab = lastSettingsTab()) {
   settingsRequired = required;
   const settings = S.settings;
   $('settings').hidden = false;
+  // Usage is for plans with the 5-hour standard limit (Unlimited and higher).
+  const usageTab = document.querySelector('#settingsTabs [data-tab="usage"]');
+  if (usageTab) usageTab.hidden = !(S.credits && S.credits.standard_window);
+  if (tab === 'usage' && usageTab && usageTab.hidden) tab = 'account';
   // Without a key there is only the account to set up.
   $('settingsTabs').hidden = required || !settings.hasKey;
   localChecked = false;
@@ -266,6 +270,7 @@ function showSettingsTab(tab) {
   if (tab === 'codingAgents') renderCodingAgentsPane();
   if (tab === 'keys') renderKeysPane();
   if (tab === 'billing') renderBillingPane();
+  if (tab === 'usage') renderUsagePane();
   if (tab === 'sandboxes') renderSandboxesPane(true);
 }
 

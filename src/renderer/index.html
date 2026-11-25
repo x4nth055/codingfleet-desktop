@@ -116,6 +116,7 @@
     <div class="settings-body">
       <nav class="settings-tabs" id="settingsTabs" aria-label="Settings">
         <button data-tab="account" data-icon="user" class="active">Account</button>
+        <button data-tab="usage" data-icon="gauge">Usage</button>
         <button data-tab="phones" data-icon="phone">Phones</button>
         <button data-tab="privacy" data-icon="lock">Data privacy</button>
         <button data-tab="preferences" data-icon="sliders">Preferences</button>
@@ -152,6 +153,7 @@
           <button class="btn primary" id="settingsSave">Save</button>
         </div>
       </div>
+      <div class="settings-pane" data-pane="usage" id="usagePane" hidden></div>
       <div class="settings-pane" data-pane="phones" id="phonesPane" hidden></div>
       <div class="settings-pane" data-pane="privacy" id="privacyPane" hidden></div>
       <div class="settings-pane" data-pane="preferences" id="prefsPane" hidden></div>
@@ -211,6 +213,7 @@
 <script src="lib/tool-words.js"></script>
 <script src="lib/pr-prompts.js"></script>
 <script src="lib/pool-cap.js"></script>
+<script src="lib/usage-window.js"></script>
 <script src="lib/mention.js"></script>
 <script src="lib/session-tools.js"></script>
 <script src="lib/steer-place.js"></script>
@@ -232,6 +235,7 @@
 <script src="app/09-navigation.js"></script>
 <script src="app/10-settings.js"></script>
 <script src="app/11-billing.js"></script>
+<script src="app/11-usage.js"></script>
 <script src="app/12-mcp.js"></script>
 <script src="app/12-github.js"></script>
 <script src="app/12-keys.js"></script>

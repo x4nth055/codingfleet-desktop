@@ -374,6 +374,11 @@ async function loadCredits({ quiet = false } = {}) {
   }
   // Redrawing an unchanged card would drop the hover on its details.
   if (changed || !quiet) renderAccount();
+  // The Usage tab, when it is open, shows the same numbers; it exists only
+  // on plans with the 5-hour standard limit.
+  const usageTab = document.querySelector('#settingsTabs [data-tab="usage"]');
+  if (usageTab) usageTab.hidden = !(S.credits && S.credits.standard_window);
+  if (changed && settingsTab === 'usage' && !$('settings').hidden) renderUsagePane();
 }
 
 // The model list is asked for again every few minutes, so a model added on the

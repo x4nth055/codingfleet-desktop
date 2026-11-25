@@ -162,7 +162,7 @@ function onWatchEvent(payload) {
       if (sessionId === S.current) updateRemoteWorking();
       break;
     case 'notice':
-      addItem(sessionId, { type: 'notice', text: data.message });
+      addItem(sessionId, { type: 'notice', text: data.message, link: CF_USAGE_WINDOW.usageLink(data) });
       break;
     case 'text.delta':
       if (watch.status === 'thinking') {
