@@ -23,15 +23,12 @@ function renderSidebar() {
     list.append(el('div', 'sidebar-empty', 'Your sessions will show here.'));
     return;
   }
-  const when = (s) => new Date(s.last_used_at || s.last_message_at || s.created_at).getTime();
   // A search keeps the sessions whose name or folder holds every word typed,
   // and opens every folder: a match hidden in a folded group is no match.
   const searching = Boolean(sessionQuery.trim());
-  const sorted = [...S.sessions]
-    .filter((s) => !searching || CF_SESSION_TOOLS.sessionMatches(sessionQuery,
-      [sessionLabel(s), s.title, sessionGroup(s), local(s.id).cwd]))
-    .sort((a, b) => when(b) - when(a));
-  if (!sorted.length) {
+  const shown = S.sessions.filter((s) => !searching || CF_SESSION_TOOLS.sessionMatches(sessionQuery,
+    [sessionLabel(s), s.title, sessionGroup(s), local(s.id).cwd]));
+  if (!shown.length) {
     list.append(el('div', 'sidebar-empty', `No session matches “${sessionQuery.trim()}”.`));
     return;
   }
@@ -41,61 +38,53 @@ function renderSidebar() {
   if (!sbx.specs && !sbx.specsLoading && !sbx.unsupported && !sbx.specsError
       && S.sessions.some((s) => s.executor !== 'client' && s.sandbox_spec)) loadSpecs();
 
-  // Pinned sessions first, whatever their folder. The rest by folder, as in
-  // Claude Code: the folder is what a person remembers, not the day they started.
-  // Keyed apart from the name, so a spec and a local folder of the same name
-  // stay two folders.
-  const groups = new Map();
-  const names = new Map();
-  const pinned = sorted.filter((s) => s.pinned);
-  if (pinned.length) groups.set('Pinned', pinned);
-  for (const session of sorted) {
-    if (session.pinned) continue;
-    const spec = sessionSpec(session);
-    const key = spec ? `spec:${spec.id}` : sessionGroup(session);
-    names.set(key, sessionGroup(session));
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(session);
-  }
-
-  // A folder sits where its most recently used session sits, so the one you
-  // just worked in is always at the top -- and the sessions inside it already
-  // follow the same order, having been pushed in it.
-  const newest = (sessions) => Math.max(...sessions.map(when));
-  const ordered = [...groups.entries()].sort(([a, sa], [b, sb]) => {
-    if (a === 'Pinned') return b === 'Pinned' ? 0 : -1;
-    if (b === 'Pinned') return 1;
-    return newest(sb) - newest(sa);
+  // Pinned sessions first, whatever their group. The rest by folder unless
+  // Group & sort says otherwise: the folder is what a person remembers, not
+  // the day they started. A folder is keyed apart from its name, so a spec and
+  // a local folder of the same name stay two folders.
+  const groups = CF_SESSION_ORDER.arrange(shown, sessionOrder, {
+    updated: (s) => s.last_used_at || s.last_message_at || s.created_at,
+    created: (s) => s.created_at,
+    name: (s) => sessionLabel(s),
+    pinned: (s) => Boolean(s.pinned),
+    folder: (s) => {
+      const spec = sessionSpec(s);
+      return { key: spec ? `spec:${spec.id}` : sessionGroup(s), name: sessionGroup(s) };
+    },
   });
 
-  for (const [key, sessions] of ordered) {
-    const name = names.get(key) || key;
+  for (const group of groups) {
+    const { key, name, kind, items: sessions } = group;
     const collapsed = !searching && S.collapsed.has(key);
-    // A div, not a button: the header carries a button of its own, and a
+    // A div, not a button: the header carries buttons of its own, and a
     // button inside a button is not something a browser will render.
-    const head = el('div', `group-head${collapsed ? ' collapsed' : ''}${key === 'Pinned' ? ' pinned' : ''}`);
-    const spec = key === 'Pinned' ? null : sessionSpec(sessions[0]);
-    const cwd = key === 'Pinned' || spec ? null : local(sessions[0].id).cwd;
+    const head = el('div', `group-head${collapsed ? ' collapsed' : ''}${kind === 'pinned' ? ' pinned' : ''}`);
+    const spec = kind === 'folder' ? sessionSpec(sessions[0]) : null;
+    const cwd = kind === 'folder' && !spec ? local(sessions[0].id).cwd : null;
+    // The plain cloud sandbox is a place to start a session in too.
+    const cloud = kind === 'folder' && !spec && sessions[0].executor !== 'client' && sessions[0].origin !== 'web';
     head.title = cwd || (spec ? `Cloud sandbox built from "${spec.name}" (${spec.summary})` : name);
     head.tabIndex = 0;
     head.setAttribute('role', 'button');
+    head.setAttribute('aria-expanded', String(!collapsed));
     head.append(chevron());
-    if (key === 'Pinned') head.append(icon('pin', 'icon group-icon'));
+    if (kind === 'pinned') head.append(icon('pin', 'icon group-icon'));
     if (spec) head.append(icon('box', 'icon group-icon'));
     head.append(el('span', 'group-name', name), el('span', 'group-count', String(sessions.length)));
+    head.append(groupButton('sort', 'Group & sort', 'group-sort', (button) => {
+      if (!$('orderMenu').hidden) closeMenus();
+      else openOrderMenu(button);
+    }));
     // The folder is already known, so a new session in it is one click: the
     // same thing as New session, with the folder (or the spec) picked for you.
-    if (cwd || spec) {
-      const add = el('button', 'group-add');
-      add.title = cwd ? `New session in ${cwd}` : `New cloud session on "${spec.name}"`;
-      add.setAttribute('aria-label', `New session in ${name}`);
-      add.innerHTML = ICON.plus;
-      add.addEventListener('click', (event) => {
-        event.stopPropagation();
+    if (cwd || spec || cloud) {
+      head.append(groupButton('plus', 'New Session', 'group-add', () => {
         if (cwd) newSessionIn(cwd);
-        else newSessionOnSpec(spec.id);
-      });
-      head.append(add);
+        else newSessionOnSpec(spec ? spec.id : null);
+      }, cwd ? `New session in ${cwd}` : spec ? `New session on "${spec.name}"` : 'New session in a cloud sandbox'));
+    } else {
+      // The slot is kept, so every header's count lines up.
+      head.append(el('span', 'group-btn-gap'));
     }
     const toggle = () => {
       if (collapsed) S.collapsed.delete(key);
@@ -104,7 +93,7 @@ function renderSidebar() {
     };
     head.addEventListener('click', toggle);
     head.addEventListener('keydown', (event) => {
-      if (event.target !== head) return; // the + button answers its own keys
+      if (event.target !== head) return; // its buttons answer their own keys
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         toggle();
@@ -114,6 +103,99 @@ function renderSidebar() {
     if (collapsed) continue;
     for (const session of sessions) list.append(sessionRow(session));
   }
+}
+
+// An icon button of a group's header. The tooltip says what it does; the
+// accessible name can say more (which folder a new session goes in).
+function groupButton(iconName, tip, className, run, label = tip) {
+  const button = el('button', `group-btn ${className}`);
+  button.title = tip;
+  button.setAttribute('aria-label', label);
+  button.innerHTML = ICON[iconName];
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    run(button);
+  });
+  return button;
+}
+
+// ── Group & sort ───────────────────────────────────────────────────────────
+// The button on each group's header: group the sessions by folder, by date or
+// not at all, and sort them by last use, by creation or by name, either way
+// round. One choice for the whole list, kept on this computer.
+const SESSION_ORDER_KEY = 'cf.session-order';
+let sessionOrder = (() => {
+  try {
+    return CF_SESSION_ORDER.normalize(JSON.parse(localStorage.getItem(SESSION_ORDER_KEY) || 'null'));
+  } catch {
+    return CF_SESSION_ORDER.normalize(null);
+  }
+})();
+
+function setSessionOrder(field, value) {
+  sessionOrder = CF_SESSION_ORDER.choose(sessionOrder, field, value);
+  try { localStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(sessionOrder)); } catch { /* this run only */ }
+  renderSidebar();
+  fillOrderMenu(field, value);
+}
+
+function fillOrderMenu(focusField, focusValue) {
+  const list = $('orderMenuList');
+  list.replaceChildren();
+  const section = (title, field, options) => {
+    list.append(el('div', 'menu-group', title));
+    for (const [value, label, iconName] of options) {
+      const on = sessionOrder[field] === value;
+      const button = el('button', `menu-item${on ? ' selected' : ''}`);
+      button.dataset.field = field;
+      button.dataset.value = value;
+      button.setAttribute('role', 'menuitemradio');
+      button.setAttribute('aria-checked', String(on));
+      button.append(icon(iconName), el('span', 'mi-name', label));
+      const tick = el('span', 'mi-check');
+      if (on) tick.innerHTML = ICON.check;
+      button.append(tick);
+      button.addEventListener('click', () => setSessionOrder(field, value));
+      list.append(button);
+    }
+  };
+  section('Group by', 'group', [
+    ['folder', 'Folder / environment', 'folder'],
+    ['date', 'Date', 'calendar'],
+    ['none', 'None', 'list'],
+  ]);
+  list.append(el('div', 'menu-sep'));
+  section('Sort by', 'sort', [
+    ['updated', 'Last updated', 'refresh'],
+    ['created', 'Date created', 'calendar'],
+    ['name', 'Name', 'text'],
+  ]);
+  const labels = CF_SESSION_ORDER.dirLabels(sessionOrder.sort);
+  list.append(el('div', 'menu-sep'));
+  section('Order', 'dir', sessionOrder.sort === 'name'
+    ? [['asc', labels.asc, 'arrowDown'], ['desc', labels.desc, 'arrowUp']]
+    : [['desc', labels.desc, 'arrowDown'], ['asc', labels.asc, 'arrowUp']]);
+  // A choice made from the keyboard keeps the focus on it.
+  if (focusField) {
+    const again = list.querySelector(`.menu-item[data-field="${focusField}"][data-value="${focusValue}"]`);
+    if (again) again.focus();
+  }
+}
+
+function openOrderMenu(anchor) {
+  closeMenus();
+  const menu = $('orderMenu');
+  fillOrderMenu();
+  menu.hidden = false;
+  // Under the button, kept inside the window. The list is drawn again under
+  // it as choices are made, so the menu stays where it opened.
+  const box = anchor.getBoundingClientRect();
+  const height = menu.offsetHeight;
+  const below = box.bottom + 4 + height < window.innerHeight - 8;
+  menu.style.top = `${below ? box.bottom + 4 : Math.max(8, box.top - height - 4)}px`;
+  menu.style.left = `${Math.min(window.innerWidth - menu.offsetWidth - 8, Math.max(8, box.left - 8))}px`;
+  const first = menu.querySelector('.menu-item.selected') || menu.querySelector('.menu-item');
+  if (first) first.focus();
 }
 
 function sessionRow(session) {

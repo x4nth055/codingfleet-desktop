@@ -79,7 +79,7 @@ function wire() {
   });
 
   document.addEventListener('mousedown', (event) => {
-    if (!event.target.closest('.menu, .session-more, .pref-toggle, #modelButton, #effortButton, #permButton, #attachButton, #folderButton, #changesPill, #githubPill, .term-shell-toggle')) closeMenus();
+    if (!event.target.closest('.menu, .session-more, .group-sort, .pref-toggle, #modelButton, #effortButton, #permButton, #attachButton, #folderButton, #changesPill, #githubPill, .term-shell-toggle')) closeMenus();
   });
   document.addEventListener('click', (event) => {
     const img = event.target.closest('.markdown img, .tool-image');

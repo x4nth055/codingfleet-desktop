@@ -404,6 +404,7 @@ function placeMenu(menu, anchor, { center = false } = {}) {
 
 function closeMenus() {
   $('sessionMenu').hidden = true;
+  $('orderMenu').hidden = true;
   hideContextMenu();
   for (const menu of document.querySelectorAll('.pref-menu')) menu.hidden = true;
   for (const open of document.querySelectorAll('.session-more.open')) open.classList.remove('open');

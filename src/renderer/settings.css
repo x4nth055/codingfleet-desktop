@@ -47,6 +47,14 @@
 .session-menu .menu-list { padding: 5px; }
 .session-menu .menu-item { padding: 7px 9px; }
 .session-menu .menu-item .icon { margin-top: 1px; }
+/* Group & sort: three short lists of choices, the chosen one ticked. */
+.order-menu { width: 224px; }
+.order-menu .menu-group { padding: 8px 9px 4px; }
+.order-menu .menu-group:first-child { padding-top: 4px; }
+.order-menu .mi-name { flex: 1; }
+.order-menu .mi-check { width: 14px; height: 14px; flex: none; color: var(--accent); }
+.order-menu .mi-check svg { width: 14px; height: 14px; display: block; }
+.order-menu .menu-item:focus-visible { outline: 0; background: var(--hover); }
 .menu-sep { height: 1px; margin: 5px 4px; background: var(--line-2); }
 .menu-item.danger, .menu-item.danger .icon { color: var(--red); }
 .menu-item.danger:hover { background: color-mix(in srgb, var(--red) 10%, transparent); }

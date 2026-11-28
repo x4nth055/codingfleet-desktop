@@ -17,6 +17,7 @@
     "e2e:background": "node test/e2e-background.mjs",
     "e2e:watch": "node test/e2e-watch-ui.mjs",
     "test:layout": "electron test/layout.cjs",
+    "test:sidebar-order": "electron test/sidebar-order.cjs",
     "test:transcript": "electron test/transcript.cjs",
     "test:stream": "electron test/markdown-stream.cjs",
     "test:browser-pane": "electron test/browser-pane.cjs",
